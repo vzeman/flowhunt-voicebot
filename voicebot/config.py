@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import fields
 import json
 import os
 from typing import Any
@@ -92,3 +93,35 @@ class Settings:
         "VOICEBOT_TTS_PIPELINE",
         [{"name": "tts"}],
     )
+
+
+SENSITIVE_FIELD_MARKERS = ("api_key", "password", "secret", "token")
+
+
+def redacted_settings(settings: Settings) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for field in fields(settings):
+        value = getattr(settings, field.name)
+        if is_sensitive_field(field.name):
+            result[field.name] = {
+                "configured": bool(value),
+                "redacted": True,
+            }
+        else:
+            result[field.name] = json_safe_value(value)
+    return result
+
+
+def is_sensitive_field(name: str) -> bool:
+    lowered = name.lower()
+    return any(marker in lowered for marker in SENSITIVE_FIELD_MARKERS)
+
+
+def json_safe_value(value: Any) -> Any:
+    if isinstance(value, tuple):
+        return [json_safe_value(item) for item in value]
+    if isinstance(value, list):
+        return [json_safe_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): json_safe_value(item) for key, item in value.items()}
+    return value

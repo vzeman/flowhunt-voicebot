@@ -55,6 +55,19 @@ class AgentTaskTracker:
                     released.append(event_id)
         return released
 
+    def renew_many(self, event_ids: list[int], owner: str, ttl_seconds: float) -> list[int]:
+        now = time.monotonic()
+        expires_at = now + max(ttl_seconds, 0.1)
+        renewed: list[int] = []
+        with self._lock:
+            self._expire_claims_locked(now)
+            for event_id in event_ids:
+                claim = self._claimed_event_ids.get(event_id)
+                if claim is not None and claim[0] == owner:
+                    self._claimed_event_ids[event_id] = (owner, expires_at)
+                    renewed.append(event_id)
+        return renewed
+
     def snapshot(self) -> dict[str, Any]:
         now = time.monotonic()
         with self._lock:

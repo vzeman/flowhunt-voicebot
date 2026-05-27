@@ -10,6 +10,7 @@ from .api_models import (
     AgentResponseRequest,
     AgentTaskClaimRequest,
     AgentTaskReleaseRequest,
+    AgentTaskRenewRequest,
     AgentToolRequest,
     CallControlRequest,
     CompactContextRequest,
@@ -179,6 +180,11 @@ def create_app(
                 {"task_event_id": event_id, "owner": request.owner},
             )
         return {"released_event_ids": released_event_ids}
+
+    @app.post("/agent/tasks/renew")
+    def renew_agent_tasks(request: AgentTaskRenewRequest) -> dict[str, Any]:
+        renewed_event_ids = tracker.renew_many(request.event_ids, request.owner, request.ttl_seconds)
+        return {"renewed_event_ids": renewed_event_ids, "owner": request.owner}
 
     @app.get("/agent/tasks/status")
     def agent_task_status() -> dict[str, Any]:

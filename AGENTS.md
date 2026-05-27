@@ -130,6 +130,14 @@ curl -X POST http://127.0.0.1:8080/agent/tasks/release \
   -d '{"event_ids":[123]}'
 ```
 
+Renew claimed tasks while a worker is still processing:
+
+```bash
+curl -X POST http://127.0.0.1:8080/agent/tasks/renew \
+  -H 'Content-Type: application/json' \
+  -d '{"event_ids":[123], "owner":"worker-1", "ttl_seconds":60}'
+```
+
 Inspect answered task IDs and active claims:
 
 ```bash

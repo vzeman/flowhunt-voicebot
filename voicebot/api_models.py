@@ -40,3 +40,9 @@ class AgentTaskClaimRequest(BaseModel):
 class AgentTaskReleaseRequest(BaseModel):
     event_ids: list[int]
     owner: str | None = None
+
+
+class AgentTaskRenewRequest(BaseModel):
+    event_ids: list[int]
+    owner: str
+    ttl_seconds: float = 60.0

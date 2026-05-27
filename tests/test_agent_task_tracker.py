@@ -68,6 +68,25 @@ class AgentTaskTrackerTests(unittest.TestCase):
 
         self.assertFalse(tracker.is_pending(1))
 
+    def test_responded_events_are_bounded(self) -> None:
+        tracker = AgentTaskTracker(max_responded_event_ids=2)
+
+        tracker.mark_responded(1)
+        tracker.mark_responded(2)
+        tracker.mark_responded(3)
+
+        self.assertFalse(tracker.is_pending(1))
+        self.assertFalse(tracker.is_pending(2))
+        self.assertFalse(tracker.is_pending(3))
+        self.assertEqual(tracker.claim([1], "worker-1", 30), [])
+        self.assertEqual(tracker.snapshot()["responded_event_ids"], [2, 3])
+        self.assertEqual(tracker.snapshot()["responded_event_id_retention"], 2)
+        self.assertEqual(tracker.snapshot()["responded_event_id_floor"], 1)
+
+    def test_responded_event_retention_requires_positive_limit(self) -> None:
+        with self.assertRaisesRegex(ValueError, "max_responded_event_ids must be at least 1"):
+            AgentTaskTracker(max_responded_event_ids=0)
+
 
 if __name__ == "__main__":
     unittest.main()

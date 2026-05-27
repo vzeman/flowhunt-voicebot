@@ -50,7 +50,11 @@ def transcript_store_check(transcripts: TranscriptStore) -> HealthCheck:
         with tempfile.NamedTemporaryFile(prefix=".health-", dir=directory, delete=True) as handle:
             handle.write(b"ok")
             handle.flush()
-        return HealthCheck(True, "transcript directory is writable", {"path": str(directory)})
+        stats = transcripts.stats()
+        message = "transcript directory is writable"
+        if stats["corrupt_transcript_count"]:
+            message = "transcript directory is writable with corrupt transcript rows"
+        return HealthCheck(True, message, {"path": str(directory), **stats})
     except OSError as exc:
         return HealthCheck(False, "transcript directory is not writable", {"path": str(directory), "error": str(exc)})
 
@@ -91,4 +95,3 @@ def event_catalog_check() -> HealthCheck:
         "event catalog covers all declared event types" if not missing else "event catalog is missing event types",
         {"missing_event_types": missing},
     )
-

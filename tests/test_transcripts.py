@@ -129,6 +129,28 @@ class TranscriptTests(unittest.TestCase):
                 ],
             )
 
+    def test_transcript_store_stats_reports_corruption(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transcripts = TranscriptStore(directory)
+            transcripts.append(FakeEvent(1, "call-1", "call_started", "2026-05-27T00:00:00Z", {}))
+            path = Path(directory) / "call-2.jsonl"
+            path.write_text(
+                '{"id":2,"call_id":"call-2","type":"call_started","timestamp":"2026-05-27T00:00:00Z","data":{}}\n'
+                "not-json\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                transcripts.stats(),
+                {
+                    "transcript_count": 2,
+                    "event_count": 2,
+                    "skipped_line_count": 1,
+                    "corrupt_transcript_count": 1,
+                    "corrupt_call_ids": ["call-2"],
+                },
+            )
+
     def test_transcript_store_ignores_invalid_event_ids_when_paging(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "call-1.jsonl"

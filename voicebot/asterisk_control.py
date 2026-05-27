@@ -43,6 +43,8 @@ class AsteriskAMI:
     def find_channel(self, call_id: str) -> str | None:
         response = self.action({"Action": "Command", "Command": "core show channels concise"})
         for line in response.splitlines():
+            if line.startswith("Output: "):
+                line = line.removeprefix("Output: ").strip()
             fields = line.split("!")
             if len(fields) >= 8 and fields[5] == "AudioSocket" and call_id in fields[6]:
                 return fields[0]

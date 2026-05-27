@@ -57,7 +57,8 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
     output_format = {
         "say": "text to speak, if any",
         "tool_calls": [
-            {"name": "hangup_call", "arguments": {"call_id": "..."}},
+            {"name": "hangup_call", "arguments": {"call_id": "...", "response_to_event_id": 123}},
+            {"name": "transfer_call", "arguments": {"call_id": "...", "target": "123", "response_to_event_id": 123}},
         ],
     }
 
@@ -65,6 +66,9 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
 Answer naturally and concisely. Do not mention implementation details, events,
 queues, STT, TTS, Asterisk, or SIP. If there are multiple unhandled user
 messages, answer them together in one coherent response.
+If the caller asks to end the call, call the hangup_call tool. If the caller
+asks to transfer the call, call transfer_call with the requested extension or
+target. Include response_to_event_id on every tool call.
 
 Conversation summary:
 {context.get("summary") or "(none)"}
@@ -122,6 +126,14 @@ def execute_tool_call(base_url: str, call: dict) -> dict:
     return http_json("POST", f"{base_url}/agent/tools/{name}", {"arguments": arguments})
 
 
+def attach_response_event_id(tool_calls: list[dict], event_id: int) -> list[dict]:
+    for call in tool_calls:
+        arguments = call.setdefault("arguments", {})
+        if isinstance(arguments, dict):
+            arguments.setdefault("response_to_event_id", event_id)
+    return tool_calls
+
+
 def main() -> None:
     args = parse_args()
     seen: set[int] = set()
@@ -139,6 +151,7 @@ def main() -> None:
             raw_answer = run_agent_command(args.command, prompt)
             answer, tool_calls = parse_agent_output(raw_answer)
             latest = pending[-1]
+            tool_calls = attach_response_event_id(tool_calls, latest["id"])
             for call in tool_calls:
                 execute_tool_call(args.base_url, call)
             if answer:

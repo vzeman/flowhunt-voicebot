@@ -26,6 +26,7 @@ class CompactContextRequest(BaseModel):
 class CallControlRequest(BaseModel):
     action: str
     target: str | None = None
+    response_to_event_id: int | None = None
 
 
 class AgentToolRequest(BaseModel):
@@ -136,12 +137,19 @@ def create_app(
                 {
                     "name": "hangup_call",
                     "description": "Hang up an active call through Asterisk AMI.",
-                    "arguments": {"call_id": "Active call ID."},
+                    "arguments": {
+                        "call_id": "Active call ID.",
+                        "response_to_event_id": "Optional event ID this answers.",
+                    },
                 },
                 {
                     "name": "transfer_call",
                     "description": "Transfer an active call to another SIP extension or target.",
-                    "arguments": {"call_id": "Active call ID.", "target": "Extension or SIP target."},
+                    "arguments": {
+                        "call_id": "Active call ID.",
+                        "target": "Extension or SIP target.",
+                        "response_to_event_id": "Optional event ID this answers.",
+                    },
                 },
                 {
                     "name": "get_transcript",
@@ -178,11 +186,21 @@ def create_app(
             return await submit_response(call_id, response)
         if tool_name == "hangup_call":
             call_id = require_arg(args, "call_id")
-            return await call_control(call_id, CallControlRequest(action="hangup"))
+            return await call_control(
+                call_id,
+                CallControlRequest(action="hangup", response_to_event_id=args.get("response_to_event_id")),
+            )
         if tool_name == "transfer_call":
             call_id = require_arg(args, "call_id")
             target = require_arg(args, "target")
-            return await call_control(call_id, CallControlRequest(action="transfer", target=target))
+            return await call_control(
+                call_id,
+                CallControlRequest(
+                    action="transfer",
+                    target=target,
+                    response_to_event_id=args.get("response_to_event_id"),
+                ),
+            )
         if tool_name == "get_transcript":
             call_id = require_arg(args, "call_id")
             return call_transcript(call_id)
@@ -236,6 +254,7 @@ def create_app(
             "call_control_completed",
             {"action": request.action, "ok": result.ok, "message": result.message, "request_event_id": requested.id},
         )
+        tracker.mark_responded(request.response_to_event_id)
         await hub.broadcast(completed)
         return {"event": event_to_dict(completed)}
 

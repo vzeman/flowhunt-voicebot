@@ -26,9 +26,12 @@ class TranscriptStore:
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
-    def read(self, call_id: str) -> list[dict]:
+    def read(self, call_id: str, after: int = 0, limit: int | None = None) -> list[dict]:
         path = self.directory / f"{safe_name(call_id)}.jsonl"
-        return self._read_path(path)
+        events = [event for event in self._read_path(path) if int(event.get("id") or 0) > after]
+        if limit is not None:
+            events = events[:limit]
+        return events
 
     def list_call_ids(self) -> list[str]:
         with self._lock:

@@ -8,6 +8,7 @@ import threading
 import unicodedata
 
 import numpy as np
+from openai import OpenAI
 from scipy.io import wavfile
 import whisper
 
@@ -86,6 +87,54 @@ class WhisperSTTProvider(STTProvider):
         if _non_latin_letter_ratio(text) > 0.30:
             return "unexpected_non_latin_text"
         return None
+
+
+class OpenAISTTProvider(STTProvider):
+    def __init__(self, settings: Settings) -> None:
+        if not settings.openai_api_key:
+            raise ValueError("OPENAI_API_KEY is required when VOICEBOT_STT_PROVIDER=openai")
+        print(f"Using OpenAI STT model: {settings.openai_stt_model}")
+        client_kwargs = {"api_key": settings.openai_api_key}
+        if settings.openai_base_url:
+            client_kwargs["base_url"] = settings.openai_base_url
+        self._client = OpenAI(**client_kwargs)
+        self._model = settings.openai_stt_model
+        self._language = settings.language
+        self._min_chars = settings.stt_min_chars
+        self._lock = threading.Lock()
+
+    def transcribe(self, call_audio: np.ndarray) -> TranscriptionResult:
+        audio = resample_audio(call_audio, CALL_SAMPLE_RATE, STT_SAMPLE_RATE)
+        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+            wavfile.write(tmp.name, STT_SAMPLE_RATE, np.clip(audio, -1.0, 1.0))
+            with open(tmp.name, "rb") as audio_file:
+                kwargs = {
+                    "model": self._model,
+                    "file": audio_file,
+                    "response_format": "verbose_json",
+                }
+                if self._language:
+                    kwargs["language"] = self._language
+                with self._lock:
+                    result = self._client.audio.transcriptions.create(**kwargs)
+
+        text = str(getattr(result, "text", "") or "").strip()
+        metadata = self._metadata(result)
+        if len(text) < self._min_chars:
+            return TranscriptionResult("", "empty_or_too_short", metadata)
+        if re.search(r"<\|.*?\|>", text):
+            return TranscriptionResult("", "whisper_token_artifact", metadata)
+        return TranscriptionResult(text, None, metadata)
+
+    def _metadata(self, result) -> dict:
+        segments = getattr(result, "segments", None) or []
+        return {
+            "provider": "openai",
+            "model": self._model,
+            "language": getattr(result, "language", None),
+            "duration": getattr(result, "duration", None),
+            "segments": len(segments),
+        }
 
 
 def _average(values: list[float]) -> float | None:

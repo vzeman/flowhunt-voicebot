@@ -50,6 +50,7 @@ Services:
 - `asterisk`: registers to the SIP trunk and answers incoming calls.
 - `voicebot`: receives Asterisk AudioSocket media, runs STT/TTS, stores events,
   and exposes the agent API on `http://127.0.0.1:8080`.
+- `openai-agent`: optional online AI agent using the OpenAI Responses API.
 
 Useful checks:
 
@@ -109,6 +110,48 @@ python agents/local_command_agent.py \
 
 The command receives a prompt on stdin and must write only the answer that should
 be spoken to the caller.
+
+## OpenAI Provider
+
+The runtime can use OpenAI for the AI agent, STT, and TTS. Put secrets in a
+local `.env` file; `.env` is ignored by git.
+
+```bash
+SIP_PASSWORD='your-sip-password-here'
+OPENAI_API_KEY='your-openai-api-key-here'
+VOICEBOT_STT_PROVIDER=openai
+VOICEBOT_OPENAI_STT_MODEL=whisper-1
+VOICEBOT_TTS_PROVIDER=openai
+VOICEBOT_OPENAI_TTS_MODEL=gpt-4o-mini-tts
+VOICEBOT_OPENAI_TTS_VOICE=alloy
+VOICEBOT_AGENT_PROVIDER=openai-responses
+VOICEBOT_OPENAI_AGENT_MODEL=gpt-4.1-mini
+```
+
+Start the full online-provider stack:
+
+```bash
+docker compose up -d --build voicebot asterisk openai-agent
+```
+
+Docker Compose lets exported shell variables override `.env` values. If you
+already have another `OPENAI_API_KEY` exported in the shell, unset it or start
+Compose from a clean shell so the project-local `.env` value is used.
+
+OpenAI model names are configurable so the same runtime can switch back to local
+Whisper/Supertonic or use newer OpenAI models without code changes.
+
+Provider names:
+
+- STT: `whisper` for local open-source Whisper, `openai` or
+  `openai-compatible` for OpenAI or a compatible transcription endpoint via
+  `VOICEBOT_OPENAI_BASE_URL`.
+- TTS: `supertonic` for local Supertonic, `openai` or `openai-compatible` for
+  OpenAI or a compatible speech endpoint via `VOICEBOT_OPENAI_BASE_URL`.
+- Agent: `openai-responses` for the OpenAI Responses API, or
+  `openai-chat-compatible` for chat-completions providers via
+  `VOICEBOT_AGENT_OPENAI_BASE_URL`. Provider aliases `openrouter`, `groq`,
+  `together`, `ollama`, and `lmstudio` map to the same chat-compatible adapter.
 
 ## Local Microphone Echo Demo
 

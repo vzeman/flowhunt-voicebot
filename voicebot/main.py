@@ -11,21 +11,25 @@ from .audiosocket_server import ThreadingAudioSocketServer
 from .calls import CallRegistry
 from .config import Settings
 from .events import EventStore
-from .stt import WhisperSTTProvider
+from .stt import OpenAISTTProvider, WhisperSTTProvider
 from .transcripts import TranscriptStore
-from .tts import SupertonicTTSProvider
+from .tts import OpenAITTSProvider, SupertonicTTSProvider
 
 
 def build_stt(settings: Settings):
-    if settings.stt_provider != "whisper":
-        raise ValueError(f"Unsupported STT provider: {settings.stt_provider}")
-    return WhisperSTTProvider(settings)
+    if settings.stt_provider == "whisper":
+        return WhisperSTTProvider(settings)
+    if settings.stt_provider in {"openai", "openai-compatible"}:
+        return OpenAISTTProvider(settings)
+    raise ValueError(f"Unsupported STT provider: {settings.stt_provider}")
 
 
 def build_tts(settings: Settings):
-    if settings.tts_provider != "supertonic":
-        raise ValueError(f"Unsupported TTS provider: {settings.tts_provider}")
-    return SupertonicTTSProvider(settings.tts_voice, settings.language)
+    if settings.tts_provider == "supertonic":
+        return SupertonicTTSProvider(settings.tts_voice, settings.language)
+    if settings.tts_provider in {"openai", "openai-compatible"}:
+        return OpenAITTSProvider(settings)
+    raise ValueError(f"Unsupported TTS provider: {settings.tts_provider}")
 
 
 def main() -> None:

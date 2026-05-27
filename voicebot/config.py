@@ -28,6 +28,9 @@ class Settings:
 
     stt_provider: str = os.getenv("VOICEBOT_STT_PROVIDER", "whisper")
     whisper_model: str = os.getenv("VOICEBOT_WHISPER_MODEL", "base")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    openai_base_url: str = os.getenv("VOICEBOT_OPENAI_BASE_URL", os.getenv("OPENAI_BASE_URL", ""))
+    openai_stt_model: str = os.getenv("VOICEBOT_OPENAI_STT_MODEL", "whisper-1")
     language: str | None = os.getenv("VOICEBOT_LANGUAGE") or None
     stt_no_speech_threshold: float = env_float("VOICEBOT_STT_NO_SPEECH_THRESHOLD", 0.60)
     stt_logprob_threshold: float = env_float("VOICEBOT_STT_LOGPROB_THRESHOLD", -1.0)
@@ -35,6 +38,8 @@ class Settings:
 
     tts_provider: str = os.getenv("VOICEBOT_TTS_PROVIDER", "supertonic")
     tts_voice: str = os.getenv("VOICEBOT_TTS_VOICE", "M1")
+    openai_tts_model: str = os.getenv("VOICEBOT_OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+    openai_tts_voice: str = os.getenv("VOICEBOT_OPENAI_TTS_VOICE", "alloy")
 
     start_threshold: float = env_float("VOICEBOT_START_THRESHOLD", 0.030)
     stop_threshold: float = env_float("VOICEBOT_STOP_THRESHOLD", 0.012)

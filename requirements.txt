@@ -1,4 +1,5 @@
 numpy
+openai
 openai-whisper
 fastapi
 pydantic

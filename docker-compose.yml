@@ -10,12 +10,19 @@ services:
       VOICEBOT_API_PORT: 8080
       VOICEBOT_AUDIOSOCKET_HOST: 0.0.0.0
       VOICEBOT_AUDIOSOCKET_PORT: 9019
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      VOICEBOT_OPENAI_BASE_URL: ${VOICEBOT_OPENAI_BASE_URL:-}
+      VOICEBOT_STT_PROVIDER: ${VOICEBOT_STT_PROVIDER:-whisper}
       VOICEBOT_WHISPER_MODEL: ${VOICEBOT_WHISPER_MODEL:-base}
+      VOICEBOT_OPENAI_STT_MODEL: ${VOICEBOT_OPENAI_STT_MODEL:-whisper-1}
       VOICEBOT_LANGUAGE: ${VOICEBOT_LANGUAGE:-}
       VOICEBOT_STT_NO_SPEECH_THRESHOLD: ${VOICEBOT_STT_NO_SPEECH_THRESHOLD:-0.60}
       VOICEBOT_STT_LOGPROB_THRESHOLD: ${VOICEBOT_STT_LOGPROB_THRESHOLD:--1.0}
       VOICEBOT_STT_MIN_CHARS: ${VOICEBOT_STT_MIN_CHARS:-2}
+      VOICEBOT_TTS_PROVIDER: ${VOICEBOT_TTS_PROVIDER:-supertonic}
       VOICEBOT_TTS_VOICE: ${VOICEBOT_TTS_VOICE:-M1}
+      VOICEBOT_OPENAI_TTS_MODEL: ${VOICEBOT_OPENAI_TTS_MODEL:-gpt-4o-mini-tts}
+      VOICEBOT_OPENAI_TTS_VOICE: ${VOICEBOT_OPENAI_TTS_VOICE:-alloy}
       VOICEBOT_START_THRESHOLD: ${VOICEBOT_START_THRESHOLD:-0.030}
       VOICEBOT_STOP_THRESHOLD: ${VOICEBOT_STOP_THRESHOLD:-0.012}
       VOICEBOT_VAD_START_MS: ${VOICEBOT_VAD_START_MS:-120}
@@ -51,6 +58,22 @@ services:
       - ./asterisk/extensions-docker.conf:/templates/extensions.conf:ro
       - ./asterisk/rtp.conf:/etc/asterisk/rtp.conf:ro
     command: ["/bin/sh", "/docker-entrypoint.sh"]
+    depends_on:
+      - voicebot
+
+  openai-agent:
+    build: .
+    container_name: flowhunt-openai-agent
+    restart: unless-stopped
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      VOICEBOT_AGENT_OPENAI_BASE_URL: ${VOICEBOT_AGENT_OPENAI_BASE_URL:-}
+      VOICEBOT_AGENT_BASE_URL: http://voicebot:8080
+      VOICEBOT_AGENT_PROVIDER: ${VOICEBOT_AGENT_PROVIDER:-openai-responses}
+      VOICEBOT_OPENAI_AGENT_MODEL: ${VOICEBOT_OPENAI_AGENT_MODEL:-gpt-4.1-mini}
+      VOICEBOT_OPENAI_AGENT_INTERVAL: ${VOICEBOT_OPENAI_AGENT_INTERVAL:-0.5}
+      VOICEBOT_OPENAI_AGENT_TIMEOUT: ${VOICEBOT_OPENAI_AGENT_TIMEOUT:-30}
+    command: ["python", "agents/openai_agent.py"]
     depends_on:
       - voicebot
 

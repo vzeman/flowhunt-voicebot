@@ -8,6 +8,7 @@ ToolName = Literal[
     "say",
     "hangup_call",
     "transfer_call",
+    "send_dtmf",
     "get_transcript",
     "get_events",
     "get_active_calls",
@@ -91,6 +92,20 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         (
             ToolArgument("call_id", "Active call ID."),
             ToolArgument("target", "Extension or SIP target."),
+            ToolArgument(
+                "response_to_event_id",
+                "Optional event ID this answers.",
+                required=False,
+                schema={"type": ["integer", "null"]},
+            ),
+        ),
+    ),
+    ToolDefinition(
+        "send_dtmf",
+        "Send one DTMF digit into an active call.",
+        (
+            ToolArgument("call_id", "Active call ID."),
+            ToolArgument("digit", "DTMF digit to send.", schema={"type": "string", "minLength": 1, "maxLength": 1}),
             ToolArgument(
                 "response_to_event_id",
                 "Optional event ID this answers.",

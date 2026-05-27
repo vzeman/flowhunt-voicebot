@@ -40,6 +40,13 @@ class AsteriskAMI:
         )
         return ControlResult("Response: Success" in response, response)
 
+    def send_dtmf(self, call_id: str, digit: str) -> ControlResult:
+        channel = self.find_channel(call_id)
+        if not channel:
+            return ControlResult(False, f"channel not found for call_id={call_id}")
+        response = self.action({"Action": "PlayDTMF", "Channel": channel, "Digit": digit})
+        return ControlResult("Response: Success" in response, response)
+
     def find_channel(self, call_id: str) -> str | None:
         response = self.action({"Action": "Command", "Command": "core show channels concise"})
         for line in response.splitlines():

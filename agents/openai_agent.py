@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -29,13 +28,11 @@ from local_command_agent import (
     is_echo_answer,
     parse_agent_output,
 )
+from agent_provider_registry import default_agent_provider_registry
 from voicebot.providers import (
-    AGENT_CHAT_COMPATIBLE_PROVIDERS,
-    SUPPORTED_AGENT_PROVIDERS,
     normalize_provider,
     provider_api_key,
     provider_base_url,
-    unsupported_provider_message,
 )
 
 
@@ -50,80 +47,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=float(os.getenv("VOICEBOT_OPENAI_AGENT_TIMEOUT", "30")))
     parser.add_argument("--max-output-tokens", type=int, default=500)
     return parser.parse_args()
-
-
-def run_openai_agent(
-    client: OpenAI,
-    provider: str,
-    model: str,
-    prompt: str,
-    timeout: float,
-    max_output_tokens: int,
-    tools: list[dict] | None = None,
-) -> tuple[str, list[dict]]:
-    provider = normalize_provider(provider)
-    if provider == "openai-responses":
-        return run_responses_agent(client, model, prompt, timeout, max_output_tokens, tools)
-    if provider in AGENT_CHAT_COMPATIBLE_PROVIDERS:
-        return run_chat_agent(client, model, prompt, timeout, max_output_tokens)
-    if provider in SUPPORTED_AGENT_PROVIDERS:
-        raise RuntimeError(
-            unsupported_provider_message(
-                "agent",
-                provider,
-                SUPPORTED_AGENT_PROVIDERS,
-                "Use VOICEBOT_AGENT_PROVIDER=openai-chat-compatible with VOICEBOT_AGENT_OPENAI_BASE_URL, "
-                "VOICEBOT_AGENT_API_KEY, and VOICEBOT_OPENAI_AGENT_MODEL until a native adapter is added.",
-            )
-        )
-    raise RuntimeError(f"unsupported agent provider: {provider}")
-
-
-def run_responses_agent(
-    client: OpenAI,
-    model: str,
-    prompt: str,
-    timeout: float,
-    max_output_tokens: int,
-    tools: list[dict] | None = None,
-) -> tuple[str, list[dict]]:
-    kwargs = {
-        "model": model,
-        "input": prompt,
-        "max_output_tokens": max_output_tokens,
-        "timeout": timeout,
-    }
-    if tools:
-        kwargs["tools"] = tools
-    response = client.responses.create(**kwargs)
-    return response.output_text.strip(), extract_responses_tool_calls(response)
-
-
-def run_chat_agent(client: OpenAI, model: str, prompt: str, timeout: float, max_output_tokens: int) -> tuple[str, list[dict]]:
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=max_output_tokens,
-        temperature=0,
-        timeout=timeout,
-    )
-    return (response.choices[0].message.content or "").strip(), []
-
-
-def extract_responses_tool_calls(response) -> list[dict]:
-    calls = []
-    for item in getattr(response, "output", []) or []:
-        if getattr(item, "type", None) != "function_call":
-            continue
-        name = getattr(item, "name", "")
-        raw_arguments = getattr(item, "arguments", "{}") or "{}"
-        try:
-            arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
-        except json.JSONDecodeError:
-            arguments = {}
-        if name:
-            calls.append({"name": name, "arguments": arguments})
-    return calls
 
 
 def main() -> None:
@@ -142,6 +65,7 @@ def main() -> None:
     elif os.environ.get("OPENAI_BASE_URL") == "":
         os.environ.pop("OPENAI_BASE_URL")
     client = OpenAI(**client_kwargs)
+    agent_providers = default_agent_provider_registry()
     seen: set[int] = set()
 
     while True:
@@ -171,7 +95,7 @@ def main() -> None:
             legacy_tools = http_json("GET", f"{args.base_url}/agent/tools").get("tools", [])
             native_tools = http_json("GET", f"{args.base_url}/agent/tools/schema").get("tools", [])
             prompt = build_prompt(pending, response.get("context", {}), legacy_tools)
-            raw_answer, native_tool_calls = run_openai_agent(
+            raw_answer, native_tool_calls = agent_providers.run(
                 client,
                 provider,
                 args.model,
@@ -184,7 +108,7 @@ def main() -> None:
             tool_calls = [*native_tool_calls, *parsed_tool_calls]
             if answer and is_echo_answer(answer, pending):
                 retry_prompt = build_retry_prompt(prompt, answer)
-                raw_answer, native_tool_calls = run_openai_agent(
+                raw_answer, native_tool_calls = agent_providers.run(
                     client,
                     provider,
                     args.model,

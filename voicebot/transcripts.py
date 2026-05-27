@@ -75,6 +75,22 @@ class TranscriptStore:
             )
         return result
 
+    def stats(self) -> dict:
+        summaries = self.summaries()
+        skipped_line_count = sum(int(summary["skipped_line_count"]) for summary in summaries)
+        corrupt_call_ids = [
+            str(summary["call_id"])
+            for summary in summaries
+            if int(summary["skipped_line_count"]) > 0
+        ]
+        return {
+            "transcript_count": len(summaries),
+            "event_count": sum(int(summary["event_count"]) for summary in summaries),
+            "skipped_line_count": skipped_line_count,
+            "corrupt_transcript_count": len(corrupt_call_ids),
+            "corrupt_call_ids": corrupt_call_ids,
+        }
+
     def _read_path(self, path: Path) -> list[dict]:
         events, _skipped_line_count = self._read_path_with_errors(path)
         return events

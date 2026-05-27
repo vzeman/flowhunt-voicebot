@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -29,6 +30,23 @@ class HealthTests(unittest.TestCase):
         self.assertFalse(report["checks"]["ami"]["configured"])
         self.assertTrue(report["checks"]["providers"]["ok"])
         self.assertTrue(report["checks"]["event_catalog"]["ok"])
+
+    def test_readiness_reports_transcript_corruption_stats(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "call-1.jsonl"
+            path.write_text("not-json\n", encoding="utf-8")
+            report = readiness_report(
+                transcripts=TranscriptStore(directory),
+                asterisk=None,
+                active_call_ids=[],
+            )
+
+        check = report["checks"]["transcripts"]
+        self.assertTrue(check["ok"])
+        self.assertEqual(check["transcript_count"], 1)
+        self.assertEqual(check["skipped_line_count"], 1)
+        self.assertEqual(check["corrupt_transcript_count"], 1)
+        self.assertEqual(check["corrupt_call_ids"], ["call-1"])
 
     def test_ami_check_reports_config_without_password(self) -> None:
         asterisk = AsteriskAMI("127.0.0.1", 5038, "admin", "secret")

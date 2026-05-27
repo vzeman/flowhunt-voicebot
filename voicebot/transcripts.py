@@ -28,14 +28,37 @@ class TranscriptStore:
 
     def read(self, call_id: str) -> list[dict]:
         path = self.directory / f"{safe_name(call_id)}.jsonl"
-        if not path.exists():
-            return []
-        with path.open("r", encoding="utf-8") as handle:
-            return [json.loads(line) for line in handle if line.strip()]
+        return self._read_path(path)
 
     def list_call_ids(self) -> list[str]:
         with self._lock:
             return sorted(path.stem for path in self.directory.glob("*.jsonl") if path.is_file())
+
+    def summaries(self) -> list[dict]:
+        result = []
+        with self._lock:
+            paths = sorted(path for path in self.directory.glob("*.jsonl") if path.is_file())
+        for path in paths:
+            events = self._read_path(path)
+            if not events:
+                continue
+            result.append(
+                {
+                    "call_id": events[0].get("call_id", path.stem),
+                    "event_count": len(events),
+                    "first_event_id": events[0].get("id"),
+                    "last_event_id": events[-1].get("id"),
+                    "first_timestamp": events[0].get("timestamp"),
+                    "last_timestamp": events[-1].get("timestamp"),
+                }
+            )
+        return result
+
+    def _read_path(self, path: Path) -> list[dict]:
+        if not path.exists():
+            return []
+        with path.open("r", encoding="utf-8") as handle:
+            return [json.loads(line) for line in handle if line.strip()]
 
 
 def safe_name(value: str) -> str:

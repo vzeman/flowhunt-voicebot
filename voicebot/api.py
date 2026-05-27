@@ -292,6 +292,10 @@ def create_app(
     def list_transcripts() -> dict[str, Any]:
         return {"call_ids": transcripts.list_call_ids()}
 
+    @app.get("/transcripts/summary")
+    def transcript_summaries() -> dict[str, Any]:
+        return {"transcripts": transcripts.summaries()}
+
     @app.post("/calls/{call_id}/control")
     async def call_control(call_id: str, request: CallControlRequest) -> dict[str, Any]:
         requested = events.append(call_id, "call_control_requested", request.model_dump())
@@ -449,6 +453,9 @@ def create_app(
     def tool_list_transcripts(args: dict[str, Any]) -> dict[str, Any]:
         return list_transcripts()
 
+    def tool_list_transcript_summaries(args: dict[str, Any]) -> dict[str, Any]:
+        return transcript_summaries()
+
     def tool_get_events(args: dict[str, Any]) -> dict[str, Any]:
         return list_events(
             after=optional_int_arg(args, "after", 0),
@@ -486,6 +493,7 @@ def create_app(
     tool_executor.register("send_dtmf", tool_send_dtmf)
     tool_executor.register("stop_playback", tool_stop_playback)
     tool_executor.register("list_transcripts", tool_list_transcripts)
+    tool_executor.register("list_transcript_summaries", tool_list_transcript_summaries)
     tool_executor.register("get_transcript", tool_get_transcript)
     tool_executor.register("get_events", tool_get_events)
     tool_executor.register("get_metrics", tool_get_metrics)

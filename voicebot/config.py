@@ -28,6 +28,8 @@ class Settings:
 
     start_threshold: float = env_float("VOICEBOT_START_THRESHOLD", 0.018)
     stop_threshold: float = env_float("VOICEBOT_STOP_THRESHOLD", 0.010)
+    barge_in_threshold: float = env_float("VOICEBOT_BARGE_IN_THRESHOLD", 0.30)
+    echo_tail_ms: int = env_int("VOICEBOT_ECHO_TAIL_MS", 800)
     silence_ms: int = env_int("VOICEBOT_SILENCE_MS", 900)
     min_seconds: float = env_float("VOICEBOT_MIN_SECONDS", 0.5)
     max_seconds: float = env_float("VOICEBOT_MAX_SECONDS", 20.0)

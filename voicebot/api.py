@@ -28,6 +28,10 @@ class CallControlRequest(BaseModel):
     target: str | None = None
 
 
+class AgentToolRequest(BaseModel):
+    arguments: dict[str, Any] = {}
+
+
 @dataclass
 class AgentTaskTracker:
     responded_event_ids: set[int]
@@ -116,6 +120,82 @@ def create_app(
             "context": events.context(),
         }
 
+    @app.get("/agent/tools")
+    def agent_tools() -> dict[str, Any]:
+        return {
+            "tools": [
+                {
+                    "name": "say",
+                    "description": "Speak text into an active call.",
+                    "arguments": {
+                        "call_id": "Active call ID.",
+                        "text": "Text to synthesize and play.",
+                        "response_to_event_id": "Optional event ID this answers.",
+                    },
+                },
+                {
+                    "name": "hangup_call",
+                    "description": "Hang up an active call through Asterisk AMI.",
+                    "arguments": {"call_id": "Active call ID."},
+                },
+                {
+                    "name": "transfer_call",
+                    "description": "Transfer an active call to another SIP extension or target.",
+                    "arguments": {"call_id": "Active call ID.", "target": "Extension or SIP target."},
+                },
+                {
+                    "name": "get_transcript",
+                    "description": "Read the full persisted transcript/events for one call.",
+                    "arguments": {"call_id": "Call ID."},
+                },
+                {
+                    "name": "get_events",
+                    "description": "Read recent in-memory events.",
+                    "arguments": {
+                        "after": "Optional event ID cursor.",
+                        "call_id": "Optional call filter.",
+                        "limit": "Optional maximum number of events.",
+                    },
+                },
+                {
+                    "name": "get_active_calls",
+                    "description": "List currently active call IDs.",
+                    "arguments": {},
+                },
+            ]
+        }
+
+    @app.post("/agent/tools/{tool_name}")
+    async def agent_tool(tool_name: str, request: AgentToolRequest) -> dict[str, Any]:
+        args = request.arguments
+        if tool_name == "say":
+            call_id = require_arg(args, "call_id")
+            text = require_arg(args, "text")
+            response = AgentResponseRequest(
+                text=text,
+                response_to_event_id=args.get("response_to_event_id"),
+            )
+            return await submit_response(call_id, response)
+        if tool_name == "hangup_call":
+            call_id = require_arg(args, "call_id")
+            return await call_control(call_id, CallControlRequest(action="hangup"))
+        if tool_name == "transfer_call":
+            call_id = require_arg(args, "call_id")
+            target = require_arg(args, "target")
+            return await call_control(call_id, CallControlRequest(action="transfer", target=target))
+        if tool_name == "get_transcript":
+            call_id = require_arg(args, "call_id")
+            return call_transcript(call_id)
+        if tool_name == "get_events":
+            return list_events(
+                after=int(args.get("after", 0)),
+                call_id=args.get("call_id"),
+                limit=int(args.get("limit", 200)),
+            )
+        if tool_name == "get_active_calls":
+            return {"active_calls": registry.active_call_ids()}
+        raise HTTPException(status_code=404, detail=f"unknown agent tool: {tool_name}")
+
     @app.post("/calls/{call_id}/responses")
     async def submit_response(call_id: str, request: AgentResponseRequest) -> dict[str, Any]:
         session = registry.get(call_id)
@@ -174,3 +254,10 @@ def create_app(
             hub.disconnect(websocket)
 
     return app
+
+
+def require_arg(args: dict[str, Any], name: str) -> Any:
+    value = args.get(name)
+    if value is None or value == "":
+        raise HTTPException(status_code=400, detail=f"missing required tool argument: {name}")
+    return value

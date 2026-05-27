@@ -38,6 +38,12 @@ Read pending agent tasks with compacted context:
 curl http://127.0.0.1:8080/agent/tasks
 ```
 
+Discover callable tools:
+
+```bash
+curl http://127.0.0.1:8080/agent/tools
+```
+
 Send an async answer:
 
 ```bash
@@ -68,6 +74,18 @@ curl -X POST http://127.0.0.1:8080/calls/CALL_ID/control \
   -d '{"action":"transfer", "target":"123456789"}'
 ```
 
+The same actions are exposed as agent tools:
+
+```bash
+curl -X POST http://127.0.0.1:8080/agent/tools/hangup_call \
+  -H 'Content-Type: application/json' \
+  -d '{"arguments":{"call_id":"CALL_ID"}}'
+
+curl -X POST http://127.0.0.1:8080/agent/tools/transfer_call \
+  -H 'Content-Type: application/json' \
+  -d '{"arguments":{"call_id":"CALL_ID", "target":"123456789"}}'
+```
+
 The control endpoint emits `call_control_requested` and
 `call_control_completed` events so the agent can observe whether the operation
 succeeded.
@@ -89,11 +107,32 @@ python agents/local_command_agent.py \
 ```
 
 The command must read the prompt from stdin and write only the final spoken
-answer to stdout.
+answer to stdout. It may also write JSON with tool calls:
+
+```json
+{
+  "say": "I will transfer you now.",
+  "tool_calls": [
+    {"name": "transfer_call", "arguments": {"call_id": "CALL_ID", "target": "123456789"}}
+  ]
+}
+```
 
 Complex agents can also call the control endpoints directly. For example, an
 agent can decide to transfer a caller to a human, hang up abusive calls, or wait
 for `call_ended` before writing post-call notes.
+
+## Parallel Calls
+
+The SIP/media layer accepts parallel incoming calls. Each call receives its own
+AudioSocket session, `call_id`, in-memory state, and transcript file. The event
+queue can contain tasks for multiple calls at the same time, so external agents
+must use the `call_id` on each event/tool call.
+
+The current local command agent processes tasks serially. Production agents
+should either run workers per call or dispatch tasks by `call_id`. STT/TTS model
+adapters should also be reviewed for provider-specific concurrency limits before
+high call volume testing.
 
 ## Context Compaction
 

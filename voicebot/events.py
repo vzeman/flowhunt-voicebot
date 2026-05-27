@@ -19,6 +19,7 @@ EventType = Literal[
     "user_transcript",
     "agent_response_requested",
     "agent_response_received",
+    "agent_response_dropped",
     "bot_playback_started",
     "bot_playback_interrupted",
     "bot_playback_finished",

@@ -60,6 +60,10 @@ class PlaybackBuffer:
             self._generation += 1
             return self._generation
 
+    def is_active(self) -> bool:
+        with self._lock:
+            return self._playing or self._current is not None or bool(self._queue)
+
     def next_packet(self, packet_samples: int) -> tuple[np.ndarray, bool, bool]:
         with self._lock:
             started = False
@@ -107,6 +111,9 @@ class CallSession:
         self.tts = tts
         self.playback = PlaybackBuffer()
         self.stop_event = threading.Event()
+        self.recording_event = threading.Event()
+        self._ignore_input_until = 0.0
+        self._ignore_input_lock = threading.Lock()
         self._speech_jobs: queue.Queue[tuple[int, np.ndarray]] = queue.Queue()
         self._active_turn = 0
         self._active_turn_lock = threading.Lock()
@@ -134,7 +141,27 @@ class CallSession:
             "agent_response_received",
             {"text": response.text, "response_to_event_id": response.response_to_event_id},
         )
+        if self.recording_event.is_set():
+            self.events.append(
+                self.call_id,
+                "agent_response_dropped",
+                {
+                    "reason": "caller_is_speaking",
+                    "response_to_event_id": response.response_to_event_id,
+                },
+            )
+            return event
         audio, duration = self.tts.synthesize(response.text)
+        if self.recording_event.is_set():
+            self.events.append(
+                self.call_id,
+                "agent_response_dropped",
+                {
+                    "reason": "caller_started_speaking_during_tts",
+                    "response_to_event_id": response.response_to_event_id,
+                },
+            )
+            return event
         self.playback.enqueue(audio)
         self.events.append(self.call_id, "system", {"message": "agent response queued", "duration": duration})
         return event
@@ -173,6 +200,8 @@ class CallSession:
             level = rms(block)
 
             if not is_recording:
+                if self._should_ignore_input(level):
+                    continue
                 if level < self.settings.start_threshold:
                     continue
 
@@ -180,6 +209,7 @@ class CallSession:
                     self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "user_speech_started"})
 
                 is_recording = True
+                self.recording_event.set()
                 collected = [block]
                 silence_ms = 0
                 speech_ms = block_ms
@@ -199,6 +229,7 @@ class CallSession:
 
             audio = np.concatenate(collected)
             is_recording = False
+            self.recording_event.clear()
             collected = []
             silence_ms = 0
             speech_ms = 0
@@ -238,8 +269,21 @@ class CallSession:
         packet_samples = max(1, int(CALL_SAMPLE_RATE * self.settings.packet_ms / 1000))
         packet_seconds = self.settings.packet_ms / 1000
         while not self.stop_event.is_set():
+            if self.recording_event.is_set():
+                if self.playback.interrupt():
+                    self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "caller_is_speaking"})
+                packet = np.zeros(packet_samples, dtype=np.float32)
+                try:
+                    write_audiosocket_message(self.sock, MSG_SLIN8, float32_to_pcm16_bytes(packet))
+                except OSError:
+                    self.stop_event.set()
+                    return
+                time.sleep(packet_seconds)
+                continue
+
             packet, started, finished = self.playback.next_packet(packet_samples)
             if started:
+                self._set_echo_tail(self.settings.echo_tail_ms)
                 self.events.append(self.call_id, "bot_playback_started", {})
             try:
                 write_audiosocket_message(self.sock, MSG_SLIN8, float32_to_pcm16_bytes(packet))
@@ -247,6 +291,7 @@ class CallSession:
                 self.stop_event.set()
                 return
             if finished:
+                self._set_echo_tail(self.settings.echo_tail_ms)
                 self.events.append(self.call_id, "bot_playback_finished", {})
             time.sleep(packet_seconds)
 
@@ -258,6 +303,16 @@ class CallSession:
     def _current_turn(self) -> int:
         with self._active_turn_lock:
             return self._active_turn
+
+    def _set_echo_tail(self, tail_ms: int) -> None:
+        with self._ignore_input_lock:
+            self._ignore_input_until = max(self._ignore_input_until, time.monotonic() + tail_ms / 1000)
+
+    def _should_ignore_input(self, level: float) -> bool:
+        if self.playback.is_active() and level < self.settings.barge_in_threshold:
+            return True
+        with self._ignore_input_lock:
+            return time.monotonic() < self._ignore_input_until
 
 
 class CallRegistry:

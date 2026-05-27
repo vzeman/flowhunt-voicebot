@@ -44,7 +44,7 @@ def http_json(method: str, url: str, payload: dict | None = None) -> dict:
         return json.loads(response.read().decode())
 
 
-def build_prompt(tasks: list[dict], context: dict) -> str:
+def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
     pending_lines = []
     for task in tasks:
         data = task.get("data", {})
@@ -52,6 +52,12 @@ def build_prompt(tasks: list[dict], context: dict) -> str:
             f"- event_id={task['id']} call_id={task['call_id']} "
             f"user said: {data.get('text', '')}"
         )
+    output_format = {
+        "say": "text to speak, if any",
+        "tool_calls": [
+            {"name": "hangup_call", "arguments": {"call_id": "..."}},
+        ],
+    }
 
     return f"""You are an AI voicebot speaking with a customer on a phone call.
 Answer naturally and concisely. Do not mention implementation details, events,
@@ -67,7 +73,11 @@ Recent events:
 Pending user messages:
 {chr(10).join(pending_lines)}
 
-Return only the exact text that should be spoken to the customer.
+Available tools:
+{json.dumps(tools, ensure_ascii=False, indent=2)}
+
+Return either plain text to speak, or JSON in this form:
+{json.dumps(output_format, ensure_ascii=False, indent=2)}
 """
 
 
@@ -86,6 +96,30 @@ def run_agent_command(command: str, prompt: str) -> str:
     return completed.stdout.strip()
 
 
+def parse_agent_output(output: str) -> tuple[str, list[dict]]:
+    try:
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        return output, []
+    if not isinstance(data, dict):
+        return output, []
+    tool_calls = data.get("tool_calls", [])
+    if not isinstance(tool_calls, list):
+        tool_calls = []
+    say = data.get("say") or data.get("text") or ""
+    return str(say).strip(), [call for call in tool_calls if isinstance(call, dict)]
+
+
+def execute_tool_call(base_url: str, call: dict) -> dict:
+    name = call.get("name")
+    arguments = call.get("arguments") or {}
+    if not name:
+        raise RuntimeError("tool call missing name")
+    if not isinstance(arguments, dict):
+        raise RuntimeError(f"tool call {name} arguments must be an object")
+    return http_json("POST", f"{base_url}/agent/tools/{name}", {"arguments": arguments})
+
+
 def main() -> None:
     args = parse_args()
     seen: set[int] = set()
@@ -98,18 +132,29 @@ def main() -> None:
                 time.sleep(args.interval)
                 continue
 
-            prompt = build_prompt(pending, response.get("context", {}))
-            answer = run_agent_command(args.command, prompt)
+            tools = http_json("GET", f"{args.base_url}/agent/tools").get("tools", [])
+            prompt = build_prompt(pending, response.get("context", {}), tools)
+            raw_answer = run_agent_command(args.command, prompt)
+            answer, tool_calls = parse_agent_output(raw_answer)
             latest = pending[-1]
-            http_json(
-                "POST",
-                f"{args.base_url}/calls/{latest['call_id']}/responses",
-                {"text": answer, "response_to_event_id": latest["id"]},
-            )
+            for call in tool_calls:
+                execute_tool_call(args.base_url, call)
+            if answer:
+                execute_tool_call(
+                    args.base_url,
+                    {
+                        "name": "say",
+                        "arguments": {
+                            "call_id": latest["call_id"],
+                            "text": answer,
+                            "response_to_event_id": latest["id"],
+                        },
+                    },
+                )
             for task in pending:
                 seen.add(task["id"])
             print(f"answered {len(pending)} pending event(s) for call {latest['call_id']}")
-        except (urllib.error.URLError, TimeoutError, RuntimeError) as exc:
+        except (OSError, urllib.error.URLError, TimeoutError, RuntimeError) as exc:
             print(f"agent error: {exc}")
             time.sleep(max(args.interval, 2.0))
 

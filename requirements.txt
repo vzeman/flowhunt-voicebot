@@ -1,0 +1,6 @@
+numpy
+openai-whisper
+scipy
+sounddevice
+soundfile
+supertonic

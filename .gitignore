@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Local SIP/Asterisk configs may contain real credentials.
+asterisk/pjsip.conf
+asterisk/extensions.conf
+.env

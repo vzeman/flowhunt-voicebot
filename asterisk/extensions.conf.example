@@ -1,0 +1,14 @@
+; Route inbound SIP trunk calls to the local Python AudioSocket server.
+; AudioSocket() does not answer by itself, so Answer() is intentional.
+
+[from-liveagent]
+exten => _X!,1,NoOp(Inbound LiveAgent SIP trunk call to ${EXTEN})
+ same => n,Answer()
+ same => n,AudioSocket(40325ec2-5efd-4bd3-805f-53576e581d13,127.0.0.1:9019)
+ same => n,Hangup()
+
+; Some providers route to "s" instead of a dialed extension.
+exten => s,1,NoOp(Inbound LiveAgent SIP trunk call)
+ same => n,Answer()
+ same => n,AudioSocket(40325ec2-5efd-4bd3-805f-53576e581d13,127.0.0.1:9019)
+ same => n,Hangup()

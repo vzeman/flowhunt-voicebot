@@ -1,0 +1,21 @@
+services:
+  asterisk:
+    image: andrius/asterisk:latest
+    container_name: supertronic-asterisk
+    restart: unless-stopped
+    network_mode: bridge
+    ports:
+      - "5060:5060/udp"
+      - "10000-10100:10000-10100/udp"
+    environment:
+      SIP_HOST: qla-prod-ec1-la-opensips-03.prod-ec1.live-agent.net
+      SIP_USER: u262625_876
+      SIP_PASSWORD: ${SIP_PASSWORD:?Set SIP_PASSWORD in your shell}
+      AUDIOSOCKET_SERVICE: host.docker.internal:9019
+    volumes:
+      - ./asterisk/docker-entrypoint.sh:/docker-entrypoint.sh:ro
+      - ./asterisk/extensions-docker.conf:/templates/extensions.conf:ro
+      - ./asterisk/rtp.conf:/etc/asterisk/rtp.conf:ro
+    command: ["/bin/sh", "/docker-entrypoint.sh"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

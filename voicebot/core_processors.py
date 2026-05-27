@@ -160,11 +160,31 @@ class STTProcessor(FrameProcessorBase):
 
 
 class AgentRequestProcessor(FrameProcessorBase):
-    def __init__(self) -> None:
+    def __init__(self, request_partials: bool = False) -> None:
         super().__init__("agent-request")
+        self.request_partials = request_partials
 
     def handle(self, frame: Frame, context: PipelineContext) -> ProcessorResult:
-        if not isinstance(frame, TranscriptionFrame) or frame.kind != "user_transcript":
+        if not isinstance(frame, TranscriptionFrame):
+            return frame
+        if frame.kind == "transcription_partial":
+            if not self.request_partials:
+                return frame
+            return [
+                frame,
+                TextFrame(
+                    "agent_request",
+                    frame.call_id,
+                    frame.text,
+                    trace_id=frame.trace_id,
+                    data={
+                        "turn_id": frame.turn_id,
+                        "transcript_frame_id": frame.frame_id,
+                        "partial": True,
+                    },
+                ),
+            ]
+        if frame.kind != "user_transcript":
             return frame
         return [
             frame,
@@ -184,7 +204,7 @@ class TTSProcessor(FrameProcessorBase):
         self.tts = tts
 
     def handle(self, frame: Frame, context: PipelineContext) -> ProcessorResult:
-        if not isinstance(frame, TextFrame) or frame.kind != "agent_response":
+        if not isinstance(frame, TextFrame) or frame.kind not in {"agent_response", "agent_response_partial"}:
             return frame
 
         started = TextFrame(
@@ -227,7 +247,11 @@ class TTSProcessor(FrameProcessorBase):
             "tts_finished",
             frame.call_id,
             trace_id=frame.trace_id,
-            data={"duration": total_duration, "response_to_frame_id": frame.response_to_frame_id},
+            data={
+                "duration": total_duration,
+                "response_to_frame_id": frame.response_to_frame_id,
+                "partial": frame.kind == "agent_response_partial",
+            },
         )
         output.append(finished)
         return output

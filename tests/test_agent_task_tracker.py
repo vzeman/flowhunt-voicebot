@@ -78,6 +78,17 @@ class AgentTaskTrackerTests(unittest.TestCase):
         self.assertEqual(list(snapshot["claims"]), ["1"])
         self.assertEqual(snapshot["claims"]["1"]["owner"], "worker-1")
 
+    def test_task_state_reports_pending_claimed_responded_and_inactive(self) -> None:
+        tracker = AgentTaskTracker()
+
+        self.assertEqual(tracker.task_state(1), {"state": "pending"})
+        self.assertEqual(tracker.task_state(2, active=False), {"state": "inactive"})
+        tracker.claim([3], "worker-1", 30)
+        self.assertEqual(tracker.task_state(3)["state"], "claimed")
+        self.assertEqual(tracker.task_state(3)["owner"], "worker-1")
+        tracker.mark_responded(4)
+        self.assertEqual(tracker.task_state(4), {"state": "responded"})
+
     def test_responded_events_are_bounded(self) -> None:
         tracker = AgentTaskTracker(max_responded_event_ids=2)
 

@@ -105,6 +105,24 @@ class AgentTaskTracker:
             "claims": claims,
         }
 
+    def task_state(self, event_id: int, active: bool = True, now: float | None = None) -> dict[str, Any]:
+        current = now or time.monotonic()
+        with self._lock:
+            self._expire_claims_locked(current)
+            claim = self._claimed_event_ids.get(event_id)
+            if claim is not None:
+                owner, expires_at = claim
+                return {
+                    "state": "claimed",
+                    "owner": owner,
+                    "expires_in_seconds": max(0.0, expires_at - current),
+                }
+            if event_id <= self._responded_event_id_floor or event_id in self.responded_event_ids:
+                return {"state": "responded"}
+            if active:
+                return {"state": "pending"}
+            return {"state": "inactive"}
+
     def _expire_claims_locked(self, now: float) -> None:
         expired = [event_id for event_id, (_owner, expires_at) in self._claimed_event_ids.items() if expires_at <= now]
         for event_id in expired:

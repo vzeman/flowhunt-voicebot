@@ -402,9 +402,9 @@ def create_app(
 
     def tool_get_events(args: dict[str, Any]) -> dict[str, Any]:
         return list_events(
-            after=int(args.get("after", 0)),
+            after=optional_int_arg(args, "after", 0),
             call_id=args.get("call_id"),
-            limit=validated_limit(int(args.get("limit", 200))),
+            limit=validated_limit(optional_int_arg(args, "limit", 200)),
         )
 
     def tool_get_metrics(args: dict[str, Any]) -> dict[str, Any]:
@@ -445,3 +445,13 @@ def validated_limit(limit: int, *, maximum: int = 1000) -> int:
     if limit > maximum:
         raise HTTPException(status_code=400, detail=f"limit must be at most {maximum}")
     return limit
+
+
+def optional_int_arg(args: dict[str, Any], name: str, default: int) -> int:
+    value = args.get(name, default)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"{name} must be an integer") from None

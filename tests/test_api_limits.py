@@ -48,6 +48,22 @@ class ApiLimitTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "limit must be at least 1")
 
+    def test_get_events_tool_rejects_non_integer_after(self) -> None:
+        client, _events = self.build_client()
+
+        response = client.post("/agent/tools/get_events", json={"arguments": {"after": "abc"}})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "after must be an integer")
+
+    def test_get_events_tool_rejects_non_integer_limit(self) -> None:
+        client, _events = self.build_client()
+
+        response = client.post("/agent/tools/get_events", json={"arguments": {"limit": "abc"}})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "limit must be an integer")
+
 
 if __name__ == "__main__":
     unittest.main()

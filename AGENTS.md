@@ -94,6 +94,12 @@ Read events:
 curl 'http://127.0.0.1:8080/events?after=0'
 ```
 
+Read aggregated metrics:
+
+```bash
+curl 'http://127.0.0.1:8080/metrics?call_id=CALL_ID'
+```
+
 Read the machine-readable event catalog:
 
 ```bash

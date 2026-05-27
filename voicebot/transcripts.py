@@ -28,7 +28,7 @@ class TranscriptStore:
 
     def read(self, call_id: str, after: int = 0, limit: int | None = None) -> list[dict]:
         path = self.directory / f"{safe_name(call_id)}.jsonl"
-        events = [event for event in self._read_path(path) if int(event.get("id") or 0) > after]
+        events = [event for event in self._read_path(path) if event_id(event) > after]
         if limit is not None:
             events = events[:limit]
         return events
@@ -81,3 +81,10 @@ class TranscriptStore:
 
 def safe_name(value: str) -> str:
     return "".join(char if char.isalnum() or char in "-_" else "_" for char in value)
+
+
+def event_id(event: dict) -> int:
+    try:
+        return int(event.get("id") or 0)
+    except (TypeError, ValueError):
+        return 0

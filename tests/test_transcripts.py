@@ -11,7 +11,7 @@ from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
-from voicebot.transcripts import TranscriptStore
+from voicebot.transcripts import TranscriptStore, event_id
 
 
 @dataclass
@@ -89,6 +89,25 @@ class TranscriptTests(unittest.TestCase):
             events = transcripts.read("call-1")
 
             self.assertEqual([event["id"] for event in events], [1, 2])
+
+    def test_transcript_store_ignores_invalid_event_ids_when_paging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "call-1.jsonl"
+            path.write_text(
+                '{"id":"bad","call_id":"call-1","type":"call_started","timestamp":"2026-05-27T00:00:00Z","data":{}}\n'
+                '{"id":2,"call_id":"call-1","type":"call_ended","timestamp":"2026-05-27T00:00:01Z","data":{}}\n',
+                encoding="utf-8",
+            )
+            transcripts = TranscriptStore(directory)
+
+            events = transcripts.read("call-1", after=1)
+
+            self.assertEqual([event["id"] for event in events], [2])
+
+    def test_event_id_returns_zero_for_invalid_values(self) -> None:
+        self.assertEqual(event_id({"id": "bad"}), 0)
+        self.assertEqual(event_id({"id": None}), 0)
+        self.assertEqual(event_id({"id": 3}), 3)
 
     def test_transcripts_endpoint_lists_persisted_call_ids(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

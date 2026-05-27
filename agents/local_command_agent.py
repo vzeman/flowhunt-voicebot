@@ -19,8 +19,11 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import re
+import shlex
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -31,6 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:8080", help="Voicebot API base URL.")
     parser.add_argument("--command", required=True, help="Local command to run for response generation.")
     parser.add_argument("--interval", type=float, default=0.5, help="Polling interval in seconds.")
+    parser.add_argument("--command-timeout", type=float, default=30.0, help="AI command timeout in seconds.")
     return parser.parse_args()
 
 
@@ -111,19 +115,59 @@ caller's request as the whole response.
 """
 
 
-def run_agent_command(command: str, prompt: str) -> str:
-    completed = subprocess.run(
-        command,
-        input=prompt,
-        text=True,
-        shell=True,
-        capture_output=True,
-        check=False,
-        timeout=120,
+def run_agent_command(command: str, prompt: str, timeout: float) -> str:
+    output_file = tempfile.NamedTemporaryFile(prefix="flowhunt-agent-answer-", suffix=".txt", delete=False)
+    output_file.close()
+    effective_command = add_codex_output_file(command, output_file.name)
+    try:
+        completed = subprocess.run(
+            effective_command,
+            input=prompt,
+            text=True,
+            shell=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+        )
+        with open(output_file.name, encoding="utf-8") as handle:
+            final_answer = handle.read().strip()
+        if completed.returncode != 0:
+            error = completed.stderr.strip() or completed.stdout.strip()
+            raise RuntimeError(error or f"agent command failed with {completed.returncode}")
+        if final_answer:
+            return final_answer
+        stdout = completed.stdout.strip()
+        if looks_like_codex_diagnostics(stdout):
+            raise RuntimeError("agent command produced diagnostics but no final answer")
+        return stdout
+    finally:
+        try:
+            os.unlink(output_file.name)
+        except OSError:
+            pass
+
+
+def add_codex_output_file(command: str, path: str) -> str:
+    if "codex exec" not in command or "--output-last-message" in command:
+        return command
+    quoted_path = shlex.quote(path)
+    if command.rstrip().endswith(" -"):
+        return f"{command.rstrip()[:-2]} --output-last-message {quoted_path} -"
+    return f"{command} --output-last-message {quoted_path}"
+
+
+def looks_like_codex_diagnostics(output: str) -> bool:
+    if not output:
+        return False
+    markers = (
+        "stream error:",
+        "unexpected status",
+        "requires a newer version of codex",
+        "mcp client",
+        "error:",
     )
-    if completed.returncode != 0:
-        raise RuntimeError(completed.stderr.strip() or f"agent command failed with {completed.returncode}")
-    return completed.stdout.strip()
+    lowered = output.lower()
+    return any(marker in lowered for marker in markers)
 
 
 def parse_agent_output(output: str) -> tuple[str, list[dict]]:
@@ -156,6 +200,68 @@ def attach_response_event_id(tool_calls: list[dict], event_id: int) -> list[dict
         if isinstance(arguments, dict):
             arguments.setdefault("response_to_event_id", event_id)
     return tool_calls
+
+
+def fast_tool_call(task: dict) -> dict | None:
+    data = task.get("data", {})
+    event_id = task["id"]
+    call_id = task["call_id"]
+    text = str(data.get("text", ""))
+    normalized = _normalize(text)
+
+    if data.get("reason") == "call_connected":
+        return {
+            "name": "say",
+            "arguments": {
+                "call_id": call_id,
+                "text": "Hello, this is the FlowHunt voicebot. How can I help you?",
+                "response_to_event_id": event_id,
+            },
+        }
+
+    if wants_hangup(normalized):
+        return {
+            "name": "hangup_call",
+            "arguments": {"call_id": call_id, "response_to_event_id": event_id},
+        }
+
+    transfer_target = requested_transfer_target(text)
+    if transfer_target:
+        return {
+            "name": "transfer_call",
+            "arguments": {
+                "call_id": call_id,
+                "target": transfer_target,
+                "response_to_event_id": event_id,
+            },
+        }
+
+    return None
+
+
+def wants_hangup(normalized_text: str) -> bool:
+    phrases = (
+        "hang up",
+        "hangup",
+        "end the call",
+        "stop the call",
+        "disconnect",
+        "terminate the call",
+    )
+    return any(phrase in normalized_text for phrase in phrases)
+
+
+def requested_transfer_target(text: str) -> str | None:
+    patterns = (
+        r"\btransfer\b.*?\bto\s+(?:extension|number)\s+([A-Za-z0-9_.+-]+)",
+        r"\btransfer\b.*?\b(?:extension|number)\s+([A-Za-z0-9_.+-]+)",
+        r"\btransfer\b.*?\bto\s+([A-Za-z0-9_.+-]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
 
 
 def is_echo_answer(answer: str, pending: list[dict]) -> bool:
@@ -196,16 +302,26 @@ def main() -> None:
                 time.sleep(args.interval)
                 continue
 
+            latest = pending[-1]
+            deterministic_call = fast_tool_call(latest)
+            if deterministic_call:
+                execute_tool_call(args.base_url, deterministic_call)
+                seen.add(latest["id"])
+                print(
+                    f"executed deterministic tool {deterministic_call['name']} for event {latest['id']}",
+                    flush=True,
+                )
+                continue
+
             tools = http_json("GET", f"{args.base_url}/agent/tools").get("tools", [])
             prompt = build_prompt(pending, response.get("context", {}), tools)
-            raw_answer = run_agent_command(args.command, prompt)
+            raw_answer = run_agent_command(args.command, prompt, args.command_timeout)
             answer, tool_calls = parse_agent_output(raw_answer)
             if answer and is_echo_answer(answer, pending):
-                raw_answer = run_agent_command(args.command, build_retry_prompt(prompt, answer))
+                raw_answer = run_agent_command(args.command, build_retry_prompt(prompt, answer), args.command_timeout)
                 answer, tool_calls = parse_agent_output(raw_answer)
                 if answer and is_echo_answer(answer, pending):
                     raise RuntimeError(f"agent returned echo response twice: {answer}")
-            latest = pending[-1]
             tool_calls = attach_response_event_id(tool_calls, latest["id"])
             for call in tool_calls:
                 execute_tool_call(args.base_url, call)
@@ -224,7 +340,7 @@ def main() -> None:
             for task in pending:
                 seen.add(task["id"])
             print(f"answered {len(pending)} pending event(s) for call {latest['call_id']}", flush=True)
-        except (OSError, urllib.error.URLError, TimeoutError, RuntimeError) as exc:
+        except (OSError, urllib.error.URLError, TimeoutError, RuntimeError, subprocess.SubprocessError) as exc:
             print(f"agent error: {exc}", flush=True)
             time.sleep(max(args.interval, 2.0))
 

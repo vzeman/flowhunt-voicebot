@@ -309,8 +309,11 @@ def create_app(
         }
 
     @app.get("/transcripts/stats")
-    def transcript_stats() -> dict[str, Any]:
-        return transcripts.stats()
+    def transcript_stats(after_call_id: str | None = None, limit: Any = 200) -> dict[str, Any]:
+        return transcripts.stats(
+            after_call_id=after_call_id,
+            limit=validated_limit(optional_int_value(limit, "limit", 200)),
+        )
 
     @app.post("/calls/{call_id}/control")
     async def call_control(call_id: str, request: CallControlRequest) -> dict[str, Any]:
@@ -480,7 +483,10 @@ def create_app(
         )
 
     def tool_get_transcript_stats(args: dict[str, Any]) -> dict[str, Any]:
-        return transcript_stats()
+        return transcript_stats(
+            after_call_id=args.get("after_call_id"),
+            limit=validated_limit(optional_int_arg(args, "limit", 200)),
+        )
 
     def tool_get_events(args: dict[str, Any]) -> dict[str, Any]:
         return list_events(

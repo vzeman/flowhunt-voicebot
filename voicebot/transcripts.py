@@ -75,8 +75,8 @@ class TranscriptStore:
             )
         return result
 
-    def stats(self) -> dict:
-        summaries = self.summaries()
+    def stats(self, after_call_id: str | None = None, limit: int | None = None) -> dict:
+        summaries = self.summaries(after_call_id=after_call_id, limit=limit)
         skipped_line_count = sum(int(summary["skipped_line_count"]) for summary in summaries)
         corrupt_call_ids = [
             str(summary["call_id"])

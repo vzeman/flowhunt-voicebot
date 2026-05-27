@@ -158,7 +158,10 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "get_transcript_stats",
         "Read aggregate persisted transcript counts and corruption counters.",
-        (),
+        (
+            ToolArgument("after_call_id", "Optional call ID cursor.", required=False, schema={"type": ["string", "null"]}),
+            ToolArgument("limit", "Optional maximum number of transcript summaries to aggregate.", required=False, schema={"type": "integer"}),
+        ),
     ),
     ToolDefinition(
         "get_transcript",

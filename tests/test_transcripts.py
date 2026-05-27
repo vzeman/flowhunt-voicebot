@@ -151,6 +151,19 @@ class TranscriptTests(unittest.TestCase):
                 },
             )
 
+    def test_transcript_store_stats_can_page_by_call_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transcripts = TranscriptStore(directory)
+            transcripts.append(FakeEvent(1, "call-1", "call_started", "2026-05-27T00:00:00Z", {}))
+            transcripts.append(FakeEvent(2, "call-2", "call_started", "2026-05-27T00:00:01Z", {}))
+            transcripts.append(FakeEvent(3, "call-3", "call_started", "2026-05-27T00:00:02Z", {}))
+
+            stats = transcripts.stats(after_call_id="call-1", limit=1)
+
+            self.assertEqual(stats["transcript_count"], 1)
+            self.assertEqual(stats["event_count"], 1)
+            self.assertEqual(stats["corrupt_call_ids"], [])
+
     def test_transcript_store_ignores_invalid_event_ids_when_paging(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "call-1.jsonl"
@@ -244,6 +257,27 @@ class TranscriptTests(unittest.TestCase):
             client = TestClient(app)
 
             response = client.get("/transcripts/stats")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["transcript_count"], 1)
+            self.assertEqual(response.json()["event_count"], 1)
+
+    def test_transcript_stats_endpoint_applies_pagination(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transcripts = TranscriptStore(directory)
+            transcripts.append(FakeEvent(1, "call-1", "call_started", "2026-05-27T00:00:00Z", {}))
+            transcripts.append(FakeEvent(2, "call-2", "call_started", "2026-05-27T00:00:01Z", {}))
+            app = create_app(
+                EventStore(max_context_events=20),
+                CallRegistry(),
+                AgentTaskTracker(),
+                WebSocketHub(),
+                transcripts,
+                None,
+            )
+            client = TestClient(app)
+
+            response = client.get("/transcripts/stats?after_call_id=call-1&limit=1")
 
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["transcript_count"], 1)
@@ -380,6 +414,30 @@ class TranscriptTests(unittest.TestCase):
             client = TestClient(app)
 
             response = client.post("/agent/tools/get_transcript_stats", json={"arguments": {}})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["transcript_count"], 1)
+            self.assertEqual(response.json()["event_count"], 1)
+
+    def test_get_transcript_stats_agent_tool_applies_pagination(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transcripts = TranscriptStore(directory)
+            transcripts.append(FakeEvent(1, "call-1", "call_started", "2026-05-27T00:00:00Z", {}))
+            transcripts.append(FakeEvent(2, "call-2", "call_started", "2026-05-27T00:00:01Z", {}))
+            app = create_app(
+                EventStore(max_context_events=20),
+                CallRegistry(),
+                AgentTaskTracker(),
+                WebSocketHub(),
+                transcripts,
+                None,
+            )
+            client = TestClient(app)
+
+            response = client.post(
+                "/agent/tools/get_transcript_stats",
+                json={"arguments": {"after_call_id": "call-1", "limit": 1}},
+            )
 
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["transcript_count"], 1)

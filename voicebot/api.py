@@ -93,7 +93,7 @@ def create_app(
 
     @app.get("/events")
     def list_events(after: int = 0, call_id: str | None = None, limit: int = 200) -> dict[str, Any]:
-        result = [event_to_dict(event) for event in events.list_events(after=after, call_id=call_id, limit=limit)]
+        result = [event_to_dict(event) for event in events.list_events(after=after, call_id=call_id, limit=validated_limit(limit))]
         return {"events": result}
 
     @app.get("/events/catalog")
@@ -116,6 +116,7 @@ def create_app(
 
     @app.get("/agent/tasks")
     def agent_tasks(after: int = 0, call_id: str | None = None, limit: int = 200) -> dict[str, Any]:
+        limit = validated_limit(limit)
         all_events = [
             event
             for event in events.list_events(after=after, limit=1000)
@@ -403,7 +404,7 @@ def create_app(
         return list_events(
             after=int(args.get("after", 0)),
             call_id=args.get("call_id"),
-            limit=int(args.get("limit", 200)),
+            limit=validated_limit(int(args.get("limit", 200))),
         )
 
     def tool_get_metrics(args: dict[str, Any]) -> dict[str, Any]:
@@ -436,3 +437,11 @@ def require_arg(args: dict[str, Any], name: str) -> Any:
     if value is None or value == "":
         raise HTTPException(status_code=400, detail=f"missing required tool argument: {name}")
     return value
+
+
+def validated_limit(limit: int, *, maximum: int = 1000) -> int:
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="limit must be at least 1")
+    if limit > maximum:
+        raise HTTPException(status_code=400, detail=f"limit must be at most {maximum}")
+    return limit

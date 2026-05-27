@@ -58,6 +58,14 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([event["id"] for event in response.json()["pending"]], [first.id])
 
+    def test_agent_tasks_rejects_invalid_limit(self) -> None:
+        client, _events, _tracker = self.build_client()
+
+        response = client.get("/agent/tasks?limit=0")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "limit must be at least 1")
+
     def test_agent_tasks_omits_responded_events(self) -> None:
         client, events, tracker = self.build_client()
         first = events.append("call-1", "agent_response_requested", {"text": "first"})

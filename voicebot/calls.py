@@ -123,6 +123,10 @@ class CallSession:
         self.recording_event = threading.Event()
         self._ignore_input_until = 0.0
         self._ignore_input_lock = threading.Lock()
+        self._interrupt_generation = 0
+        self._interrupt_generation_lock = threading.Lock()
+        self._response_generation_lock = threading.Lock()
+        self._response_generations: dict[int, int] = {}
         self._speech_jobs: queue.Queue[tuple[int, np.ndarray]] = queue.Queue()
         self._active_turn = 0
         self._active_turn_lock = threading.Lock()
@@ -161,6 +165,19 @@ class CallSession:
             )
             return event
 
+        request_generation = self._response_generation(response.response_to_event_id)
+        if request_generation != self._current_interrupt_generation():
+            self.events.append(
+                self.call_id,
+                "agent_response_dropped",
+                {
+                    "reason": "stale_response_after_new_caller_speech",
+                    "response_to_event_id": response.response_to_event_id,
+                },
+            )
+            return event
+
+        interrupt_generation = request_generation
         try:
             frames = asyncio.run(
                 self.tts_pipeline.push(
@@ -215,12 +232,12 @@ class CallSession:
             )
             raise RuntimeError("TTS produced no audio")
 
-        if self.recording_event.is_set():
+        if self.recording_event.is_set() or interrupt_generation != self._current_interrupt_generation():
             self.events.append(
                 self.call_id,
                 "agent_response_dropped",
                 {
-                    "reason": "caller_started_speaking_during_tts",
+                    "reason": "caller_started_speaking_during_tts_or_after_request",
                     "response_to_event_id": response.response_to_event_id,
                 },
             )
@@ -262,7 +279,7 @@ class CallSession:
                     {"audiosocket_uuid": audiosocket_uuid, "transport": "asterisk_audiosocket"},
                 )
                 if self.settings.greet_on_connect:
-                    self.events.append(
+                    request = self.events.append(
                         self.call_id,
                         "agent_response_requested",
                         {
@@ -271,6 +288,7 @@ class CallSession:
                             "text": self.settings.connect_greeting_prompt,
                         },
                     )
+                    self._remember_response_generation(request.id)
                 continue
             if msg_type == MSG_DTMF:
                 self.events.append(self.call_id, "dtmf", {"digit": payload.decode(errors="replace")})
@@ -307,6 +325,7 @@ class CallSession:
                 speech_ms = sum(int(len(item) / CALL_SAMPLE_RATE * 1000) for item in collected)
                 turn_id = self._new_turn()
                 self.events.append(self.call_id, "user_speech_started", {"turn_id": turn_id, "level": level})
+                self._mark_interrupted("user_speech_started")
 
                 if self.playback.interrupt():
                     self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "user_speech_started"})
@@ -357,7 +376,7 @@ class CallSession:
                 if not isinstance(frame, TranscriptionFrame):
                     if isinstance(frame, TextFrame) and frame.kind == "agent_request":
                         transcript_frame_id = str(frame.data.get("transcript_frame_id", ""))
-                        self.events.append(
+                        request = self.events.append(
                             self.call_id,
                             "agent_response_requested",
                             {
@@ -366,6 +385,7 @@ class CallSession:
                                 "text": frame.text,
                             },
                         )
+                        self._remember_response_generation(request.id)
                     continue
 
                 if frame.kind == "transcription_started":
@@ -409,6 +429,7 @@ class CallSession:
         while not self.stop_event.is_set():
             if self.recording_event.is_set():
                 if self.playback.interrupt():
+                    self._mark_interrupted("caller_is_speaking")
                     self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "caller_is_speaking"})
                 packet = np.zeros(packet_samples, dtype=np.float32)
                 try:
@@ -451,6 +472,25 @@ class CallSession:
             return True
         with self._ignore_input_lock:
             return time.monotonic() < self._ignore_input_until
+
+    def _mark_interrupted(self, reason: str) -> int:
+        with self._interrupt_generation_lock:
+            self._interrupt_generation += 1
+            return self._interrupt_generation
+
+    def _current_interrupt_generation(self) -> int:
+        with self._interrupt_generation_lock:
+            return self._interrupt_generation
+
+    def _remember_response_generation(self, event_id: int) -> None:
+        with self._response_generation_lock:
+            self._response_generations[event_id] = self._current_interrupt_generation()
+
+    def _response_generation(self, event_id: int | None) -> int:
+        if event_id is None:
+            return self._current_interrupt_generation()
+        with self._response_generation_lock:
+            return self._response_generations.get(event_id, self._current_interrupt_generation())
 
 
 class CallRegistry:

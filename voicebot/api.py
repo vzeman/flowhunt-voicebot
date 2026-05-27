@@ -222,6 +222,7 @@ def create_app(
 
     @app.get("/agent/tasks/summary")
     def agent_task_summary(
+        after: int = 0,
         call_id: str | None = None,
         owner: str | None = None,
         limit: int = 200,
@@ -230,7 +231,7 @@ def create_app(
         active_call_ids = set(registry.active_call_ids())
         task_events = [
             event
-            for event in events.list_events(limit=1000, call_id=call_id)
+            for event in events.list_events(after=after, limit=1000, call_id=call_id)
             if event.type == "agent_response_requested"
         ]
         tasks = []
@@ -473,6 +474,7 @@ def create_app(
 
     def tool_get_agent_task_summary(args: dict[str, Any]) -> dict[str, Any]:
         return agent_task_summary(
+            after=optional_int_arg(args, "after", 0),
             call_id=args.get("call_id"),
             owner=args.get("owner"),
             limit=validated_limit(optional_int_arg(args, "limit", 200)),

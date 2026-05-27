@@ -106,6 +106,14 @@ Read pending agent tasks with compacted context:
 curl http://127.0.0.1:8080/agent/tasks
 ```
 
+Claim tasks before processing when multiple agent workers are running:
+
+```bash
+curl -X POST http://127.0.0.1:8080/agent/tasks/claim \
+  -H 'Content-Type: application/json' \
+  -d '{"event_ids":[123], "owner":"worker-1", "ttl_seconds":60}'
+```
+
 For parallel call handling, filter tasks to one call or bound each poll:
 
 ```bash

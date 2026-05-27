@@ -68,6 +68,52 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([event["id"] for event in response.json()["pending"]], [second.id])
 
+    def test_agent_task_claim_hides_claimed_events_until_expired(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+        second = events.append("call-1", "agent_response_requested", {"text": "second"})
+
+        claim_response = client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [first.id, second.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+        tasks_response = client.get("/agent/tasks?call_id=call-1")
+
+        self.assertEqual(claim_response.status_code, 200)
+        self.assertEqual(claim_response.json()["claimed_event_ids"], [first.id, second.id])
+        self.assertEqual(tasks_response.status_code, 200)
+        self.assertEqual(tasks_response.json()["pending"], [])
+
+    def test_agent_task_claim_skips_responded_events(self) -> None:
+        client, events, tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+        tracker.mark_responded(first.id)
+
+        response = client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["claimed_event_ids"], [])
+
+    def test_agent_task_claim_expires(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+
+        claim_response = client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 0.1},
+        )
+        self.assertEqual(claim_response.json()["claimed_event_ids"], [first.id])
+
+        import time
+
+        time.sleep(0.12)
+        tasks_response = client.get("/agent/tasks?call_id=call-1")
+
+        self.assertEqual([event["id"] for event in tasks_response.json()["pending"]], [first.id])
+
 
 if __name__ == "__main__":
     unittest.main()

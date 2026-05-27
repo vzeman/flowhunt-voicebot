@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import time
 import urllib.request
@@ -60,13 +61,32 @@ def control_tool(task: dict) -> tuple[str, dict] | None:
     return None
 
 
+def claim_tasks(base_url: str, tasks: list[dict], owner: str) -> list[dict]:
+    event_ids = [int(task["id"]) for task in tasks]
+    if not event_ids:
+        return []
+    response = http_json(
+        "POST",
+        f"{base_url}/agent/tasks/claim",
+        {"event_ids": event_ids, "owner": owner, "ttl_seconds": 30},
+    )
+    claimed_ids = set(response.get("claimed_event_ids", []))
+    return [task for task in tasks if task["id"] in claimed_ids]
+
+
 def main() -> None:
     args = parse_args()
+    owner = f"fast-test-agent:{os.getpid()}"
     seen: set[int] = set()
     while True:
         try:
             tasks = http_json("GET", f"{args.base_url}/agent/tasks").get("pending", [])
             pending = [task for task in tasks if task["id"] not in seen]
+            if not pending:
+                time.sleep(args.interval)
+                continue
+
+            pending = claim_tasks(args.base_url, pending, owner)
             if not pending:
                 time.sleep(args.interval)
                 continue

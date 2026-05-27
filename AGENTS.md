@@ -178,6 +178,14 @@ curl -X POST http://127.0.0.1:8080/agent/tools/send_dtmf \
   -d '{"arguments":{"call_id":"CALL_ID", "digit":"1"}}'
 ```
 
+Stop currently queued or playing bot audio without ending the call:
+
+```bash
+curl -X POST http://127.0.0.1:8080/agent/tools/stop_playback \
+  -H 'Content-Type: application/json' \
+  -d '{"arguments":{"call_id":"CALL_ID", "reason":"agent_requested"}}'
+```
+
 The control endpoint emits `call_control_requested` and
 `call_control_completed` events so the agent can observe whether the operation
 succeeded.

@@ -48,6 +48,16 @@ class AgentTaskTrackerTests(unittest.TestCase):
 
         self.assertTrue(tracker.is_pending(1))
 
+    def test_release_many_can_require_matching_owner(self) -> None:
+        tracker = AgentTaskTracker()
+        tracker.claim([1, 2], "worker-1", 30)
+
+        self.assertEqual(tracker.release_many([1], owner="worker-2"), [])
+        self.assertFalse(tracker.is_pending(1))
+        self.assertEqual(tracker.release_many([1], owner="worker-1"), [1])
+        self.assertTrue(tracker.is_pending(1))
+        self.assertEqual(tracker.release_many([2]), [2])
+
 
 if __name__ == "__main__":
     unittest.main()

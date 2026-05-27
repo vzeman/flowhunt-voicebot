@@ -155,7 +155,7 @@ def main() -> None:
         except (OSError, urllib.error.URLError, TimeoutError, RuntimeError) as exc:
             if claimed_pending:
                 try:
-                    release_tasks(args.base_url, claimed_pending)
+                    release_tasks(args.base_url, claimed_pending, owner)
                 except (OSError, urllib.error.URLError, TimeoutError, RuntimeError):
                     pass
                 claimed_pending = []

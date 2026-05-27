@@ -45,11 +45,12 @@ class AgentTaskTracker:
         with self._lock:
             self._claimed_event_ids.pop(event_id, None)
 
-    def release_many(self, event_ids: list[int]) -> list[int]:
+    def release_many(self, event_ids: list[int], owner: str | None = None) -> list[int]:
         released: list[int] = []
         with self._lock:
             for event_id in event_ids:
-                if event_id in self._claimed_event_ids:
+                claim = self._claimed_event_ids.get(event_id)
+                if claim is not None and (owner is None or claim[0] == owner):
                     self._claimed_event_ids.pop(event_id, None)
                     released.append(event_id)
         return released

@@ -168,7 +168,7 @@ def create_app(
 
     @app.post("/agent/tasks/release")
     def release_agent_tasks(request: AgentTaskReleaseRequest) -> dict[str, Any]:
-        released_event_ids = tracker.release_many(request.event_ids)
+        released_event_ids = tracker.release_many(request.event_ids, owner=request.owner)
         for event_id in released_event_ids:
             source_event = events.get_event(event_id)
             if source_event is None:
@@ -176,7 +176,7 @@ def create_app(
             events.append(
                 source_event.call_id,
                 "agent_task_released",
-                {"task_event_id": event_id},
+                {"task_event_id": event_id, "owner": request.owner},
             )
         return {"released_event_ids": released_event_ids}
 

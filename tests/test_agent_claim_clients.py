@@ -44,13 +44,13 @@ class AgentClaimClientTests(unittest.TestCase):
 
         with patch("local_command_agent.http_json") as http_json:
             http_json.return_value = {"released_event_ids": [1, 2]}
-            response = release_tasks("http://voicebot", tasks)
+            response = release_tasks("http://voicebot", tasks, "worker-1")
 
         self.assertEqual(response, {"released_event_ids": [1, 2]})
         http_json.assert_called_once_with(
             "POST",
             "http://voicebot/agent/tasks/release",
-            {"event_ids": [1, 2]},
+            {"event_ids": [1, 2], "owner": "worker-1"},
         )
 
 

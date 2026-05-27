@@ -39,3 +39,4 @@ class AgentTaskClaimRequest(BaseModel):
 
 class AgentTaskReleaseRequest(BaseModel):
     event_ids: list[int]
+    owner: str | None = None

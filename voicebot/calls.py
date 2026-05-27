@@ -151,7 +151,25 @@ class CallSession:
                 },
             )
             return event
-        audio, duration = self.tts.synthesize(response.text)
+        self.events.append(
+            self.call_id,
+            "tts_started",
+            {"text": response.text, "response_to_event_id": response.response_to_event_id},
+        )
+        try:
+            audio, duration = self.tts.synthesize(response.text)
+        except Exception as exc:
+            self.events.append(
+                self.call_id,
+                "tts_failed",
+                {"error": str(exc), "response_to_event_id": response.response_to_event_id},
+            )
+            raise
+        self.events.append(
+            self.call_id,
+            "tts_finished",
+            {"duration": duration, "response_to_event_id": response.response_to_event_id},
+        )
         if self.recording_event.is_set():
             self.events.append(
                 self.call_id,
@@ -163,7 +181,11 @@ class CallSession:
             )
             return event
         self.playback.enqueue(audio)
-        self.events.append(self.call_id, "system", {"message": "agent response queued", "duration": duration})
+        self.events.append(
+            self.call_id,
+            "agent_response_queued",
+            {"duration": duration, "response_to_event_id": response.response_to_event_id},
+        )
         return event
 
     def _receive_loop(self) -> None:
@@ -187,6 +209,21 @@ class CallSession:
                 if self._call_id_change_callback is not None:
                     self._call_id_change_callback(old_call_id, self)
                 self.events.append(self.call_id, "call_started", {"audiosocket_uuid": audiosocket_uuid})
+                connected = self.events.append(
+                    self.call_id,
+                    "call_connected",
+                    {"audiosocket_uuid": audiosocket_uuid, "transport": "asterisk_audiosocket"},
+                )
+                if self.settings.greet_on_connect:
+                    self.events.append(
+                        self.call_id,
+                        "agent_response_requested",
+                        {
+                            "reason": "call_connected",
+                            "trigger_event_id": connected.id,
+                            "text": self.settings.connect_greeting_prompt,
+                        },
+                    )
                 continue
             if msg_type == MSG_DTMF:
                 self.events.append(self.call_id, "dtmf", {"digit": payload.decode(errors="replace")})
@@ -248,11 +285,13 @@ class CallSession:
                 continue
 
             started = time.perf_counter()
+            self.events.append(self.call_id, "stt_started", {"turn_id": turn_id})
             text = self.stt.transcribe(audio)
             elapsed = time.perf_counter() - started
             if not text:
-                self.events.append(self.call_id, "system", {"message": "no text recognized", "turn_id": turn_id})
+                self.events.append(self.call_id, "stt_no_text", {"turn_id": turn_id, "elapsed": elapsed})
                 continue
+            self.events.append(self.call_id, "stt_finished", {"turn_id": turn_id, "elapsed": elapsed})
 
             transcript = self.events.append(
                 self.call_id,

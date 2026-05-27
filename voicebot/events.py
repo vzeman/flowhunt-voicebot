@@ -11,15 +11,23 @@ from .transcripts import TranscriptStore
 
 EventType = Literal[
     "call_started",
+    "call_connected",
     "call_ended",
     "call_control_requested",
     "call_control_completed",
     "user_speech_started",
     "user_speech_finished",
+    "stt_started",
+    "stt_finished",
+    "stt_no_text",
     "user_transcript",
     "agent_response_requested",
     "agent_response_received",
     "agent_response_dropped",
+    "agent_response_queued",
+    "tts_started",
+    "tts_finished",
+    "tts_failed",
     "bot_playback_started",
     "bot_playback_interrupted",
     "bot_playback_finished",
@@ -96,7 +104,15 @@ class EventStore:
         if self._summary:
             lines.append(self._summary)
         for event in overflow:
-            if event.type in {"user_transcript", "agent_response_received", "call_started", "call_ended"}:
+            if event.type in {
+                "call_started",
+                "call_connected",
+                "call_ended",
+                "user_transcript",
+                "agent_response_requested",
+                "agent_response_received",
+                "call_control_completed",
+            }:
                 lines.append(f"{event.timestamp} {event.call_id} {event.type}: {event.data}")
         self._summary = "\n".join(lines)[-6000:]
 

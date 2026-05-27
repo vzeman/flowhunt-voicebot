@@ -12,6 +12,13 @@ def env_float(name: str, default: float) -> float:
     return float(os.getenv(name, str(default)))
 
 
+def env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     api_host: str = os.getenv("VOICEBOT_API_HOST", "0.0.0.0")
@@ -37,6 +44,11 @@ class Settings:
 
     max_context_events: int = env_int("VOICEBOT_MAX_CONTEXT_EVENTS", 80)
     transcript_dir: str = os.getenv("VOICEBOT_TRANSCRIPT_DIR", "/data/transcripts")
+    greet_on_connect: bool = env_bool("VOICEBOT_GREET_ON_CONNECT", True)
+    connect_greeting_prompt: str = os.getenv(
+        "VOICEBOT_CONNECT_GREETING_PROMPT",
+        "The call has connected. Greet the caller and ask how you can help.",
+    )
 
     ami_host: str = os.getenv("VOICEBOT_AMI_HOST", "asterisk")
     ami_port: int = env_int("VOICEBOT_AMI_PORT", 5038)

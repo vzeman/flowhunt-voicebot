@@ -20,6 +20,8 @@ services:
       VOICEBOT_AMI_USERNAME: voicebot
       VOICEBOT_AMI_PASSWORD: ${AMI_PASSWORD:-voicebot-local-dev}
       VOICEBOT_TRANSCRIPT_DIR: /data/transcripts
+      VOICEBOT_GREET_ON_CONNECT: ${VOICEBOT_GREET_ON_CONNECT:-true}
+      VOICEBOT_CONNECT_GREETING_PROMPT: "${VOICEBOT_CONNECT_GREETING_PROMPT:-The call has connected. Greet the caller and ask how you can help.}"
     volumes:
       - voicebot-cache:/root/.cache
       - voicebot-data:/data

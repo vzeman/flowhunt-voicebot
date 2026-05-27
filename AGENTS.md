@@ -5,18 +5,70 @@ waits for an external AI agent to answer asynchronously.
 
 ## Event Flow
 
-1. Caller speaks.
-2. STT produces a `user_transcript` event.
-3. Voicebot emits `agent_response_requested`.
-4. External agent reads pending tasks from `/agent/tasks`.
-5. External agent posts an answer to `/calls/{call_id}/responses`.
-6. Voicebot synthesizes that text and streams it back to the SIP call.
+1. Asterisk connects a call and the service emits `call_started` and
+   `call_connected`.
+2. If `VOICEBOT_GREET_ON_CONNECT=true`, voicebot emits
+   `agent_response_requested` with `reason=call_connected` so the agent can
+   greet the caller immediately.
+3. Caller speaks.
+4. STT produces a `user_transcript` event.
+5. Voicebot emits `agent_response_requested` with the recognized text.
+6. External agent reads pending tasks from `/agent/tasks`.
+7. External agent posts an answer or calls a tool.
+8. Voicebot synthesizes spoken responses and streams them back to the SIP call.
 
 If the caller starts speaking while audio is playing, playback is interrupted
 and the new turn becomes the next pending task.
 
 Every event is also written to a per-call JSONL transcript under the service's
 transcript directory. Docker stores this in the `voicebot-data` volume.
+
+## Event Catalog
+
+Call lifecycle:
+
+- `call_started`: AudioSocket session was created and call ID is known.
+- `call_connected`: Call media is connected and the agent may greet the caller.
+- `call_ended`: AudioSocket session ended.
+
+Caller media and STT:
+
+- `user_speech_started`: VAD detected caller speech.
+- `user_speech_finished`: VAD detected end of caller speech.
+- `stt_started`: STT started for a speech turn.
+- `stt_finished`: STT finished and recognized text.
+- `stt_no_text`: STT finished without usable text.
+- `user_transcript`: Recognized caller text.
+- `dtmf`: Caller sent a DTMF digit.
+
+Agent tasks and responses:
+
+- `agent_response_requested`: Agent should decide what to do. Reasons include
+  `call_connected` and caller transcript turns.
+- `agent_response_received`: Service received a response from an agent.
+- `agent_response_dropped`: Response was intentionally not played, usually
+  because the caller was already speaking.
+- `agent_response_queued`: Response audio was queued for playback.
+
+TTS and playback:
+
+- `tts_started`: TTS synthesis started.
+- `tts_finished`: TTS synthesis finished.
+- `tts_failed`: TTS synthesis failed.
+- `bot_playback_started`: Bot audio started playing to the call.
+- `bot_playback_interrupted`: Playback was stopped because caller speech won.
+- `bot_playback_finished`: Queued bot audio finished playing.
+
+Control and context:
+
+- `call_control_requested`: Agent or API requested a call control action.
+- `call_control_completed`: Asterisk returned a result for the control action.
+- `context_compacted`: Long event context was summarized.
+- `system`: Operational fallback event for unexpected or low-level conditions.
+
+New provider-specific events should be additive. Agents should ignore event
+types they do not understand and rely on `call_id`, `type`, `timestamp`, and
+`data` being present on every event.
 
 ## HTTP API
 

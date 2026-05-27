@@ -48,9 +48,11 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
     pending_lines = []
     for task in tasks:
         data = task.get("data", {})
+        reason = data.get("reason", "user_transcript")
+        label = "instruction" if reason == "call_connected" else "user said"
         pending_lines.append(
             f"- event_id={task['id']} call_id={task['call_id']} "
-            f"user said: {data.get('text', '')}"
+            f"reason={reason} {label}: {data.get('text', '')}"
         )
     output_format = {
         "say": "text to speak, if any",

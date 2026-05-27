@@ -4,7 +4,8 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from voicebot.api import AgentTaskTracker, WebSocketHub, create_app
+from voicebot.agent_tasks import AgentTaskTracker
+from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
 from voicebot.event_catalog import event_catalog, missing_catalog_event_types
 from voicebot.events import EventStore

@@ -390,6 +390,17 @@ class CallSession:
 
                 if frame.kind == "transcription_started":
                     self.events.append(self.call_id, "stt_started", {"turn_id": frame.turn_id})
+                elif frame.kind == "transcription_partial":
+                    self.events.append(
+                        self.call_id,
+                        "user_transcript_partial",
+                        {
+                            "turn_id": frame.turn_id,
+                            "text": frame.text,
+                            "elapsed": frame.data.get("elapsed"),
+                            "metadata": frame.metadata,
+                        },
+                    )
                 elif frame.kind == "transcription_empty":
                     self.events.append(
                         self.call_id,

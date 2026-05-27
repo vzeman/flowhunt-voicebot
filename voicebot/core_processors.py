@@ -22,6 +22,9 @@ class STTService(Protocol):
     def transcribe(self, call_audio):
         raise NotImplementedError
 
+    def transcribe_stream(self, call_audio):
+        raise NotImplementedError
+
 
 class TTSService(Protocol):
     def synthesize(self, text: str):
@@ -80,37 +83,76 @@ class STTProcessor(FrameProcessorBase):
         turn_id = int(frame.data["turn_id"])
         started = TranscriptionFrame("transcription_started", frame.call_id, turn_id, trace_id=frame.trace_id)
         start_time = time.perf_counter()
-        result = self.stt.transcribe(frame.audio)
-        elapsed = time.perf_counter() - start_time
-        metadata = result.metadata or {}
-        if not result.text:
-            empty = TranscriptionFrame(
-                "transcription_empty",
-                frame.call_id,
-                turn_id,
-                metadata=metadata,
-                trace_id=frame.trace_id,
-                data={"elapsed": elapsed, "reason": result.reason or "empty_result"},
-            )
-            return [started, empty]
+        output: list[Frame] = [started]
+        final_seen = False
+        transcribe_stream = getattr(self.stt, "transcribe_stream", None)
+        results = transcribe_stream(frame.audio) if transcribe_stream else [self.stt.transcribe(frame.audio)]
+        for result in results:
+            elapsed = time.perf_counter() - start_time
+            metadata = result.metadata or {}
+            is_final = getattr(result, "is_final", True)
+            if not result.text:
+                if is_final:
+                    output.append(
+                        TranscriptionFrame(
+                            "transcription_empty",
+                            frame.call_id,
+                            turn_id,
+                            metadata=metadata,
+                            trace_id=frame.trace_id,
+                            data={"elapsed": elapsed, "reason": result.reason or "empty_result"},
+                        )
+                    )
+                    final_seen = True
+                continue
 
-        finished = TranscriptionFrame(
-            "transcription_finished",
-            frame.call_id,
-            turn_id,
-            metadata=metadata,
-            trace_id=frame.trace_id,
-            data={"elapsed": elapsed},
-        )
-        transcript = TranscriptionFrame(
-            "user_transcript",
-            frame.call_id,
-            turn_id,
-            text=result.text,
-            trace_id=frame.trace_id,
-            data={"elapsed": elapsed},
-        )
-        return [started, finished, transcript]
+            if not is_final:
+                output.append(
+                    TranscriptionFrame(
+                        "transcription_partial",
+                        frame.call_id,
+                        turn_id,
+                        text=result.text,
+                        metadata=metadata,
+                        trace_id=frame.trace_id,
+                        data={"elapsed": elapsed},
+                    )
+                )
+                continue
+
+            output.append(
+                TranscriptionFrame(
+                    "transcription_finished",
+                    frame.call_id,
+                    turn_id,
+                    metadata=metadata,
+                    trace_id=frame.trace_id,
+                    data={"elapsed": elapsed},
+                )
+            )
+            output.append(
+                TranscriptionFrame(
+                    "user_transcript",
+                    frame.call_id,
+                    turn_id,
+                    text=result.text,
+                    trace_id=frame.trace_id,
+                    data={"elapsed": elapsed},
+                )
+            )
+            final_seen = True
+        if not final_seen:
+            elapsed = time.perf_counter() - start_time
+            output.append(
+                TranscriptionFrame(
+                    "transcription_empty",
+                    frame.call_id,
+                    turn_id,
+                    trace_id=frame.trace_id,
+                    data={"elapsed": elapsed, "reason": "empty_stream"},
+                )
+            )
+        return output
 
 
 class AgentRequestProcessor(FrameProcessorBase):

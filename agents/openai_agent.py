@@ -22,6 +22,7 @@ from local_command_agent import (
     attach_response_event_id,
     build_prompt,
     build_retry_prompt,
+    ClaimRenewer,
     claim_tasks,
     execute_tool_call,
     fast_tool_call,
@@ -92,38 +93,28 @@ def main() -> None:
                 continue
             claimed_pending = pending
 
-            latest = pending[-1]
-            deterministic_call = fast_tool_call(latest)
-            if deterministic_call:
-                execute_tool_call(args.base_url, deterministic_call)
-                seen.add(latest["id"])
-                print(
-                    f"executed deterministic tool {deterministic_call['name']} for event {latest['id']}",
-                    flush=True,
-                )
-                continue
+            ttl_seconds = max(args.timeout * 2, 30.0)
+            with ClaimRenewer(args.base_url, pending, owner, ttl_seconds):
+                latest = pending[-1]
+                deterministic_call = fast_tool_call(latest)
+                if deterministic_call:
+                    execute_tool_call(args.base_url, deterministic_call)
+                    seen.add(latest["id"])
+                    print(
+                        f"executed deterministic tool {deterministic_call['name']} for event {latest['id']}",
+                        flush=True,
+                    )
+                    claimed_pending = []
+                    continue
 
-            legacy_tools = http_json("GET", f"{args.base_url}/agent/tools").get("tools", [])
-            native_tools = http_json("GET", f"{args.base_url}/agent/tools/schema").get("tools", [])
-            prompt = build_prompt(pending, response.get("context", {}), legacy_tools)
-            raw_answer, native_tool_calls = agent_providers.run(
-                client,
-                provider,
-                args.model,
-                prompt,
-                args.timeout,
-                args.max_output_tokens,
-                native_tools,
-            )
-            answer, parsed_tool_calls = parse_agent_output(raw_answer)
-            tool_calls = [*native_tool_calls, *parsed_tool_calls]
-            if answer and is_echo_answer(answer, pending):
-                retry_prompt = build_retry_prompt(prompt, answer)
+                legacy_tools = http_json("GET", f"{args.base_url}/agent/tools").get("tools", [])
+                native_tools = http_json("GET", f"{args.base_url}/agent/tools/schema").get("tools", [])
+                prompt = build_prompt(pending, response.get("context", {}), legacy_tools)
                 raw_answer, native_tool_calls = agent_providers.run(
                     client,
                     provider,
                     args.model,
-                    retry_prompt,
+                    prompt,
                     args.timeout,
                     args.max_output_tokens,
                     native_tools,
@@ -131,23 +122,36 @@ def main() -> None:
                 answer, parsed_tool_calls = parse_agent_output(raw_answer)
                 tool_calls = [*native_tool_calls, *parsed_tool_calls]
                 if answer and is_echo_answer(answer, pending):
-                    raise RuntimeError(f"OpenAI agent returned echo response twice: {answer}")
+                    retry_prompt = build_retry_prompt(prompt, answer)
+                    raw_answer, native_tool_calls = agent_providers.run(
+                        client,
+                        provider,
+                        args.model,
+                        retry_prompt,
+                        args.timeout,
+                        args.max_output_tokens,
+                        native_tools,
+                    )
+                    answer, parsed_tool_calls = parse_agent_output(raw_answer)
+                    tool_calls = [*native_tool_calls, *parsed_tool_calls]
+                    if answer and is_echo_answer(answer, pending):
+                        raise RuntimeError(f"OpenAI agent returned echo response twice: {answer}")
 
-            tool_calls = attach_response_event_id(tool_calls, latest["id"])
-            for call in tool_calls:
-                execute_tool_call(args.base_url, call)
-            if answer:
-                execute_tool_call(
-                    args.base_url,
-                    {
-                        "name": "say",
-                        "arguments": {
-                            "call_id": latest["call_id"],
-                            "text": answer,
-                            "response_to_event_id": latest["id"],
+                tool_calls = attach_response_event_id(tool_calls, latest["id"])
+                for call in tool_calls:
+                    execute_tool_call(args.base_url, call)
+                if answer:
+                    execute_tool_call(
+                        args.base_url,
+                        {
+                            "name": "say",
+                            "arguments": {
+                                "call_id": latest["call_id"],
+                                "text": answer,
+                                "response_to_event_id": latest["id"],
+                            },
                         },
-                    },
-                )
+                    )
             for task in pending:
                 seen.add(task["id"])
             claimed_pending = []

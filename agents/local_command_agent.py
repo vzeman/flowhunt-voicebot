@@ -24,6 +24,7 @@ import re
 import shlex
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -219,6 +220,43 @@ def release_tasks(base_url: str, tasks: list[dict], owner: str | None = None) ->
     return http_json("POST", f"{base_url}/agent/tasks/release", payload)
 
 
+def renew_tasks(base_url: str, tasks: list[dict], owner: str, ttl_seconds: float) -> dict:
+    event_ids = [int(task["id"]) for task in tasks]
+    if not event_ids:
+        return {"renewed_event_ids": []}
+    return http_json(
+        "POST",
+        f"{base_url}/agent/tasks/renew",
+        {"event_ids": event_ids, "owner": owner, "ttl_seconds": ttl_seconds},
+    )
+
+
+class ClaimRenewer:
+    def __init__(self, base_url: str, tasks: list[dict], owner: str, ttl_seconds: float) -> None:
+        self.base_url = base_url
+        self.tasks = tasks
+        self.owner = owner
+        self.ttl_seconds = ttl_seconds
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def __enter__(self) -> ClaimRenewer:
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        self._stop.set()
+        self._thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        interval = max(1.0, self.ttl_seconds / 2)
+        while not self._stop.wait(interval):
+            try:
+                renew_tasks(self.base_url, self.tasks, self.owner, self.ttl_seconds)
+            except (OSError, urllib.error.URLError, TimeoutError, RuntimeError):
+                pass
+
+
 def attach_response_event_id(tool_calls: list[dict], event_id: int) -> list[dict]:
     for call in tool_calls:
         arguments = call.setdefault("arguments", {})
@@ -336,41 +374,44 @@ def main() -> None:
                 continue
             claimed_pending = pending
 
-            latest = pending[-1]
-            deterministic_call = fast_tool_call(latest)
-            if deterministic_call:
-                execute_tool_call(args.base_url, deterministic_call)
-                seen.add(latest["id"])
-                print(
-                    f"executed deterministic tool {deterministic_call['name']} for event {latest['id']}",
-                    flush=True,
-                )
-                continue
+            ttl_seconds = max(args.command_timeout * 2, 30.0)
+            with ClaimRenewer(args.base_url, pending, owner, ttl_seconds):
+                latest = pending[-1]
+                deterministic_call = fast_tool_call(latest)
+                if deterministic_call:
+                    execute_tool_call(args.base_url, deterministic_call)
+                    seen.add(latest["id"])
+                    print(
+                        f"executed deterministic tool {deterministic_call['name']} for event {latest['id']}",
+                        flush=True,
+                    )
+                    claimed_pending = []
+                    continue
 
-            tools = http_json("GET", f"{args.base_url}/agent/tools").get("tools", [])
-            prompt = build_prompt(pending, response.get("context", {}), tools)
-            raw_answer = run_agent_command(args.command, prompt, args.command_timeout)
-            answer, tool_calls = parse_agent_output(raw_answer)
-            if answer and is_echo_answer(answer, pending):
-                raw_answer = run_agent_command(args.command, build_retry_prompt(prompt, answer), args.command_timeout)
+                tools = http_json("GET", f"{args.base_url}/agent/tools").get("tools", [])
+                prompt = build_prompt(pending, response.get("context", {}), tools)
+                raw_answer = run_agent_command(args.command, prompt, args.command_timeout)
                 answer, tool_calls = parse_agent_output(raw_answer)
                 if answer and is_echo_answer(answer, pending):
-                    raise RuntimeError(f"agent returned echo response twice: {answer}")
-            tool_calls = attach_response_event_id(tool_calls, latest["id"])
-            for call in tool_calls:
-                execute_tool_call(args.base_url, call)
-            if answer:
-                execute_tool_call(
-                    args.base_url,
-                    {
-                        "name": "say",
-                        "arguments": {
-                            "call_id": latest["call_id"],
-                            "text": answer,
-                            "response_to_event_id": latest["id"],
+                    raw_answer = run_agent_command(args.command, build_retry_prompt(prompt, answer), args.command_timeout)
+                    answer, tool_calls = parse_agent_output(raw_answer)
+                    if answer and is_echo_answer(answer, pending):
+                        raise RuntimeError(f"agent returned echo response twice: {answer}")
+                tool_calls = attach_response_event_id(tool_calls, latest["id"])
+                for call in tool_calls:
+                    execute_tool_call(args.base_url, call)
+                if answer:
+                    execute_tool_call(
+                        args.base_url,
+                        {
+                            "name": "say",
+                            "arguments": {
+                                "call_id": latest["call_id"],
+                                "text": answer,
+                                "response_to_event_id": latest["id"],
+                            },
                         },
-                    },
-                )
+                    )
             for task in pending:
                 seen.add(task["id"])
             claimed_pending = []

@@ -220,6 +220,38 @@ def create_app(
     def agent_task_status(owner: str | None = None) -> dict[str, Any]:
         return tracker.snapshot(owner=owner)
 
+    @app.get("/agent/tasks/summary")
+    def agent_task_summary(
+        call_id: str | None = None,
+        owner: str | None = None,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        limit = validated_limit(limit)
+        active_call_ids = set(registry.active_call_ids())
+        task_events = [
+            event
+            for event in events.list_events(limit=1000, call_id=call_id)
+            if event.type == "agent_response_requested"
+        ]
+        tasks = []
+        counts: dict[str, int] = {}
+        for event in task_events:
+            state = tracker.task_state(event.id, active=event.call_id in active_call_ids)
+            if owner is not None and state.get("state") == "claimed" and state.get("owner") != owner:
+                continue
+            entry = {
+                "event": event_to_dict(event),
+                **state,
+            }
+            tasks.append(entry)
+            state_name = str(state["state"])
+            counts[state_name] = counts.get(state_name, 0) + 1
+        return {
+            "tasks": tasks[:limit],
+            "counts": counts,
+            "active_calls": sorted(active_call_ids),
+        }
+
     @app.get("/agent/tools")
     def agent_tools() -> dict[str, Any]:
         return {"tools": tool_definitions_legacy()}
@@ -439,6 +471,13 @@ def create_app(
     def tool_get_agent_task_status(args: dict[str, Any]) -> dict[str, Any]:
         return agent_task_status(owner=args.get("owner"))
 
+    def tool_get_agent_task_summary(args: dict[str, Any]) -> dict[str, Any]:
+        return agent_task_summary(
+            call_id=args.get("call_id"),
+            owner=args.get("owner"),
+            limit=validated_limit(optional_int_arg(args, "limit", 200)),
+        )
+
     tool_executor.register("say", tool_say)
     tool_executor.register("hangup_call", tool_hangup_call)
     tool_executor.register("transfer_call", tool_transfer_call)
@@ -452,6 +491,7 @@ def create_app(
     tool_executor.register("get_call_state", tool_get_call_state)
     tool_executor.register("get_runtime_config", tool_get_runtime_config)
     tool_executor.register("get_agent_task_status", tool_get_agent_task_status)
+    tool_executor.register("get_agent_task_summary", tool_get_agent_task_summary)
 
     return app
 

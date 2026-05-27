@@ -18,6 +18,7 @@ ToolName = Literal[
     "get_call_state",
     "get_runtime_config",
     "get_agent_task_status",
+    "get_agent_task_summary",
 ]
 
 
@@ -170,6 +171,15 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         "get_agent_task_status",
         "Read agent task response and claim status.",
         (ToolArgument("owner", "Optional claim owner filter.", required=False, schema={"type": ["string", "null"]}),),
+    ),
+    ToolDefinition(
+        "get_agent_task_summary",
+        "List agent task events with pending, claimed, responded, or inactive state.",
+        (
+            ToolArgument("call_id", "Optional call filter.", required=False, schema={"type": ["string", "null"]}),
+            ToolArgument("owner", "Optional claim owner filter.", required=False, schema={"type": ["string", "null"]}),
+            ToolArgument("limit", "Optional maximum number of tasks.", required=False, schema={"type": "integer"}),
+        ),
     ),
 )
 

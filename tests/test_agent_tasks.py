@@ -247,6 +247,62 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.json()["claims"]), [str(first.id)])
 
+    def test_agent_task_summary_classifies_tasks(self) -> None:
+        client, events, tracker = self.build_client()
+        responded = events.append("call-1", "agent_response_requested", {"text": "responded"})
+        claimed = events.append("call-1", "agent_response_requested", {"text": "claimed"})
+        pending = events.append("call-2", "agent_response_requested", {"text": "pending"})
+        inactive = events.append("inactive", "agent_response_requested", {"text": "inactive"})
+        tracker.mark_responded(responded.id)
+        client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [claimed.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+
+        response = client.get("/agent/tasks/summary")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        states = {task["event"]["id"]: task["state"] for task in payload["tasks"]}
+        self.assertEqual(states[responded.id], "responded")
+        self.assertEqual(states[claimed.id], "claimed")
+        self.assertEqual(states[pending.id], "pending")
+        self.assertEqual(states[inactive.id], "inactive")
+        self.assertEqual(payload["counts"], {"responded": 1, "claimed": 1, "pending": 1, "inactive": 1})
+
+    def test_agent_task_summary_filters_by_call_owner_and_limit(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+        second = events.append("call-1", "agent_response_requested", {"text": "second"})
+        events.append("call-2", "agent_response_requested", {"text": "other"})
+        client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+        client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [second.id], "owner": "worker-2", "ttl_seconds": 30},
+        )
+
+        response = client.get("/agent/tasks/summary?call_id=call-1&owner=worker-1&limit=1")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([task["event"]["id"] for task in payload["tasks"]], [first.id])
+        self.assertEqual(payload["counts"], {"claimed": 1})
+
+    def test_get_agent_task_summary_tool_reports_classified_tasks(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+
+        response = client.post(
+            "/agent/tools/get_agent_task_summary",
+            json={"arguments": {"call_id": "call-1", "limit": 1}},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([task["event"]["id"] for task in response.json()["tasks"]], [first.id])
+
     def test_agent_task_renew_extends_matching_claims(self) -> None:
         client, events, _tracker = self.build_client()
         first = events.append("call-1", "agent_response_requested", {"text": "first"})

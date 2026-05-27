@@ -217,8 +217,8 @@ def create_app(
         return {"renewed_event_ids": renewed_event_ids, "owner": request.owner}
 
     @app.get("/agent/tasks/status")
-    def agent_task_status() -> dict[str, Any]:
-        return tracker.snapshot()
+    def agent_task_status(owner: str | None = None) -> dict[str, Any]:
+        return tracker.snapshot(owner=owner)
 
     @app.get("/agent/tools")
     def agent_tools() -> dict[str, Any]:
@@ -436,6 +436,9 @@ def create_app(
     def tool_get_runtime_config(args: dict[str, Any]) -> dict[str, Any]:
         return config()
 
+    def tool_get_agent_task_status(args: dict[str, Any]) -> dict[str, Any]:
+        return agent_task_status(owner=args.get("owner"))
+
     tool_executor.register("say", tool_say)
     tool_executor.register("hangup_call", tool_hangup_call)
     tool_executor.register("transfer_call", tool_transfer_call)
@@ -448,6 +451,7 @@ def create_app(
     tool_executor.register("get_active_calls", tool_get_active_calls)
     tool_executor.register("get_call_state", tool_get_call_state)
     tool_executor.register("get_runtime_config", tool_get_runtime_config)
+    tool_executor.register("get_agent_task_status", tool_get_agent_task_status)
 
     return app
 

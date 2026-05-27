@@ -216,6 +216,37 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual(payload["claims"][str(second.id)]["owner"], "worker-1")
         self.assertGreater(payload["claims"][str(second.id)]["expires_in_seconds"], 0)
 
+    def test_agent_task_status_can_filter_claims_by_owner(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+        second = events.append("call-2", "agent_response_requested", {"text": "second"})
+        client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+        client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [second.id], "owner": "worker-2", "ttl_seconds": 30},
+        )
+
+        response = client.get("/agent/tasks/status?owner=worker-1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.json()["claims"]), [str(first.id)])
+
+    def test_get_agent_task_status_tool_reports_claims(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+        client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+
+        response = client.post("/agent/tools/get_agent_task_status", json={"arguments": {"owner": "worker-1"}})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.json()["claims"]), [str(first.id)])
+
     def test_agent_task_renew_extends_matching_claims(self) -> None:
         client, events, _tracker = self.build_client()
         first = events.append("call-1", "agent_response_requested", {"text": "first"})

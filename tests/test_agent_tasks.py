@@ -229,6 +229,13 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual(wrong_owner.json()["renewed_event_ids"], [])
         self.assertEqual(renewed.status_code, 200)
         self.assertEqual(renewed.json()["renewed_event_ids"], [first.id])
+        renew_events = [
+            event
+            for event in events.list_events(call_id="call-1")
+            if event.type == "agent_task_renewed"
+        ]
+        self.assertEqual([event.data["task_event_id"] for event in renew_events], [first.id])
+        self.assertEqual([event.data["owner"] for event in renew_events], ["worker-1"])
 
 
 if __name__ == "__main__":

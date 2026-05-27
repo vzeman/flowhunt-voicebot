@@ -184,6 +184,19 @@ def create_app(
     @app.post("/agent/tasks/renew")
     def renew_agent_tasks(request: AgentTaskRenewRequest) -> dict[str, Any]:
         renewed_event_ids = tracker.renew_many(request.event_ids, request.owner, request.ttl_seconds)
+        for event_id in renewed_event_ids:
+            source_event = events.get_event(event_id)
+            if source_event is None:
+                continue
+            events.append(
+                source_event.call_id,
+                "agent_task_renewed",
+                {
+                    "task_event_id": event_id,
+                    "owner": request.owner,
+                    "ttl_seconds": request.ttl_seconds,
+                },
+            )
         return {"renewed_event_ids": renewed_event_ids, "owner": request.owner}
 
     @app.get("/agent/tasks/status")

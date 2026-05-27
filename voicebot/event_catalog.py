@@ -40,6 +40,8 @@ EVENT_CATALOG: tuple[EventCatalogEntry, ...] = (
     EventCatalogEntry("agent_response_received", "agent", "Service received a final response from an agent."),
     EventCatalogEntry("agent_response_dropped", "agent", "Agent response was intentionally not played."),
     EventCatalogEntry("agent_response_queued", "agent", "Agent response audio was queued for playback."),
+    EventCatalogEntry("agent_task_claimed", "agent", "Agent worker claimed an agent response task."),
+    EventCatalogEntry("agent_task_released", "agent", "Agent worker released a previously claimed task."),
     EventCatalogEntry("tts_started", "tts", "Text-to-speech synthesis started."),
     EventCatalogEntry("tts_finished", "tts", "Text-to-speech synthesis finished."),
     EventCatalogEntry("tts_failed", "tts", "Text-to-speech synthesis failed."),

@@ -51,6 +51,8 @@ Agent tasks and responses:
 - `agent_response_dropped`: Response was intentionally not played, usually
   because the caller was already speaking.
 - `agent_response_queued`: Response audio was queued for playback.
+- `agent_task_claimed`: Agent worker claimed an agent response task.
+- `agent_task_released`: Agent worker released a previously claimed task.
 
 TTS and playback:
 

@@ -83,6 +83,13 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual(claim_response.json()["claimed_event_ids"], [first.id, second.id])
         self.assertEqual(tasks_response.status_code, 200)
         self.assertEqual(tasks_response.json()["pending"], [])
+        claim_events = [
+            event
+            for event in events.list_events(call_id="call-1")
+            if event.type == "agent_task_claimed"
+        ]
+        self.assertEqual([event.data["task_event_id"] for event in claim_events], [first.id, second.id])
+        self.assertEqual([event.data["owner"] for event in claim_events], ["worker-1", "worker-1"])
 
     def test_agent_task_claim_skips_responded_events(self) -> None:
         client, events, tracker = self.build_client()
@@ -129,6 +136,12 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual(release_response.status_code, 200)
         self.assertEqual(release_response.json()["released_event_ids"], [first.id])
         self.assertEqual([event["id"] for event in tasks_response.json()["pending"]], [first.id])
+        release_events = [
+            event
+            for event in events.list_events(call_id="call-1")
+            if event.type == "agent_task_released"
+        ]
+        self.assertEqual([event.data["task_event_id"] for event in release_events], [first.id])
 
 
 if __name__ == "__main__":

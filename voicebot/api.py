@@ -216,14 +216,38 @@ def create_app(
 
     @app.post("/agent/tasks/claim")
     def claim_agent_tasks(request: AgentTaskClaimRequest) -> dict[str, Any]:
+        claimed_event_ids = tracker.claim(request.event_ids, request.owner, request.ttl_seconds)
+        for event_id in claimed_event_ids:
+            source_event = events.get_event(event_id)
+            if source_event is None:
+                continue
+            events.append(
+                source_event.call_id,
+                "agent_task_claimed",
+                {
+                    "task_event_id": event_id,
+                    "owner": request.owner,
+                    "ttl_seconds": request.ttl_seconds,
+                },
+            )
         return {
-            "claimed_event_ids": tracker.claim(request.event_ids, request.owner, request.ttl_seconds),
+            "claimed_event_ids": claimed_event_ids,
             "owner": request.owner,
         }
 
     @app.post("/agent/tasks/release")
     def release_agent_tasks(request: AgentTaskReleaseRequest) -> dict[str, Any]:
-        return {"released_event_ids": tracker.release_many(request.event_ids)}
+        released_event_ids = tracker.release_many(request.event_ids)
+        for event_id in released_event_ids:
+            source_event = events.get_event(event_id)
+            if source_event is None:
+                continue
+            events.append(
+                source_event.call_id,
+                "agent_task_released",
+                {"task_event_id": event_id},
+            )
+        return {"released_event_ids": released_event_ids}
 
     @app.get("/agent/tools")
     def agent_tools() -> dict[str, Any]:

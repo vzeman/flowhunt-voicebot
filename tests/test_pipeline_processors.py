@@ -8,6 +8,7 @@ import numpy as np
 
 from voicebot.core_processors import AgentRequestProcessor, EventLogProcessor, STTProcessor, TTSProcessor
 from voicebot.events import EventStore
+from voicebot.fanout import FanOutProcessor
 from voicebot.frames import AudioInputFrame, AudioOutputFrame, Frame, MetricsFrame, TextFrame, TranscriptionFrame
 from voicebot.pipeline import PipelineContext, PipelineRunner
 from voicebot.processor_registry import ProcessorDependencies, ProcessorSpec, default_processor_registry
@@ -216,6 +217,43 @@ class ProcessorRegistryTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "stt processor requires STT dependency"):
             registry.create(ProcessorSpec("stt"), ProcessorDependencies())
+
+    def test_registry_creates_fanout_with_branch_processors(self) -> None:
+        registry = default_processor_registry()
+        processor = registry.create(
+            ProcessorSpec(
+                "fan-out",
+                {
+                    "name": "observer-fanout",
+                    "branches": [
+                        {
+                            "name": "observer",
+                            "include_outputs": True,
+                            "processors": [{"name": "passthrough", "options": {"name": "observer-pass"}}],
+                        },
+                        {
+                            "name": "dropper",
+                            "processors": [{"name": "drop"}],
+                        },
+                    ],
+                },
+            ),
+            ProcessorDependencies(),
+        )
+
+        self.assertIsInstance(processor, FanOutProcessor)
+        self.assertEqual(processor.name, "observer-fanout")
+        self.assertEqual([branch.name for branch in processor.branches], ["observer", "dropper"])
+        self.assertTrue(processor.branches[0].include_outputs)
+
+    def test_registry_rejects_invalid_fanout_branch_config(self) -> None:
+        registry = default_processor_registry()
+
+        with self.assertRaisesRegex(ValueError, "fan-out branch processors must be a list"):
+            registry.create(
+                ProcessorSpec("fan-out", {"branches": [{"name": "bad", "processors": "passthrough"}]}),
+                ProcessorDependencies(),
+            )
 
 
 if __name__ == "__main__":

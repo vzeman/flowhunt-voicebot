@@ -6,6 +6,7 @@ from typing import Any
 
 from .core_processors import AgentRequestProcessor, EventLogProcessor, STTProcessor, TTSProcessor
 from .events import EventStore
+from .fanout import FanOutBranch, FanOutProcessor
 from .processors import DropProcessor, FrameProcessorBase, PassthroughProcessor
 
 
@@ -55,6 +56,7 @@ def default_processor_registry() -> ProcessorRegistry:
     registry.register("stt", _stt_factory)
     registry.register("agent-request", _agent_request_factory)
     registry.register("tts", _tts_factory)
+    registry.register("fan-out", lambda options, deps: _fanout_factory(options, deps, registry))
     return registry
 
 
@@ -78,3 +80,48 @@ def _tts_factory(options: dict[str, Any], dependencies: ProcessorDependencies) -
     if dependencies.tts is None:
         raise ValueError("tts processor requires TTS dependency")
     return TTSProcessor(dependencies.tts)
+
+
+def _fanout_factory(
+    options: dict[str, Any],
+    dependencies: ProcessorDependencies,
+    registry: ProcessorRegistry,
+) -> FanOutProcessor:
+    branches_config = options.get("branches", [])
+    if not isinstance(branches_config, list):
+        raise ValueError("fan-out processor requires branches to be a list")
+
+    branches: list[FanOutBranch] = []
+    for index, branch_config in enumerate(branches_config, start=1):
+        if not isinstance(branch_config, dict):
+            raise ValueError("fan-out branch configuration must be an object")
+        processor_specs = _processor_specs(branch_config.get("processors", []))
+        branches.append(
+            FanOutBranch(
+                name=str(branch_config.get("name") or f"branch-{index}"),
+                processors=registry.create_many(processor_specs, dependencies),
+                include_outputs=bool(branch_config.get("include_outputs", False)),
+            )
+        )
+    return FanOutProcessor(branches, name=str(options.get("name") or "fan-out"))
+
+
+def _processor_specs(config: Any) -> list[ProcessorSpec]:
+    if not isinstance(config, list):
+        raise ValueError("fan-out branch processors must be a list")
+
+    specs: list[ProcessorSpec] = []
+    for item in config:
+        if isinstance(item, ProcessorSpec):
+            specs.append(item)
+            continue
+        if not isinstance(item, dict):
+            raise ValueError("processor configuration must be an object")
+        name = item.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError("processor configuration requires a non-empty name")
+        options = item.get("options", {})
+        if not isinstance(options, dict):
+            raise ValueError("processor options must be an object")
+        specs.append(ProcessorSpec(name, options))
+    return specs

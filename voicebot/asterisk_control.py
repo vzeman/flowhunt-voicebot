@@ -71,7 +71,7 @@ class AsteriskAMI:
             return response
 
     def _send_action(self, sock: socket.socket, fields: dict[str, str]) -> None:
-        payload = "".join(f"{key}: {value}\r\n" for key, value in fields.items()) + "\r\n"
+        payload = "".join(f"{_ami_field(key)}: {_ami_field(value)}\r\n" for key, value in fields.items()) + "\r\n"
         sock.sendall(payload.encode())
 
     def _read_response(self, sock: socket.socket) -> str:
@@ -85,3 +85,10 @@ class AsteriskAMI:
                 break
             data += chunk
         return data
+
+
+def _ami_field(value: str) -> str:
+    text = str(value)
+    if "\r" in text or "\n" in text:
+        raise ValueError("AMI fields must not contain CR or LF characters")
+    return text

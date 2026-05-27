@@ -91,6 +91,22 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual([event.data["task_event_id"] for event in claim_events], [first.id, second.id])
         self.assertEqual([event.data["owner"] for event in claim_events], ["worker-1", "worker-1"])
 
+    def test_agent_tasks_ignore_claim_events_when_listing_pending_tasks(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+        client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 0.1},
+        )
+
+        import time
+
+        time.sleep(0.12)
+        response = client.get("/agent/tasks?call_id=call-1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([event["id"] for event in response.json()["pending"]], [first.id])
+
     def test_agent_task_claim_skips_responded_events(self) -> None:
         client, events, tracker = self.build_client()
         first = events.append("call-1", "agent_response_requested", {"text": "first"})

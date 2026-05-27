@@ -199,7 +199,11 @@ def create_app(
 
     @app.get("/agent/tasks")
     def agent_tasks(after: int = 0, call_id: str | None = None, limit: int = 200) -> dict[str, Any]:
-        all_events = events.list_events(after=after, limit=1000)
+        all_events = [
+            event
+            for event in events.list_events(after=after, limit=1000)
+            if event.type == "agent_response_requested"
+        ]
         active_call_ids = set(registry.active_call_ids())
         pending = [
             event

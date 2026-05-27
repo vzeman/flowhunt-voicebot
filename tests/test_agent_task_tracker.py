@@ -58,6 +58,16 @@ class AgentTaskTrackerTests(unittest.TestCase):
         self.assertTrue(tracker.is_pending(1))
         self.assertEqual(tracker.release_many([2]), [2])
 
+    def test_renew_many_extends_matching_owner_claims(self) -> None:
+        tracker = AgentTaskTracker()
+        tracker.claim([1], "worker-1", 0.1)
+
+        self.assertEqual(tracker.renew_many([1], "worker-2", 30), [])
+        self.assertEqual(tracker.renew_many([1], "worker-1", 30), [1])
+        time.sleep(0.12)
+
+        self.assertFalse(tracker.is_pending(1))
+
 
 if __name__ == "__main__":
     unittest.main()

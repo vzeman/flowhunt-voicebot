@@ -208,6 +208,28 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual(payload["claims"][str(second.id)]["owner"], "worker-1")
         self.assertGreater(payload["claims"][str(second.id)]["expires_in_seconds"], 0)
 
+    def test_agent_task_renew_extends_matching_claims(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+        client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 0.1},
+        )
+
+        wrong_owner = client.post(
+            "/agent/tasks/renew",
+            json={"event_ids": [first.id], "owner": "worker-2", "ttl_seconds": 30},
+        )
+        renewed = client.post(
+            "/agent/tasks/renew",
+            json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+
+        self.assertEqual(wrong_owner.status_code, 200)
+        self.assertEqual(wrong_owner.json()["renewed_event_ids"], [])
+        self.assertEqual(renewed.status_code, 200)
+        self.assertEqual(renewed.json()["renewed_event_ids"], [first.id])
+
 
 if __name__ == "__main__":
     unittest.main()

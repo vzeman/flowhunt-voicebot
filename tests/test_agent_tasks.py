@@ -121,6 +121,20 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["claimed_event_ids"], [])
 
+    def test_agent_task_claim_skips_missing_non_task_and_inactive_events(self) -> None:
+        client, events, _tracker = self.build_client()
+        non_task = events.append("call-1", "user_transcript", {"text": "not a task"})
+        inactive_task = events.append("inactive", "agent_response_requested", {"text": "inactive"})
+
+        response = client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [999999, non_task.id, inactive_task.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["claimed_event_ids"], [])
+        self.assertEqual(events.list_events(call_id="call-1")[-1].type, "user_transcript")
+
     def test_agent_task_claim_expires(self) -> None:
         client, events, _tracker = self.build_client()
         first = events.append("call-1", "agent_response_requested", {"text": "first"})

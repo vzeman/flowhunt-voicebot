@@ -9,6 +9,7 @@ ToolName = Literal[
     "hangup_call",
     "transfer_call",
     "send_dtmf",
+    "list_transcripts",
     "get_transcript",
     "get_events",
     "get_active_calls",
@@ -113,6 +114,11 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 schema={"type": ["integer", "null"]},
             ),
         ),
+    ),
+    ToolDefinition(
+        "list_transcripts",
+        "List call IDs with persisted transcripts.",
+        (),
     ),
     ToolDefinition(
         "get_transcript",

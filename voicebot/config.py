@@ -73,6 +73,7 @@ class Settings:
     packet_ms: int = env_int("VOICEBOT_PACKET_MS", 20)
 
     max_context_events: int = env_int("VOICEBOT_MAX_CONTEXT_EVENTS", 80)
+    agent_task_responded_event_retention: int = env_int("VOICEBOT_AGENT_TASK_RESPONDED_EVENT_RETENTION", 10000)
     transcript_dir: str = os.getenv("VOICEBOT_TRANSCRIPT_DIR", "/data/transcripts")
     greet_on_connect: bool = env_bool("VOICEBOT_GREET_ON_CONNECT", True)
     connect_greeting_prompt: str = os.getenv(

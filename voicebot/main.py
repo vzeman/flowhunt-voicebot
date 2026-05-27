@@ -22,7 +22,7 @@ def main() -> None:
     transcripts = TranscriptStore(settings.transcript_dir)
     events = EventStore(settings.max_context_events, transcript_store=transcripts)
     registry = CallRegistry()
-    tracker = AgentTaskTracker()
+    tracker = AgentTaskTracker(settings.agent_task_responded_event_retention)
     asterisk = (
         AsteriskAMI(settings.ami_host, settings.ami_port, settings.ami_username, settings.ami_password)
         if settings.ami_password

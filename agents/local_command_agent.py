@@ -209,11 +209,14 @@ def claim_tasks(base_url: str, tasks: list[dict], owner: str, ttl_seconds: float
     return [task for task in tasks if task["id"] in claimed_ids]
 
 
-def release_tasks(base_url: str, tasks: list[dict]) -> dict:
+def release_tasks(base_url: str, tasks: list[dict], owner: str | None = None) -> dict:
     event_ids = [int(task["id"]) for task in tasks]
     if not event_ids:
         return {"released_event_ids": []}
-    return http_json("POST", f"{base_url}/agent/tasks/release", {"event_ids": event_ids})
+    payload: dict = {"event_ids": event_ids}
+    if owner:
+        payload["owner"] = owner
+    return http_json("POST", f"{base_url}/agent/tasks/release", payload)
 
 
 def attach_response_event_id(tool_calls: list[dict], event_id: int) -> list[dict]:
@@ -375,7 +378,7 @@ def main() -> None:
         except (OSError, urllib.error.URLError, TimeoutError, RuntimeError, subprocess.SubprocessError) as exc:
             if claimed_pending:
                 try:
-                    release_tasks(args.base_url, claimed_pending)
+                    release_tasks(args.base_url, claimed_pending, owner)
                 except (OSError, urllib.error.URLError, TimeoutError, RuntimeError):
                     pass
                 claimed_pending = []

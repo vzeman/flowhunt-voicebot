@@ -160,7 +160,7 @@ class AgentTasksTests(unittest.TestCase):
             "/agent/tasks/claim",
             json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 30},
         )
-        release_response = client.post("/agent/tasks/release", json={"event_ids": [first.id]})
+        release_response = client.post("/agent/tasks/release", json={"event_ids": [first.id], "owner": "worker-1"})
         tasks_response = client.get("/agent/tasks?call_id=call-1")
 
         self.assertEqual(claim_response.json()["claimed_event_ids"], [first.id])
@@ -173,6 +173,22 @@ class AgentTasksTests(unittest.TestCase):
             if event.type == "agent_task_released"
         ]
         self.assertEqual([event.data["task_event_id"] for event in release_events], [first.id])
+        self.assertEqual([event.data["owner"] for event in release_events], ["worker-1"])
+
+    def test_agent_task_release_skips_claims_owned_by_another_worker(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+        client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+
+        release_response = client.post("/agent/tasks/release", json={"event_ids": [first.id], "owner": "worker-2"})
+        tasks_response = client.get("/agent/tasks?call_id=call-1")
+
+        self.assertEqual(release_response.status_code, 200)
+        self.assertEqual(release_response.json()["released_event_ids"], [])
+        self.assertEqual(tasks_response.json()["pending"], [])
 
     def test_agent_task_status_reports_claims_and_responded_events(self) -> None:
         client, events, tracker = self.build_client()

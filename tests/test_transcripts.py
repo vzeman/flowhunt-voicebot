@@ -188,6 +188,40 @@ class TranscriptTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual([event["id"] for event in response.json()["events"]], [2])
 
+    def test_call_transcript_endpoint_rejects_invalid_pagination(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(
+                EventStore(max_context_events=20),
+                CallRegistry(),
+                AgentTaskTracker(),
+                WebSocketHub(),
+                TranscriptStore(directory),
+                None,
+            )
+            client = TestClient(app)
+
+            response = client.get("/calls/call-1/transcript?after=bad")
+
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json()["detail"], "after must be an integer")
+
+    def test_transcript_summary_endpoint_rejects_invalid_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(
+                EventStore(max_context_events=20),
+                CallRegistry(),
+                AgentTaskTracker(),
+                WebSocketHub(),
+                TranscriptStore(directory),
+                None,
+            )
+            client = TestClient(app)
+
+            response = client.get("/transcripts/summary?limit=bad")
+
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json()["detail"], "limit must be an integer")
+
     def test_list_transcripts_agent_tool_lists_persisted_call_ids(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             transcripts = TranscriptStore(directory)

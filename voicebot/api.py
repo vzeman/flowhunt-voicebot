@@ -285,16 +285,28 @@ def create_app(
         return {"event": event_to_dict(event)}
 
     @app.get("/calls/{call_id}/transcript")
-    def call_transcript(call_id: str, after: int = 0, limit: int = 200) -> dict[str, Any]:
-        return {"call_id": call_id, "events": transcripts.read(call_id, after=after, limit=validated_limit(limit))}
+    def call_transcript(call_id: str, after: Any = 0, limit: Any = 200) -> dict[str, Any]:
+        return {
+            "call_id": call_id,
+            "events": transcripts.read(
+                call_id,
+                after=optional_int_value(after, "after", 0),
+                limit=validated_limit(optional_int_value(limit, "limit", 200)),
+            ),
+        }
 
     @app.get("/transcripts")
     def list_transcripts() -> dict[str, Any]:
         return {"call_ids": transcripts.list_call_ids()}
 
     @app.get("/transcripts/summary")
-    def transcript_summaries(after_call_id: str | None = None, limit: int = 200) -> dict[str, Any]:
-        return {"transcripts": transcripts.summaries(after_call_id=after_call_id, limit=validated_limit(limit))}
+    def transcript_summaries(after_call_id: str | None = None, limit: Any = 200) -> dict[str, Any]:
+        return {
+            "transcripts": transcripts.summaries(
+                after_call_id=after_call_id,
+                limit=validated_limit(optional_int_value(limit, "limit", 200)),
+            )
+        }
 
     @app.post("/calls/{call_id}/control")
     async def call_control(call_id: str, request: CallControlRequest) -> dict[str, Any]:
@@ -529,7 +541,10 @@ def validated_limit(limit: int, *, maximum: int = 1000) -> int:
 
 
 def optional_int_arg(args: dict[str, Any], name: str, default: int) -> int:
-    value = args.get(name, default)
+    return optional_int_value(args.get(name, default), name, default)
+
+
+def optional_int_value(value: Any, name: str, default: int) -> int:
     if value is None or value == "":
         return default
     try:

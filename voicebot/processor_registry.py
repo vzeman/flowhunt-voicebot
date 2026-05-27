@@ -95,7 +95,7 @@ def _fanout_factory(
     for index, branch_config in enumerate(branches_config, start=1):
         if not isinstance(branch_config, dict):
             raise ValueError("fan-out branch configuration must be an object")
-        processor_specs = _processor_specs(branch_config.get("processors", []))
+        processor_specs = processor_specs_from_config(branch_config.get("processors", []))
         branches.append(
             FanOutBranch(
                 name=str(branch_config.get("name") or f"branch-{index}"),
@@ -106,7 +106,7 @@ def _fanout_factory(
     return FanOutProcessor(branches, name=str(options.get("name") or "fan-out"))
 
 
-def _processor_specs(config: Any) -> list[ProcessorSpec]:
+def processor_specs_from_config(config: Any) -> list[ProcessorSpec]:
     if not isinstance(config, list):
         raise ValueError("fan-out branch processors must be a list")
 

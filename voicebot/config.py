@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
+from typing import Any
 
 
 def env_int(name: str, default: int) -> int:
@@ -17,6 +19,18 @@ def env_bool(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_json_list(name: str, default: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return tuple(default)
+    parsed = json.loads(value)
+    if not isinstance(parsed, list):
+        raise ValueError(f"{name} must be a JSON list")
+    if not all(isinstance(item, dict) for item in parsed):
+        raise ValueError(f"{name} must contain JSON objects")
+    return tuple(parsed)
 
 
 @dataclass(frozen=True)
@@ -69,3 +83,12 @@ class Settings:
     ami_port: int = env_int("VOICEBOT_AMI_PORT", 5038)
     ami_username: str = os.getenv("VOICEBOT_AMI_USERNAME", "voicebot")
     ami_password: str = os.getenv("VOICEBOT_AMI_PASSWORD", "")
+
+    stt_pipeline: tuple[dict[str, Any], ...] = env_json_list(
+        "VOICEBOT_STT_PIPELINE",
+        [{"name": "stt"}, {"name": "agent-request"}],
+    )
+    tts_pipeline: tuple[dict[str, Any], ...] = env_json_list(
+        "VOICEBOT_TTS_PIPELINE",
+        [{"name": "tts"}],
+    )

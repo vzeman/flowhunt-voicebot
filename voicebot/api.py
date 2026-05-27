@@ -13,6 +13,7 @@ from .asterisk_control import AsteriskAMI
 from .calls import AgentResponse, CallRegistry
 from .event_catalog import event_catalog
 from .events import EventStore, VoicebotEvent, event_to_dict
+from .metrics import summarize_metrics
 from .provider_catalog import provider_catalog
 from .tool_executor import AgentToolExecutor
 from .transcripts import TranscriptStore
@@ -181,6 +182,10 @@ def create_app(
     @app.get("/events/catalog")
     def list_event_catalog() -> dict[str, Any]:
         return {"events": event_catalog()}
+
+    @app.get("/metrics")
+    def metrics(call_id: str | None = None) -> dict[str, Any]:
+        return summarize_metrics(events.list_events(call_id=call_id, limit=1000))
 
     @app.get("/context")
     def context(call_id: str | None = None) -> dict[str, Any]:
@@ -423,6 +428,9 @@ def create_app(
             limit=int(args.get("limit", 200)),
         )
 
+    def tool_get_metrics(args: dict[str, Any]) -> dict[str, Any]:
+        return metrics(call_id=args.get("call_id"))
+
     def tool_get_active_calls(args: dict[str, Any]) -> dict[str, Any]:
         return {"active_calls": registry.active_call_ids()}
 
@@ -438,6 +446,7 @@ def create_app(
     tool_executor.register("list_transcripts", tool_list_transcripts)
     tool_executor.register("get_transcript", tool_get_transcript)
     tool_executor.register("get_events", tool_get_events)
+    tool_executor.register("get_metrics", tool_get_metrics)
     tool_executor.register("get_active_calls", tool_get_active_calls)
     tool_executor.register("get_call_state", tool_get_call_state)
 

@@ -106,6 +106,29 @@ class TranscriptTests(unittest.TestCase):
 
             self.assertEqual(summaries[0]["skipped_line_count"], 2)
 
+    def test_transcript_summary_reports_fully_corrupt_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "call-1.jsonl"
+            path.write_text("not-json\n[]\n", encoding="utf-8")
+            transcripts = TranscriptStore(directory)
+
+            summaries = transcripts.summaries()
+
+            self.assertEqual(
+                summaries,
+                [
+                    {
+                        "call_id": "call-1",
+                        "event_count": 0,
+                        "first_event_id": None,
+                        "last_event_id": None,
+                        "first_timestamp": None,
+                        "last_timestamp": None,
+                        "skipped_line_count": 2,
+                    }
+                ],
+            )
+
     def test_transcript_store_ignores_invalid_event_ids_when_paging(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "call-1.jsonl"

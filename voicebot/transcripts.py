@@ -49,6 +49,18 @@ class TranscriptStore:
         for path in paths:
             events, skipped_line_count = self._read_path_with_errors(path)
             if not events:
+                if skipped_line_count:
+                    result.append(
+                        {
+                            "call_id": path.stem,
+                            "event_count": 0,
+                            "first_event_id": None,
+                            "last_event_id": None,
+                            "first_timestamp": None,
+                            "last_timestamp": None,
+                            "skipped_line_count": skipped_line_count,
+                        }
+                    )
                 continue
             result.append(
                 {

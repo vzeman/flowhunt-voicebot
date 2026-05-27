@@ -12,6 +12,7 @@ ToolName = Literal[
     "stop_playback",
     "list_transcripts",
     "list_transcript_summaries",
+    "get_transcript_stats",
     "get_transcript",
     "get_events",
     "get_metrics",
@@ -153,6 +154,11 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             ToolArgument("after_call_id", "Optional call ID cursor.", required=False, schema={"type": ["string", "null"]}),
             ToolArgument("limit", "Optional maximum number of transcript summaries.", required=False, schema={"type": "integer"}),
         ),
+    ),
+    ToolDefinition(
+        "get_transcript_stats",
+        "Read aggregate persisted transcript counts and corruption counters.",
+        (),
     ),
     ToolDefinition(
         "get_transcript",

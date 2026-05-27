@@ -32,6 +32,12 @@ FrameKind = Literal[
     "playback_finished",
     "call_control_requested",
     "call_control_completed",
+    "interrupt",
+    "cancel_agent",
+    "cancel_tts",
+    "pause_input",
+    "resume_input",
+    "flush_playback",
     "metrics",
     "error",
     "system",
@@ -268,6 +274,41 @@ class CallControlFrame(Frame):
         object.__setattr__(self, "trace_id", trace_id)
         object.__setattr__(self, "action", action)
         object.__setattr__(self, "target", target)
+        object.__setattr__(self, "data", payload)
+
+
+ControlKind = Literal[
+    "interrupt",
+    "cancel_agent",
+    "cancel_tts",
+    "pause_input",
+    "resume_input",
+    "flush_playback",
+]
+
+
+@dataclass(frozen=True)
+class ControlFrame(Frame):
+    reason: str = ""
+
+    def __init__(
+        self,
+        kind: ControlKind,
+        call_id: str,
+        *,
+        reason: str = "",
+        trace_id: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        payload = data or {}
+        if reason:
+            payload = {"reason": reason, **payload}
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "call_id", call_id)
+        object.__setattr__(self, "frame_id", str(uuid4()))
+        object.__setattr__(self, "timestamp", frame_timestamp())
+        object.__setattr__(self, "trace_id", trace_id)
+        object.__setattr__(self, "reason", reason)
         object.__setattr__(self, "data", payload)
 
 

@@ -185,8 +185,13 @@ def main() -> None:
 
     while True:
         try:
+            active_call_ids = set(http_json("GET", f"{args.base_url}/health").get("active_calls", []))
             response = http_json("GET", f"{args.base_url}/agent/tasks")
-            pending = [task for task in response.get("pending", []) if task["id"] not in seen]
+            pending = [
+                task
+                for task in response.get("pending", [])
+                if task["id"] not in seen and task.get("call_id") in active_call_ids
+            ]
             if not pending:
                 time.sleep(args.interval)
                 continue

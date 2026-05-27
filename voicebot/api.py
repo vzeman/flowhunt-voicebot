@@ -111,10 +111,13 @@ def create_app(
     @app.get("/agent/tasks")
     def agent_tasks(after: int = 0) -> dict[str, Any]:
         all_events = events.list_events(after=after, limit=1000)
+        active_call_ids = set(registry.active_call_ids())
         pending = [
             event
             for event in all_events
-            if event.type == "agent_response_requested" and event.id not in tracker.responded_event_ids
+            if event.type == "agent_response_requested"
+            and event.id not in tracker.responded_event_ids
+            and event.call_id in active_call_ids
         ]
         return {
             "pending": [event_to_dict(event) for event in pending],

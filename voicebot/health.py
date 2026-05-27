@@ -50,7 +50,7 @@ def transcript_store_check(transcripts: TranscriptStore) -> HealthCheck:
         with tempfile.NamedTemporaryFile(prefix=".health-", dir=directory, delete=True) as handle:
             handle.write(b"ok")
             handle.flush()
-        stats = transcripts.stats()
+        stats = transcripts.stats(limit=None)
         message = "transcript directory is writable"
         if stats["corrupt_transcript_count"]:
             message = "transcript directory is writable with corrupt transcript rows"

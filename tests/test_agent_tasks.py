@@ -114,6 +114,22 @@ class AgentTasksTests(unittest.TestCase):
 
         self.assertEqual([event["id"] for event in tasks_response.json()["pending"]], [first.id])
 
+    def test_agent_task_release_makes_claimed_events_pending_again(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+
+        claim_response = client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+        release_response = client.post("/agent/tasks/release", json={"event_ids": [first.id]})
+        tasks_response = client.get("/agent/tasks?call_id=call-1")
+
+        self.assertEqual(claim_response.json()["claimed_event_ids"], [first.id])
+        self.assertEqual(release_response.status_code, 200)
+        self.assertEqual(release_response.json()["released_event_ids"], [first.id])
+        self.assertEqual([event["id"] for event in tasks_response.json()["pending"]], [first.id])
+
 
 if __name__ == "__main__":
     unittest.main()

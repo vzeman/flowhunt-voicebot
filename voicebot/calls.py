@@ -270,6 +270,15 @@ class CallSession:
         )
         return event
 
+    def interrupt_playback(self, reason: str = "agent_requested") -> VoicebotEvent:
+        interrupted = self.playback.interrupt()
+        self._mark_interrupted(reason)
+        return self.events.append(
+            self.call_id,
+            "bot_playback_interrupted",
+            {"reason": reason, "interrupted": interrupted},
+        )
+
     def snapshot(self) -> dict:
         return {
             "call_id": self.call_id,

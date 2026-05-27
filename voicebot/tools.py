@@ -9,6 +9,7 @@ ToolName = Literal[
     "hangup_call",
     "transfer_call",
     "send_dtmf",
+    "stop_playback",
     "list_transcripts",
     "get_transcript",
     "get_events",
@@ -108,6 +109,25 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         (
             ToolArgument("call_id", "Active call ID."),
             ToolArgument("digit", "DTMF digit to send.", schema={"type": "string", "minLength": 1, "maxLength": 1}),
+            ToolArgument(
+                "response_to_event_id",
+                "Optional event ID this answers.",
+                required=False,
+                schema={"type": ["integer", "null"]},
+            ),
+        ),
+    ),
+    ToolDefinition(
+        "stop_playback",
+        "Stop currently queued or playing bot audio in an active call.",
+        (
+            ToolArgument("call_id", "Active call ID."),
+            ToolArgument(
+                "reason",
+                "Optional reason for stopping playback.",
+                required=False,
+                schema={"type": ["string", "null"]},
+            ),
             ToolArgument(
                 "response_to_event_id",
                 "Optional event ID this answers.",

@@ -34,6 +34,11 @@ class CallControlRequest(BaseModel):
     response_to_event_id: int | None = None
 
 
+class PlaybackInterruptRequest(BaseModel):
+    reason: str = "agent_requested"
+    response_to_event_id: int | None = None
+
+
 class AgentToolRequest(BaseModel):
     arguments: dict[str, Any] = {}
 
@@ -265,6 +270,16 @@ def create_app(
         await hub.broadcast(completed)
         return {"event": event_to_dict(completed)}
 
+    @app.post("/calls/{call_id}/playback/interrupt")
+    async def interrupt_playback(call_id: str, request: PlaybackInterruptRequest) -> dict[str, Any]:
+        session = registry.get(call_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Active call not found: {call_id}")
+        event = session.interrupt_playback(request.reason)
+        tracker.mark_responded(request.response_to_event_id)
+        await hub.broadcast(event)
+        return {"event": event_to_dict(event)}
+
     @app.websocket("/ws/events")
     async def websocket_events(websocket: WebSocket) -> None:
         await hub.connect(websocket)
@@ -319,6 +334,16 @@ def create_app(
             ),
         )
 
+    async def tool_stop_playback(args: dict[str, Any]) -> dict[str, Any]:
+        call_id = require_arg(args, "call_id")
+        return await interrupt_playback(
+            call_id,
+            PlaybackInterruptRequest(
+                reason=str(args.get("reason") or "agent_requested"),
+                response_to_event_id=args.get("response_to_event_id"),
+            ),
+        )
+
     def tool_get_transcript(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
         return call_transcript(call_id)
@@ -344,6 +369,7 @@ def create_app(
     tool_executor.register("hangup_call", tool_hangup_call)
     tool_executor.register("transfer_call", tool_transfer_call)
     tool_executor.register("send_dtmf", tool_send_dtmf)
+    tool_executor.register("stop_playback", tool_stop_playback)
     tool_executor.register("list_transcripts", tool_list_transcripts)
     tool_executor.register("get_transcript", tool_get_transcript)
     tool_executor.register("get_events", tool_get_events)

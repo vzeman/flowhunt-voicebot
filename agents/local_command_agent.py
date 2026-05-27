@@ -65,6 +65,7 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
         "tool_calls": [
             {"name": "hangup_call", "arguments": {"call_id": "...", "response_to_event_id": 123}},
             {"name": "transfer_call", "arguments": {"call_id": "...", "target": "123", "response_to_event_id": 123}},
+            {"name": "send_dtmf", "arguments": {"call_id": "...", "digit": "1", "response_to_event_id": 123}},
         ],
     }
 
@@ -79,7 +80,8 @@ details, events, queues, STT, TTS, Asterisk, or SIP. If there are multiple
 unhandled user messages, answer them together in one coherent response.
 If the caller asks to end the call, call the hangup_call tool. If the caller
 asks to transfer the call, call transfer_call with the requested extension or
-target. Include response_to_event_id on every tool call.
+target. If the caller asks you to press or send a keypad digit, call send_dtmf
+with one digit. Include response_to_event_id on every tool call.
 If the caller asks something you can inspect on this computer, use your local
 shell/tooling to find the answer before responding. If you cannot complete a
 request, say what is missing and ask one short follow-up question.

@@ -36,6 +36,7 @@ class CompactContextRequest(BaseModel):
 class CallControlRequest(BaseModel):
     action: str
     target: str | None = None
+    digit: str | None = None
     response_to_event_id: int | None = None
 
 
@@ -226,6 +227,22 @@ def create_app(
             tracker.mark_responded(request.response_to_event_id)
             await hub.broadcast(completed)
             raise HTTPException(status_code=400, detail="transfer requires target")
+        elif request.action == "send_dtmf" and request.digit:
+            result = asterisk.send_dtmf(call_id, request.digit)
+        elif request.action == "send_dtmf":
+            completed = events.append(
+                call_id,
+                "call_control_completed",
+                {
+                    "action": request.action,
+                    "ok": False,
+                    "message": "send_dtmf requires digit",
+                    "request_event_id": requested.id,
+                },
+            )
+            tracker.mark_responded(request.response_to_event_id)
+            await hub.broadcast(completed)
+            raise HTTPException(status_code=400, detail="send_dtmf requires digit")
         else:
             completed = events.append(
                 call_id,
@@ -292,6 +309,18 @@ def create_app(
             ),
         )
 
+    async def tool_send_dtmf(args: dict[str, Any]) -> dict[str, Any]:
+        call_id = require_arg(args, "call_id")
+        digit = require_arg(args, "digit")
+        return await call_control(
+            call_id,
+            CallControlRequest(
+                action="send_dtmf",
+                digit=digit,
+                response_to_event_id=args.get("response_to_event_id"),
+            ),
+        )
+
     def tool_get_transcript(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
         return call_transcript(call_id)
@@ -309,6 +338,7 @@ def create_app(
     tool_executor.register("say", tool_say)
     tool_executor.register("hangup_call", tool_hangup_call)
     tool_executor.register("transfer_call", tool_transfer_call)
+    tool_executor.register("send_dtmf", tool_send_dtmf)
     tool_executor.register("get_transcript", tool_get_transcript)
     tool_executor.register("get_events", tool_get_events)
     tool_executor.register("get_active_calls", tool_get_active_calls)

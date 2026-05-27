@@ -17,6 +17,9 @@ class FakeAsterisk:
     def transfer(self, call_id: str, target: str):
         return FakeControlResult(True, f"transferred {call_id} to {target}")
 
+    def send_dtmf(self, call_id: str, digit: str):
+        return FakeControlResult(True, f"sent DTMF {digit} to {call_id}")
+
 
 class FakeControlResult:
     def __init__(self, ok: bool, message: str) -> None:
@@ -82,6 +85,33 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertEqual([event.type for event in persisted], ["call_control_requested", "call_control_completed"])
         self.assertTrue(persisted[1].data["ok"])
         self.assertEqual(persisted[1].data["message"], "transferred call-1 to 123")
+
+    def test_call_control_records_send_dtmf_result(self) -> None:
+        client, events, tracker = self.build_client(asterisk=FakeAsterisk())
+
+        response = client.post(
+            "/calls/call-1/control",
+            json={"action": "send_dtmf", "digit": "1", "response_to_event_id": 45},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(45, tracker.responded_event_ids)
+        persisted = events.list_events(call_id="call-1")
+        self.assertEqual([event.type for event in persisted], ["call_control_requested", "call_control_completed"])
+        self.assertTrue(persisted[1].data["ok"])
+        self.assertEqual(persisted[1].data["message"], "sent DTMF 1 to call-1")
+
+    def test_send_dtmf_tool_requires_digit(self) -> None:
+        client, events, tracker = self.build_client(asterisk=FakeAsterisk())
+
+        response = client.post(
+            "/agent/tools/send_dtmf",
+            json={"arguments": {"call_id": "call-1", "response_to_event_id": 46}},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn(46, tracker.responded_event_ids)
+        self.assertEqual(events.list_events(call_id="call-1"), [])
 
 
 if __name__ == "__main__":

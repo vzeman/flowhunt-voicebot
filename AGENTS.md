@@ -126,6 +126,14 @@ curl -X POST http://127.0.0.1:8080/calls/CALL_ID/control \
   -d '{"action":"transfer", "target":"123456789"}'
 ```
 
+Send one DTMF digit:
+
+```bash
+curl -X POST http://127.0.0.1:8080/calls/CALL_ID/control \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"send_dtmf", "digit":"1"}'
+```
+
 The same actions are exposed as agent tools:
 
 ```bash
@@ -136,6 +144,10 @@ curl -X POST http://127.0.0.1:8080/agent/tools/hangup_call \
 curl -X POST http://127.0.0.1:8080/agent/tools/transfer_call \
   -H 'Content-Type: application/json' \
   -d '{"arguments":{"call_id":"CALL_ID", "target":"123456789"}}'
+
+curl -X POST http://127.0.0.1:8080/agent/tools/send_dtmf \
+  -H 'Content-Type: application/json' \
+  -d '{"arguments":{"call_id":"CALL_ID", "digit":"1"}}'
 ```
 
 The control endpoint emits `call_control_requested` and

@@ -22,6 +22,7 @@ from local_command_agent import (
     attach_response_event_id,
     build_prompt,
     build_retry_prompt,
+    claim_tasks,
     execute_tool_call,
     fast_tool_call,
     http_json,
@@ -66,6 +67,7 @@ def main() -> None:
         os.environ.pop("OPENAI_BASE_URL")
     client = OpenAI(**client_kwargs)
     agent_providers = default_agent_provider_registry()
+    owner = f"openai-agent:{os.getpid()}"
     seen: set[int] = set()
 
     while True:
@@ -77,6 +79,11 @@ def main() -> None:
                 for task in response.get("pending", [])
                 if task["id"] not in seen and task.get("call_id") in active_call_ids
             ]
+            if not pending:
+                time.sleep(args.interval)
+                continue
+
+            pending = claim_tasks(args.base_url, pending, owner, max(args.timeout * 2, 30.0))
             if not pending:
                 time.sleep(args.interval)
                 continue

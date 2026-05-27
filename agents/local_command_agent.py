@@ -196,6 +196,19 @@ def execute_tool_call(base_url: str, call: dict) -> dict:
     return http_json("POST", f"{base_url}/agent/tools/{name}", {"arguments": arguments})
 
 
+def claim_tasks(base_url: str, tasks: list[dict], owner: str, ttl_seconds: float) -> list[dict]:
+    event_ids = [int(task["id"]) for task in tasks]
+    if not event_ids:
+        return []
+    response = http_json(
+        "POST",
+        f"{base_url}/agent/tasks/claim",
+        {"event_ids": event_ids, "owner": owner, "ttl_seconds": ttl_seconds},
+    )
+    claimed_ids = set(response.get("claimed_event_ids", []))
+    return [task for task in tasks if task["id"] in claimed_ids]
+
+
 def attach_response_event_id(tool_calls: list[dict], event_id: int) -> list[dict]:
     for call in tool_calls:
         arguments = call.setdefault("arguments", {})
@@ -289,6 +302,7 @@ def _normalize(text: str) -> str:
 
 def main() -> None:
     args = parse_args()
+    owner = f"local-command-agent:{os.getpid()}"
     seen: set[int] = set()
 
     while True:
@@ -300,6 +314,11 @@ def main() -> None:
                 for task in response.get("pending", [])
                 if task["id"] not in seen and task.get("call_id") in active_call_ids
             ]
+            if not pending:
+                time.sleep(args.interval)
+                continue
+
+            pending = claim_tasks(args.base_url, pending, owner, max(args.command_timeout * 2, 30.0))
             if not pending:
                 time.sleep(args.interval)
                 continue

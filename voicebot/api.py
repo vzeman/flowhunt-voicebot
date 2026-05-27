@@ -104,6 +104,20 @@ class AgentTaskTracker:
                     released.append(event_id)
         return released
 
+    def snapshot(self) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._lock:
+            self._expire_claims_locked(now)
+            claims = {
+                str(event_id): {
+                    "owner": owner,
+                    "expires_in_seconds": max(0.0, expires_at - now),
+                }
+                for event_id, (owner, expires_at) in sorted(self._claimed_event_ids.items())
+            }
+            responded = sorted(self.responded_event_ids)
+        return {"responded_event_ids": responded, "claims": claims}
+
     def _expire_claims_locked(self, now: float) -> None:
         expired = [event_id for event_id, (_owner, expires_at) in self._claimed_event_ids.items() if expires_at <= now]
         for event_id in expired:
@@ -252,6 +266,10 @@ def create_app(
                 {"task_event_id": event_id},
             )
         return {"released_event_ids": released_event_ids}
+
+    @app.get("/agent/tasks/status")
+    def agent_task_status() -> dict[str, Any]:
+        return tracker.snapshot()
 
     @app.get("/agent/tools")
     def agent_tools() -> dict[str, Any]:

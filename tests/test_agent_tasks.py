@@ -159,6 +159,24 @@ class AgentTasksTests(unittest.TestCase):
         ]
         self.assertEqual([event.data["task_event_id"] for event in release_events], [first.id])
 
+    def test_agent_task_status_reports_claims_and_responded_events(self) -> None:
+        client, events, tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+        second = events.append("call-1", "agent_response_requested", {"text": "second"})
+        tracker.mark_responded(first.id)
+        client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [second.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+
+        response = client.get("/agent/tasks/status")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["responded_event_ids"], [first.id])
+        self.assertEqual(payload["claims"][str(second.id)]["owner"], "worker-1")
+        self.assertGreater(payload["claims"][str(second.id)]["expires_in_seconds"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,1 @@
+"""Flowhunt voicebot prototype package."""

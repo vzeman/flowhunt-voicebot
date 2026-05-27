@@ -1,9 +1,31 @@
 services:
+  voicebot:
+    build: .
+    container_name: flowhunt-voicebot
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      VOICEBOT_API_HOST: 0.0.0.0
+      VOICEBOT_API_PORT: 8080
+      VOICEBOT_AUDIOSOCKET_HOST: 0.0.0.0
+      VOICEBOT_AUDIOSOCKET_PORT: 9019
+      VOICEBOT_WHISPER_MODEL: ${VOICEBOT_WHISPER_MODEL:-base}
+      VOICEBOT_LANGUAGE: ${VOICEBOT_LANGUAGE:-}
+      VOICEBOT_TTS_VOICE: ${VOICEBOT_TTS_VOICE:-M1}
+      VOICEBOT_AMI_HOST: asterisk
+      VOICEBOT_AMI_PORT: 5038
+      VOICEBOT_AMI_USERNAME: voicebot
+      VOICEBOT_AMI_PASSWORD: ${AMI_PASSWORD:-voicebot-local-dev}
+      VOICEBOT_TRANSCRIPT_DIR: /data/transcripts
+    volumes:
+      - voicebot-cache:/root/.cache
+      - voicebot-data:/data
+
   asterisk:
     image: andrius/asterisk:latest
     container_name: supertronic-asterisk
     restart: unless-stopped
-    network_mode: bridge
     ports:
       - "5060:5060/udp"
       - "10000-10100:10000-10100/udp"
@@ -11,11 +33,17 @@ services:
       SIP_HOST: qla-prod-ec1-la-opensips-03.prod-ec1.live-agent.net
       SIP_USER: u262625_876
       SIP_PASSWORD: ${SIP_PASSWORD:?Set SIP_PASSWORD in your shell}
-      AUDIOSOCKET_SERVICE: host.docker.internal:9019
+      AUDIOSOCKET_SERVICE: voicebot:9019
+      AMI_USERNAME: voicebot
+      AMI_PASSWORD: ${AMI_PASSWORD:-voicebot-local-dev}
     volumes:
       - ./asterisk/docker-entrypoint.sh:/docker-entrypoint.sh:ro
       - ./asterisk/extensions-docker.conf:/templates/extensions.conf:ro
       - ./asterisk/rtp.conf:/etc/asterisk/rtp.conf:ro
     command: ["/bin/sh", "/docker-entrypoint.sh"]
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      - voicebot
+
+volumes:
+  voicebot-cache:
+  voicebot-data:

@@ -89,6 +89,14 @@ Check registration:
 docker exec supertronic-asterisk asterisk -rx 'pjsip show registrations'
 ```
 
+The full Docker stack runs both Asterisk and the voicebot service:
+
+```bash
+SIP_PASSWORD='your-password-here' docker compose up -d --build
+```
+
+The agent API is exposed on `http://127.0.0.1:8080`.
+
 ## Notes
 
 AudioSocket’s dialplan app sends 16-bit, 8 kHz, mono PCM over TCP and receives

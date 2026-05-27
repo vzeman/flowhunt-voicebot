@@ -1,6 +1,9 @@
 numpy
 openai-whisper
+fastapi
+pydantic
 scipy
 sounddevice
 soundfile
 supertonic
+uvicorn[standard]

@@ -5,6 +5,8 @@ set -eu
 : "${SIP_USER:?missing SIP_USER}"
 : "${SIP_PASSWORD:?missing SIP_PASSWORD}"
 : "${AUDIOSOCKET_SERVICE:?missing AUDIOSOCKET_SERVICE}"
+: "${AMI_USERNAME:=voicebot}"
+: "${AMI_PASSWORD:=voicebot-local-dev}"
 
 cat >/etc/asterisk/pjsip.conf <<EOF
 [transport-udp]
@@ -53,6 +55,19 @@ timers=no
 type=identify
 endpoint=liveagent-endpoint
 match=${SIP_HOST}
+EOF
+
+cat >/etc/asterisk/manager.conf <<EOF
+[general]
+enabled=yes
+webenabled=no
+port=5038
+bindaddr=0.0.0.0
+
+[${AMI_USERNAME}]
+secret=${AMI_PASSWORD}
+read=system,call,command,agent,user,config,dtmf,reporting,cdr,dialplan
+write=system,call,command,agent,user,config,originate,reporting
 EOF
 
 sed "s#__AUDIOSOCKET_SERVICE__#${AUDIOSOCKET_SERVICE}#g" \

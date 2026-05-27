@@ -130,6 +130,12 @@ curl -X POST http://127.0.0.1:8080/agent/tasks/release \
   -d '{"event_ids":[123]}'
 ```
 
+Inspect answered task IDs and active claims:
+
+```bash
+curl http://127.0.0.1:8080/agent/tasks/status
+```
+
 For parallel call handling, filter tasks to one call or bound each poll:
 
 ```bash

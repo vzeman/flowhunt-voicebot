@@ -17,7 +17,9 @@ stdout.
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
+import re
 import subprocess
 import time
 import urllib.error
@@ -77,6 +79,8 @@ target. Include response_to_event_id on every tool call.
 If the caller asks something you can inspect on this computer, use your local
 shell/tooling to find the answer before responding. If you cannot complete a
 request, say what is missing and ask one short follow-up question.
+For website questions, try to inspect the URL with available local networking
+tools before answering. Never answer by saying only that you heard the request.
 
 Conversation summary:
 {context.get("summary") or "(none)"}
@@ -92,6 +96,18 @@ Available tools:
 
 Return either plain text to speak, or JSON in this form:
 {json.dumps(output_format, ensure_ascii=False, indent=2)}
+"""
+
+
+def build_retry_prompt(original_prompt: str, bad_answer: str) -> str:
+    return f"""{original_prompt}
+
+Your previous answer was rejected because it repeated the caller instead of
+helping them:
+{bad_answer}
+
+Produce a useful answer now. Do not use phrases like "I heard" or restate the
+caller's request as the whole response.
 """
 
 
@@ -142,6 +158,27 @@ def attach_response_event_id(tool_calls: list[dict], event_id: int) -> list[dict
     return tool_calls
 
 
+def is_echo_answer(answer: str, pending: list[dict]) -> bool:
+    normalized_answer = _normalize(answer)
+    if not normalized_answer:
+        return False
+    if normalized_answer.startswith(("i heard ", "you said ", "i heard you say ")):
+        return True
+
+    latest_text = _normalize(str(pending[-1].get("data", {}).get("text", "")))
+    if not latest_text:
+        return False
+    if normalized_answer in {latest_text, f"i heard {latest_text}", f"you said {latest_text}"}:
+        return True
+    return difflib.SequenceMatcher(None, normalized_answer, latest_text).ratio() >= 0.88
+
+
+def _normalize(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def main() -> None:
     args = parse_args()
     seen: set[int] = set()
@@ -158,6 +195,11 @@ def main() -> None:
             prompt = build_prompt(pending, response.get("context", {}), tools)
             raw_answer = run_agent_command(args.command, prompt)
             answer, tool_calls = parse_agent_output(raw_answer)
+            if answer and is_echo_answer(answer, pending):
+                raw_answer = run_agent_command(args.command, build_retry_prompt(prompt, answer))
+                answer, tool_calls = parse_agent_output(raw_answer)
+                if answer and is_echo_answer(answer, pending):
+                    raise RuntimeError(f"agent returned echo response twice: {answer}")
             latest = pending[-1]
             tool_calls = attach_response_event_id(tool_calls, latest["id"])
             for call in tool_calls:
@@ -176,9 +218,9 @@ def main() -> None:
                 )
             for task in pending:
                 seen.add(task["id"])
-            print(f"answered {len(pending)} pending event(s) for call {latest['call_id']}")
+            print(f"answered {len(pending)} pending event(s) for call {latest['call_id']}", flush=True)
         except (OSError, urllib.error.URLError, TimeoutError, RuntimeError) as exc:
-            print(f"agent error: {exc}")
+            print(f"agent error: {exc}", flush=True)
             time.sleep(max(args.interval, 2.0))
 
 

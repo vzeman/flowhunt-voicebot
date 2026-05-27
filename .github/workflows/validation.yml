@@ -39,4 +39,4 @@ jobs:
         run: '! rg -n "PIPECAT|Pipecat|pipecat" voicebot agents tests'
 
       - name: Check committed secrets
-        run: '! rg -n "sk-proj-|jsFSGFaS3YNbVM4sq87uFACs8e3QFX" --glob "!.env" --glob "!*.pyc" .'
+        run: '! rg -n "sk[-]proj[-][A-Za-z0-9_-]+|[A-Za-z0-9]{32,}" --glob "!.env" --glob "!*.pyc" .'

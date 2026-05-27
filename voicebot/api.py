@@ -20,6 +20,7 @@ from .asterisk_control import AsteriskAMI
 from .calls import AgentResponse, CallRegistry
 from .event_catalog import event_catalog
 from .events import EventStore, VoicebotEvent, event_to_dict
+from .health import readiness_report
 from .metrics import summarize_metrics
 from .provider_catalog import provider_catalog
 from .tool_executor import AgentToolExecutor
@@ -75,6 +76,14 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, Any]:
         return {"ok": True, "active_calls": registry.active_call_ids()}
+
+    @app.get("/health/readiness")
+    def readiness() -> dict[str, Any]:
+        return readiness_report(
+            transcripts=transcripts,
+            asterisk=asterisk,
+            active_call_ids=registry.active_call_ids(),
+        )
 
     @app.get("/calls")
     def list_calls() -> dict[str, Any]:

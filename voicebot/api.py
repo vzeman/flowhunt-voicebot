@@ -285,8 +285,8 @@ def create_app(
         return {"event": event_to_dict(event)}
 
     @app.get("/calls/{call_id}/transcript")
-    def call_transcript(call_id: str) -> dict[str, Any]:
-        return {"call_id": call_id, "events": transcripts.read(call_id)}
+    def call_transcript(call_id: str, after: int = 0, limit: int = 200) -> dict[str, Any]:
+        return {"call_id": call_id, "events": transcripts.read(call_id, after=after, limit=validated_limit(limit))}
 
     @app.get("/transcripts")
     def list_transcripts() -> dict[str, Any]:
@@ -448,7 +448,11 @@ def create_app(
 
     def tool_get_transcript(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
-        return call_transcript(call_id)
+        return call_transcript(
+            call_id,
+            after=optional_int_arg(args, "after", 0),
+            limit=validated_limit(optional_int_arg(args, "limit", 200)),
+        )
 
     def tool_list_transcripts(args: dict[str, Any]) -> dict[str, Any]:
         return list_transcripts()

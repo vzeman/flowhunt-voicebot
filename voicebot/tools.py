@@ -157,7 +157,11 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "get_transcript",
         "Read the full persisted transcript/events for one call.",
-        (ToolArgument("call_id", "Call ID."),),
+        (
+            ToolArgument("call_id", "Call ID."),
+            ToolArgument("after", "Optional event ID cursor.", required=False, schema={"type": "integer"}),
+            ToolArgument("limit", "Optional maximum number of transcript events.", required=False, schema={"type": "integer"}),
+        ),
     ),
     ToolDefinition(
         "get_events",

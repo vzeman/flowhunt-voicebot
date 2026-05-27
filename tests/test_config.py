@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from voicebot.config import env_json_list
+from voicebot.config import Settings, env_json_list, redacted_settings
 
 
 class ConfigTests(unittest.TestCase):
@@ -24,6 +24,20 @@ class ConfigTests(unittest.TestCase):
         with patch.dict(os.environ, {"VOICEBOT_TEST_PIPELINE": '{"name":"stt"}'}):
             with self.assertRaisesRegex(ValueError, "VOICEBOT_TEST_PIPELINE must be a JSON list"):
                 env_json_list("VOICEBOT_TEST_PIPELINE", [])
+
+    def test_redacted_settings_hides_sensitive_values(self) -> None:
+        settings = Settings(
+            openai_api_key="configured-openai",
+            ami_password="configured-ami",
+            stt_pipeline=({"name": "stt"},),
+        )
+
+        result = redacted_settings(settings)
+
+        self.assertEqual(result["openai_api_key"], {"configured": True, "redacted": True})
+        self.assertEqual(result["ami_password"], {"configured": True, "redacted": True})
+        self.assertEqual(result["stt_pipeline"], [{"name": "stt"}])
+        self.assertEqual(result["stt_provider"], settings.stt_provider)
 
 
 if __name__ == "__main__":

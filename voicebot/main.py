@@ -45,7 +45,7 @@ def main() -> None:
     thread.start()
     print(f"AudioSocket listening on {settings.audiosocket_host}:{settings.audiosocket_port}")
 
-    app = create_app(events, registry, tracker, hub, transcripts, asterisk)
+    app = create_app(events, registry, tracker, hub, transcripts, asterisk, settings)
     uvicorn.run(app, host=settings.api_host, port=settings.api_port)
 
     audiosocket_server.shutdown()

@@ -18,6 +18,7 @@ from .api_models import (
 )
 from .asterisk_control import AsteriskAMI
 from .calls import AgentResponse, CallRegistry
+from .config import Settings, redacted_settings
 from .event_catalog import event_catalog
 from .events import EventStore, VoicebotEvent, event_to_dict
 from .health import readiness_report
@@ -69,9 +70,11 @@ def create_app(
     hub: WebSocketHub,
     transcripts: TranscriptStore,
     asterisk: AsteriskAMI | None,
+    settings: Settings | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Flowhunt Voicebot", version="0.1.0")
     tool_executor = AgentToolExecutor()
+    runtime_settings = settings or Settings()
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -99,6 +102,10 @@ def create_app(
     @app.get("/providers")
     def providers() -> dict[str, Any]:
         return provider_catalog()
+
+    @app.get("/config")
+    def config() -> dict[str, Any]:
+        return {"settings": redacted_settings(runtime_settings)}
 
     @app.get("/events")
     def list_events(after: int = 0, call_id: str | None = None, limit: int = 200) -> dict[str, Any]:
@@ -426,6 +433,9 @@ def create_app(
         call_id = require_arg(args, "call_id")
         return call_state(call_id)
 
+    def tool_get_runtime_config(args: dict[str, Any]) -> dict[str, Any]:
+        return config()
+
     tool_executor.register("say", tool_say)
     tool_executor.register("hangup_call", tool_hangup_call)
     tool_executor.register("transfer_call", tool_transfer_call)
@@ -437,6 +447,7 @@ def create_app(
     tool_executor.register("get_metrics", tool_get_metrics)
     tool_executor.register("get_active_calls", tool_get_active_calls)
     tool_executor.register("get_call_state", tool_get_call_state)
+    tool_executor.register("get_runtime_config", tool_get_runtime_config)
 
     return app
 

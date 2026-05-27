@@ -16,6 +16,7 @@ ToolName = Literal[
     "get_metrics",
     "get_active_calls",
     "get_call_state",
+    "get_runtime_config",
 ]
 
 
@@ -163,6 +164,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ),
     ToolDefinition("get_active_calls", "List currently active call IDs.", ()),
     ToolDefinition("get_call_state", "Read runtime state for one active call.", (ToolArgument("call_id", "Active call ID."),)),
+    ToolDefinition("get_runtime_config", "Read redacted runtime configuration.", ()),
 )
 
 

@@ -44,6 +44,7 @@ FRAME_EVENT_TYPES = {
     "transcription_empty": "stt_no_text",
     "user_transcript": "user_transcript",
     "agent_request": "agent_response_requested",
+    "agent_response_partial": "agent_response_partial",
     "agent_response": "agent_response_received",
     "agent_response_dropped": "agent_response_dropped",
     "tts_started": "tts_started",

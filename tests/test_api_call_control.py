@@ -114,6 +114,30 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertNotIn(46, tracker.responded_event_ids)
         self.assertEqual(events.list_events(call_id="call-1"), [])
 
+    def test_send_dtmf_rejects_invalid_digit(self) -> None:
+        client, events, tracker = self.build_client(asterisk=FakeAsterisk())
+
+        response = client.post(
+            "/calls/call-1/control",
+            json={"action": "send_dtmf", "digit": "12", "response_to_event_id": 47},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "digit must be one DTMF character: 0-9, *, #, A-D")
+        self.assertNotIn(47, tracker.responded_event_ids)
+        self.assertEqual([event.type for event in events.list_events(call_id="call-1")], ["call_control_requested"])
+
+    def test_send_dtmf_normalizes_letter_digit(self) -> None:
+        client, events, _tracker = self.build_client(asterisk=FakeAsterisk())
+
+        response = client.post(
+            "/calls/call-1/control",
+            json={"action": "send_dtmf", "digit": "a"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(events.list_events(call_id="call-1")[-1].data["message"], "sent DTMF A to call-1")
+
 
 if __name__ == "__main__":
     unittest.main()

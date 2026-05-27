@@ -280,7 +280,7 @@ def create_app(
             await hub.broadcast(completed)
             raise HTTPException(status_code=400, detail="transfer requires target")
         elif request.action == "send_dtmf" and request.digit:
-            result = asterisk.send_dtmf(call_id, request.digit)
+            result = asterisk.send_dtmf(call_id, validated_dtmf_digit(request.digit))
         elif request.action == "send_dtmf":
             completed = events.append(
                 call_id,
@@ -373,7 +373,7 @@ def create_app(
 
     async def tool_send_dtmf(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
-        digit = require_arg(args, "digit")
+        digit = validated_dtmf_digit(require_arg(args, "digit"))
         return await call_control(
             call_id,
             CallControlRequest(
@@ -455,3 +455,10 @@ def optional_int_arg(args: dict[str, Any], name: str, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail=f"{name} must be an integer") from None
+
+
+def validated_dtmf_digit(value: Any) -> str:
+    digit = str(value).upper()
+    if len(digit) != 1 or digit not in "0123456789*#ABCD":
+        raise HTTPException(status_code=400, detail="digit must be one DTMF character: 0-9, *, #, A-D")
+    return digit

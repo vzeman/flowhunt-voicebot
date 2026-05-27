@@ -51,6 +51,10 @@ class AgentTaskClaimRequest(BaseModel):
     ttl_seconds: float = 60.0
 
 
+class AgentTaskReleaseRequest(BaseModel):
+    event_ids: list[int]
+
+
 @dataclass
 class AgentTaskTracker:
     responded_event_ids: set[int]
@@ -89,6 +93,15 @@ class AgentTaskTracker:
             return
         with self._lock:
             self._claimed_event_ids.pop(event_id, None)
+
+    def release_many(self, event_ids: list[int]) -> list[int]:
+        released: list[int] = []
+        with self._lock:
+            for event_id in event_ids:
+                if event_id in self._claimed_event_ids:
+                    self._claimed_event_ids.pop(event_id, None)
+                    released.append(event_id)
+        return released
 
     def _expire_claims_locked(self, now: float) -> None:
         expired = [event_id for event_id, (_owner, expires_at) in self._claimed_event_ids.items() if expires_at <= now]
@@ -202,6 +215,10 @@ def create_app(
             "claimed_event_ids": tracker.claim(request.event_ids, request.owner, request.ttl_seconds),
             "owner": request.owner,
         }
+
+    @app.post("/agent/tasks/release")
+    def release_agent_tasks(request: AgentTaskReleaseRequest) -> dict[str, Any]:
+        return {"released_event_ids": tracker.release_many(request.event_ids)}
 
     @app.get("/agent/tools")
     def agent_tools() -> dict[str, Any]:

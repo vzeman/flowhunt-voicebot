@@ -114,6 +114,14 @@ curl -X POST http://127.0.0.1:8080/agent/tasks/claim \
   -d '{"event_ids":[123], "owner":"worker-1", "ttl_seconds":60}'
 ```
 
+Release claimed tasks if a worker cannot answer them:
+
+```bash
+curl -X POST http://127.0.0.1:8080/agent/tasks/release \
+  -H 'Content-Type: application/json' \
+  -d '{"event_ids":[123]}'
+```
+
 For parallel call handling, filter tasks to one call or bound each poll:
 
 ```bash

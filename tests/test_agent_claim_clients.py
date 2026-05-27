@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agents"))
 
-from local_command_agent import claim_tasks
+from local_command_agent import claim_tasks, release_tasks
 
 
 class AgentClaimClientTests(unittest.TestCase):
@@ -35,6 +35,23 @@ class AgentClaimClientTests(unittest.TestCase):
 
         self.assertEqual(claimed, [])
         http_json.assert_not_called()
+
+    def test_release_tasks_posts_claimed_event_ids(self) -> None:
+        tasks = [
+            {"id": 1, "call_id": "call-1"},
+            {"id": 2, "call_id": "call-1"},
+        ]
+
+        with patch("local_command_agent.http_json") as http_json:
+            http_json.return_value = {"released_event_ids": [1, 2]}
+            response = release_tasks("http://voicebot", tasks)
+
+        self.assertEqual(response, {"released_event_ids": [1, 2]})
+        http_json.assert_called_once_with(
+            "POST",
+            "http://voicebot/agent/tasks/release",
+            {"event_ids": [1, 2]},
+        )
 
 
 if __name__ == "__main__":

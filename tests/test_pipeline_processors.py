@@ -270,6 +270,11 @@ class ProcessorRegistryTests(unittest.TestCase):
 
         self.assertEqual(specs, [ProcessorSpec("stt"), ProcessorSpec("agent-request", {"request_partials": True})])
 
+    def test_processor_specs_from_config_accepts_settings_tuple(self) -> None:
+        specs = processor_specs_from_config(({"name": "stt"}, {"name": "agent-request"}))
+
+        self.assertEqual(specs, [ProcessorSpec("stt"), ProcessorSpec("agent-request")])
+
     def test_processor_specs_from_config_rejects_missing_names(self) -> None:
         with self.assertRaisesRegex(ValueError, "processor configuration requires a non-empty name"):
             processor_specs_from_config([{"options": {}}])

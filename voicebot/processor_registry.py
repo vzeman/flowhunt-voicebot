@@ -107,7 +107,7 @@ def _fanout_factory(
 
 
 def processor_specs_from_config(config: Any) -> list[ProcessorSpec]:
-    if not isinstance(config, list):
+    if not isinstance(config, (list, tuple)):
         raise ValueError("fan-out branch processors must be a list")
 
     specs: list[ProcessorSpec] = []

@@ -33,6 +33,7 @@ EventType = Literal[
     "bot_playback_started",
     "bot_playback_interrupted",
     "bot_playback_finished",
+    "metrics",
     "dtmf",
     "system",
     "context_compacted",

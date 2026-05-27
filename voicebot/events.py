@@ -27,6 +27,8 @@ EventType = Literal[
     "agent_response_received",
     "agent_response_dropped",
     "agent_response_queued",
+    "agent_task_claimed",
+    "agent_task_released",
     "tts_started",
     "tts_finished",
     "tts_failed",
@@ -84,6 +86,13 @@ class EventStore:
             events = [e for e in self._events if e.id > after and (call_id is None or e.call_id == call_id)]
             return events[:limit]
 
+    def get_event(self, event_id: int) -> VoicebotEvent | None:
+        with self._lock:
+            for event in self._events:
+                if event.id == event_id:
+                    return event
+        return None
+
     def context(self, call_id: str | None = None) -> dict[str, Any]:
         with self._lock:
             events = [e for e in self._events if call_id is None or e.call_id == call_id]
@@ -113,6 +122,8 @@ class EventStore:
                 "call_ended",
                 "user_transcript",
                 "agent_response_requested",
+                "agent_task_claimed",
+                "agent_task_released",
                 "agent_response_received",
                 "call_control_completed",
             }:

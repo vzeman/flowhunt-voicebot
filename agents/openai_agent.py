@@ -4,13 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
 import urllib.error
 from pathlib import Path
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ModuleNotFoundError:
+    OpenAI = None
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -55,10 +59,11 @@ def run_openai_agent(
     prompt: str,
     timeout: float,
     max_output_tokens: int,
-) -> str:
+    tools: list[dict] | None = None,
+) -> tuple[str, list[dict]]:
     provider = normalize_provider(provider)
     if provider == "openai-responses":
-        return run_responses_agent(client, model, prompt, timeout, max_output_tokens)
+        return run_responses_agent(client, model, prompt, timeout, max_output_tokens, tools)
     if provider in AGENT_CHAT_COMPATIBLE_PROVIDERS:
         return run_chat_agent(client, model, prompt, timeout, max_output_tokens)
     if provider in SUPPORTED_AGENT_PROVIDERS:
@@ -74,17 +79,27 @@ def run_openai_agent(
     raise RuntimeError(f"unsupported agent provider: {provider}")
 
 
-def run_responses_agent(client: OpenAI, model: str, prompt: str, timeout: float, max_output_tokens: int) -> str:
-    response = client.responses.create(
-        model=model,
-        input=prompt,
-        max_output_tokens=max_output_tokens,
-        timeout=timeout,
-    )
-    return response.output_text.strip()
+def run_responses_agent(
+    client: OpenAI,
+    model: str,
+    prompt: str,
+    timeout: float,
+    max_output_tokens: int,
+    tools: list[dict] | None = None,
+) -> tuple[str, list[dict]]:
+    kwargs = {
+        "model": model,
+        "input": prompt,
+        "max_output_tokens": max_output_tokens,
+        "timeout": timeout,
+    }
+    if tools:
+        kwargs["tools"] = tools
+    response = client.responses.create(**kwargs)
+    return response.output_text.strip(), extract_responses_tool_calls(response)
 
 
-def run_chat_agent(client: OpenAI, model: str, prompt: str, timeout: float, max_output_tokens: int) -> str:
+def run_chat_agent(client: OpenAI, model: str, prompt: str, timeout: float, max_output_tokens: int) -> tuple[str, list[dict]]:
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -92,11 +107,29 @@ def run_chat_agent(client: OpenAI, model: str, prompt: str, timeout: float, max_
         temperature=0,
         timeout=timeout,
     )
-    return (response.choices[0].message.content or "").strip()
+    return (response.choices[0].message.content or "").strip(), []
+
+
+def extract_responses_tool_calls(response) -> list[dict]:
+    calls = []
+    for item in getattr(response, "output", []) or []:
+        if getattr(item, "type", None) != "function_call":
+            continue
+        name = getattr(item, "name", "")
+        raw_arguments = getattr(item, "arguments", "{}") or "{}"
+        try:
+            arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+        except json.JSONDecodeError:
+            arguments = {}
+        if name:
+            calls.append({"name": name, "arguments": arguments})
+    return calls
 
 
 def main() -> None:
     args = parse_args()
+    if OpenAI is None:
+        raise RuntimeError("The openai package is required to run this agent")
     provider = normalize_provider(args.provider)
     api_key = provider_api_key(provider, args.api_key, os.getenv("OPENAI_API_KEY", ""))
     if not api_key and provider != "ollama":
@@ -135,28 +168,33 @@ def main() -> None:
                 )
                 continue
 
-            tools = http_json("GET", f"{args.base_url}/agent/tools").get("tools", [])
-            prompt = build_prompt(pending, response.get("context", {}), tools)
-            raw_answer = run_openai_agent(
+            legacy_tools = http_json("GET", f"{args.base_url}/agent/tools").get("tools", [])
+            native_tools = http_json("GET", f"{args.base_url}/agent/tools/schema").get("tools", [])
+            prompt = build_prompt(pending, response.get("context", {}), legacy_tools)
+            raw_answer, native_tool_calls = run_openai_agent(
                 client,
                 provider,
                 args.model,
                 prompt,
                 args.timeout,
                 args.max_output_tokens,
+                native_tools,
             )
-            answer, tool_calls = parse_agent_output(raw_answer)
+            answer, parsed_tool_calls = parse_agent_output(raw_answer)
+            tool_calls = [*native_tool_calls, *parsed_tool_calls]
             if answer and is_echo_answer(answer, pending):
                 retry_prompt = build_retry_prompt(prompt, answer)
-                raw_answer = run_openai_agent(
+                raw_answer, native_tool_calls = run_openai_agent(
                     client,
                     provider,
                     args.model,
                     retry_prompt,
                     args.timeout,
                     args.max_output_tokens,
+                    native_tools,
                 )
-                answer, tool_calls = parse_agent_output(raw_answer)
+                answer, parsed_tool_calls = parse_agent_output(raw_answer)
+                tool_calls = [*native_tool_calls, *parsed_tool_calls]
                 if answer and is_echo_answer(answer, pending):
                     raise RuntimeError(f"OpenAI agent returned echo response twice: {answer}")
 

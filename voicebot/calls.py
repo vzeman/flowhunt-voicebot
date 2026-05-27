@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from dataclasses import dataclass
 import queue
 import socket
 import threading
 import time
+from typing import TYPE_CHECKING
 import uuid
 
 import numpy as np
@@ -23,9 +25,14 @@ from .audio import (
     write_audiosocket_message,
 )
 from .config import Settings
+from .core_processors import AgentRequestProcessor, STTProcessor, TTSProcessor
 from .events import EventStore, VoicebotEvent
-from .stt import STTProvider
-from .tts import TTSProvider
+from .frames import AudioInputFrame, AudioOutputFrame, PlaybackFrame, TextFrame, TranscriptionFrame
+from .pipeline import PipelineRunner
+
+if TYPE_CHECKING:
+    from .stt import STTProvider
+    from .tts import TTSProvider
 
 
 @dataclass(frozen=True)
@@ -109,6 +116,8 @@ class CallSession:
         self.events = event_store
         self.stt = stt
         self.tts = tts
+        self.stt_pipeline = PipelineRunner([STTProcessor(stt), AgentRequestProcessor()])
+        self.tts_pipeline = PipelineRunner([TTSProcessor(tts)])
         self.playback = PlaybackBuffer()
         self.stop_event = threading.Event()
         self.recording_event = threading.Event()
@@ -151,13 +160,18 @@ class CallSession:
                 },
             )
             return event
-        self.events.append(
-            self.call_id,
-            "tts_started",
-            {"text": response.text, "response_to_event_id": response.response_to_event_id},
-        )
+
         try:
-            audio, duration = self.tts.synthesize(response.text)
+            frames = asyncio.run(
+                self.tts_pipeline.push(
+                    TextFrame(
+                        "agent_response",
+                        self.call_id,
+                        response.text,
+                        data={"response_to_event_id": response.response_to_event_id},
+                    )
+                )
+            )
         except Exception as exc:
             self.events.append(
                 self.call_id,
@@ -165,11 +179,42 @@ class CallSession:
                 {"error": str(exc), "response_to_event_id": response.response_to_event_id},
             )
             raise
-        self.events.append(
-            self.call_id,
-            "tts_finished",
-            {"duration": duration, "response_to_event_id": response.response_to_event_id},
-        )
+
+        audio: np.ndarray | None = None
+        duration: float | None = None
+        for frame in frames:
+            if isinstance(frame, TextFrame) and frame.kind == "tts_started":
+                self.events.append(
+                    self.call_id,
+                    "tts_started",
+                    {"text": response.text, "response_to_event_id": response.response_to_event_id},
+                )
+            elif isinstance(frame, PlaybackFrame) and frame.kind == "tts_finished":
+                duration = float(frame.data.get("duration", 0.0))
+                self.events.append(
+                    self.call_id,
+                    "tts_finished",
+                    {"duration": duration, "response_to_event_id": response.response_to_event_id},
+                )
+            elif isinstance(frame, TextFrame) and frame.kind == "tts_failed":
+                self.events.append(
+                    self.call_id,
+                    "tts_failed",
+                    {"error": frame.text, "response_to_event_id": response.response_to_event_id},
+                )
+                raise RuntimeError(frame.text)
+            elif isinstance(frame, AudioOutputFrame):
+                audio = frame.audio
+                duration = float(frame.data.get("duration", duration or 0.0))
+
+        if audio is None:
+            self.events.append(
+                self.call_id,
+                "tts_failed",
+                {"error": "TTS produced no audio", "response_to_event_id": response.response_to_event_id},
+            )
+            raise RuntimeError("TTS produced no audio")
+
         if self.recording_event.is_set():
             self.events.append(
                 self.call_id,
@@ -184,7 +229,7 @@ class CallSession:
         self.events.append(
             self.call_id,
             "agent_response_queued",
-            {"duration": duration, "response_to_event_id": response.response_to_event_id},
+            {"duration": duration or 0.0, "response_to_event_id": response.response_to_event_id},
         )
         return event
 
@@ -297,38 +342,66 @@ class CallSession:
             except queue.Empty:
                 continue
 
-            started = time.perf_counter()
-            self.events.append(self.call_id, "stt_started", {"turn_id": turn_id})
-            result = self.stt.transcribe(audio)
-            elapsed = time.perf_counter() - started
-            if not result.text:
-                self.events.append(
-                    self.call_id,
-                    "stt_no_text",
-                    {
-                        "turn_id": turn_id,
-                        "elapsed": elapsed,
-                        "reason": result.reason or "empty_result",
-                        "metadata": result.metadata or {},
-                    },
+            frames = asyncio.run(
+                self.stt_pipeline.push(
+                    AudioInputFrame(
+                        self.call_id,
+                        audio,
+                        CALL_SAMPLE_RATE,
+                        data={"turn_id": turn_id},
+                    )
                 )
-                continue
-            self.events.append(
-                self.call_id,
-                "stt_finished",
-                {"turn_id": turn_id, "elapsed": elapsed, "metadata": result.metadata or {}},
             )
+            transcript_event_ids: dict[str, int] = {}
+            for frame in frames:
+                if not isinstance(frame, TranscriptionFrame):
+                    if isinstance(frame, TextFrame) and frame.kind == "agent_request":
+                        transcript_frame_id = str(frame.data.get("transcript_frame_id", ""))
+                        self.events.append(
+                            self.call_id,
+                            "agent_response_requested",
+                            {
+                                "turn_id": frame.data.get("turn_id"),
+                                "transcript_event_id": transcript_event_ids.get(transcript_frame_id),
+                                "text": frame.text,
+                            },
+                        )
+                    continue
 
-            transcript = self.events.append(
-                self.call_id,
-                "user_transcript",
-                {"turn_id": turn_id, "text": result.text, "elapsed": elapsed},
-            )
-            self.events.append(
-                self.call_id,
-                "agent_response_requested",
-                {"turn_id": turn_id, "transcript_event_id": transcript.id, "text": result.text},
-            )
+                if frame.kind == "transcription_started":
+                    self.events.append(self.call_id, "stt_started", {"turn_id": frame.turn_id})
+                elif frame.kind == "transcription_empty":
+                    self.events.append(
+                        self.call_id,
+                        "stt_no_text",
+                        {
+                            "turn_id": frame.turn_id,
+                            "elapsed": frame.data.get("elapsed"),
+                            "reason": frame.data.get("reason", "empty_result"),
+                            "metadata": frame.metadata,
+                        },
+                    )
+                elif frame.kind == "transcription_finished":
+                    self.events.append(
+                        self.call_id,
+                        "stt_finished",
+                        {
+                            "turn_id": frame.turn_id,
+                            "elapsed": frame.data.get("elapsed"),
+                            "metadata": frame.metadata,
+                        },
+                    )
+                elif frame.kind == "user_transcript":
+                    transcript = self.events.append(
+                        self.call_id,
+                        "user_transcript",
+                        {
+                            "turn_id": frame.turn_id,
+                            "text": frame.text,
+                            "elapsed": frame.data.get("elapsed"),
+                        },
+                    )
+                    transcript_event_ids[frame.frame_id] = transcript.id
 
     def _send_loop(self) -> None:
         packet_samples = max(1, int(CALL_SAMPLE_RATE * self.settings.packet_ms / 1000))

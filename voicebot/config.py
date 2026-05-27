@@ -29,12 +29,16 @@ class Settings:
     stt_provider: str = os.getenv("VOICEBOT_STT_PROVIDER", "whisper")
     whisper_model: str = os.getenv("VOICEBOT_WHISPER_MODEL", "base")
     language: str | None = os.getenv("VOICEBOT_LANGUAGE") or None
+    stt_no_speech_threshold: float = env_float("VOICEBOT_STT_NO_SPEECH_THRESHOLD", 0.60)
+    stt_logprob_threshold: float = env_float("VOICEBOT_STT_LOGPROB_THRESHOLD", -1.0)
+    stt_min_chars: int = env_int("VOICEBOT_STT_MIN_CHARS", 2)
 
     tts_provider: str = os.getenv("VOICEBOT_TTS_PROVIDER", "supertonic")
     tts_voice: str = os.getenv("VOICEBOT_TTS_VOICE", "M1")
 
-    start_threshold: float = env_float("VOICEBOT_START_THRESHOLD", 0.018)
-    stop_threshold: float = env_float("VOICEBOT_STOP_THRESHOLD", 0.010)
+    start_threshold: float = env_float("VOICEBOT_START_THRESHOLD", 0.030)
+    stop_threshold: float = env_float("VOICEBOT_STOP_THRESHOLD", 0.012)
+    vad_start_ms: int = env_int("VOICEBOT_VAD_START_MS", 120)
     barge_in_threshold: float = env_float("VOICEBOT_BARGE_IN_THRESHOLD", 0.30)
     echo_tail_ms: int = env_int("VOICEBOT_ECHO_TAIL_MS", 800)
     silence_ms: int = env_int("VOICEBOT_SILENCE_MS", 900)

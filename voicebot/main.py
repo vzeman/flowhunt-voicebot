@@ -19,7 +19,7 @@ from .tts import SupertonicTTSProvider
 def build_stt(settings: Settings):
     if settings.stt_provider != "whisper":
         raise ValueError(f"Unsupported STT provider: {settings.stt_provider}")
-    return WhisperSTTProvider(settings.whisper_model, settings.language)
+    return WhisperSTTProvider(settings)
 
 
 def build_tts(settings: Settings):

@@ -191,6 +191,8 @@ class CallSession:
     def _receive_loop(self) -> None:
         is_recording = False
         collected: list[np.ndarray] = []
+        pending_start: list[np.ndarray] = []
+        pending_start_ms = 0
         silence_ms = 0
         speech_ms = 0
 
@@ -238,20 +240,31 @@ class CallSession:
 
             if not is_recording:
                 if self._should_ignore_input(level):
+                    pending_start = []
+                    pending_start_ms = 0
                     continue
                 if level < self.settings.start_threshold:
+                    pending_start = []
+                    pending_start_ms = 0
                     continue
 
-                if self.playback.interrupt():
-                    self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "user_speech_started"})
+                pending_start.append(block)
+                pending_start_ms += block_ms
+                if pending_start_ms < self.settings.vad_start_ms:
+                    continue
 
                 is_recording = True
                 self.recording_event.set()
-                collected = [block]
+                collected = pending_start
+                pending_start = []
+                pending_start_ms = 0
                 silence_ms = 0
-                speech_ms = block_ms
+                speech_ms = sum(int(len(item) / CALL_SAMPLE_RATE * 1000) for item in collected)
                 turn_id = self._new_turn()
                 self.events.append(self.call_id, "user_speech_started", {"turn_id": turn_id, "level": level})
+
+                if self.playback.interrupt():
+                    self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "user_speech_started"})
                 continue
 
             collected.append(block)
@@ -286,22 +299,35 @@ class CallSession:
 
             started = time.perf_counter()
             self.events.append(self.call_id, "stt_started", {"turn_id": turn_id})
-            text = self.stt.transcribe(audio)
+            result = self.stt.transcribe(audio)
             elapsed = time.perf_counter() - started
-            if not text:
-                self.events.append(self.call_id, "stt_no_text", {"turn_id": turn_id, "elapsed": elapsed})
+            if not result.text:
+                self.events.append(
+                    self.call_id,
+                    "stt_no_text",
+                    {
+                        "turn_id": turn_id,
+                        "elapsed": elapsed,
+                        "reason": result.reason or "empty_result",
+                        "metadata": result.metadata or {},
+                    },
+                )
                 continue
-            self.events.append(self.call_id, "stt_finished", {"turn_id": turn_id, "elapsed": elapsed})
+            self.events.append(
+                self.call_id,
+                "stt_finished",
+                {"turn_id": turn_id, "elapsed": elapsed, "metadata": result.metadata or {}},
+            )
 
             transcript = self.events.append(
                 self.call_id,
                 "user_transcript",
-                {"turn_id": turn_id, "text": text, "elapsed": elapsed},
+                {"turn_id": turn_id, "text": result.text, "elapsed": elapsed},
             )
             self.events.append(
                 self.call_id,
                 "agent_response_requested",
-                {"turn_id": turn_id, "transcript_event_id": transcript.id, "text": text},
+                {"turn_id": turn_id, "transcript_event_id": transcript.id, "text": result.text},
             )
 
     def _send_loop(self) -> None:

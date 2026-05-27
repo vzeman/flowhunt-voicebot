@@ -58,6 +58,7 @@ FRAME_EVENT_TYPES = {
     "playback_finished": "bot_playback_finished",
     "call_control_requested": "call_control_requested",
     "call_control_completed": "call_control_completed",
+    "metrics": "metrics",
     "error": "system",
     "system": "system",
 }

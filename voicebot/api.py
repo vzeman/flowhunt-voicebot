@@ -136,7 +136,18 @@ def create_app(
 
     @app.post("/agent/tasks/claim")
     def claim_agent_tasks(request: AgentTaskClaimRequest) -> dict[str, Any]:
-        claimed_event_ids = tracker.claim(request.event_ids, request.owner, request.ttl_seconds)
+        active_call_ids = set(registry.active_call_ids())
+        eligible_event_ids = []
+        for event_id in request.event_ids:
+            source_event = events.get_event(event_id)
+            if (
+                source_event is not None
+                and source_event.type == "agent_response_requested"
+                and source_event.call_id in active_call_ids
+            ):
+                eligible_event_ids.append(event_id)
+
+        claimed_event_ids = tracker.claim(eligible_event_ids, request.owner, request.ttl_seconds)
         for event_id in claimed_event_ids:
             source_event = events.get_event(event_id)
             if source_event is None:

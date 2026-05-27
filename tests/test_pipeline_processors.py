@@ -11,7 +11,12 @@ from voicebot.events import EventStore
 from voicebot.fanout import FanOutProcessor
 from voicebot.frames import AudioInputFrame, AudioOutputFrame, Frame, MetricsFrame, TextFrame, TranscriptionFrame
 from voicebot.pipeline import PipelineContext, PipelineRunner
-from voicebot.processor_registry import ProcessorDependencies, ProcessorSpec, default_processor_registry
+from voicebot.processor_registry import (
+    ProcessorDependencies,
+    ProcessorSpec,
+    default_processor_registry,
+    processor_specs_from_config,
+)
 from voicebot.processors import DropProcessor, FrameProcessorBase, PassthroughProcessor
 
 
@@ -254,6 +259,20 @@ class ProcessorRegistryTests(unittest.TestCase):
                 ProcessorSpec("fan-out", {"branches": [{"name": "bad", "processors": "passthrough"}]}),
                 ProcessorDependencies(),
             )
+
+    def test_processor_specs_from_config_converts_serialized_specs(self) -> None:
+        specs = processor_specs_from_config(
+            [
+                {"name": "stt"},
+                {"name": "agent-request", "options": {"request_partials": True}},
+            ]
+        )
+
+        self.assertEqual(specs, [ProcessorSpec("stt"), ProcessorSpec("agent-request", {"request_partials": True})])
+
+    def test_processor_specs_from_config_rejects_missing_names(self) -> None:
+        with self.assertRaisesRegex(ValueError, "processor configuration requires a non-empty name"):
+            processor_specs_from_config([{"options": {}}])
 
 
 if __name__ == "__main__":

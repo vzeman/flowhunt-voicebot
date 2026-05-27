@@ -171,6 +171,37 @@ voice-agent stacks. If a provider needs a protocol-specific native adapter, the
 runtime fails fast with the exact variables to set for an OpenAI-compatible
 gateway until that native adapter is added.
 
+## Pipeline Configuration
+
+The STT and TTS call pipelines can be configured with JSON processor specs.
+When unset, the defaults preserve the normal flow.
+
+```bash
+VOICEBOT_STT_PIPELINE='[{"name":"stt"},{"name":"agent-request"}]'
+VOICEBOT_TTS_PIPELINE='[{"name":"tts"}]'
+```
+
+Fan-out branches can mirror frames into side pipelines for observers, metrics,
+or future integrations:
+
+```bash
+VOICEBOT_STT_PIPELINE='[
+  {
+    "name": "fan-out",
+    "options": {
+      "branches": [
+        {
+          "name": "observer",
+          "processors": [{"name": "event-log"}]
+        }
+      ]
+    }
+  },
+  {"name": "stt"},
+  {"name": "agent-request"}
+]'
+```
+
 ## Local Microphone Echo Demo
 
 The original local microphone/speaker test script is still available:

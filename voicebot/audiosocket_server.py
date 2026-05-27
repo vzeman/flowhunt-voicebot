@@ -6,6 +6,7 @@ import uuid
 from .calls import CallRegistry, CallSession
 from .config import Settings
 from .events import EventStore
+from .processor_registry import ProcessorSpec, processor_specs_from_config
 from .stt import STTProvider
 from .tts import TTSProvider
 
@@ -29,6 +30,8 @@ class ThreadingAudioSocketServer(socketserver.ThreadingTCPServer):
         self.registry = registry
         self.stt = stt
         self.tts = tts
+        self.stt_pipeline_specs: tuple[ProcessorSpec, ...] = tuple(processor_specs_from_config(settings.stt_pipeline))
+        self.tts_pipeline_specs: tuple[ProcessorSpec, ...] = tuple(processor_specs_from_config(settings.tts_pipeline))
 
 
 class AudioSocketRequestHandler(socketserver.BaseRequestHandler):
@@ -43,6 +46,8 @@ class AudioSocketRequestHandler(socketserver.BaseRequestHandler):
             event_store=self.server.events,
             stt=self.server.stt,
             tts=self.server.tts,
+            stt_pipeline_specs=self.server.stt_pipeline_specs,
+            tts_pipeline_specs=self.server.tts_pipeline_specs,
         )
         session.set_call_id_change_callback(self.server.registry.replace_id)
         self.server.registry.add(session)

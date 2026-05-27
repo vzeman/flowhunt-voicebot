@@ -77,7 +77,7 @@ class ApiCallControlTests(unittest.TestCase):
 
         response = client.post(
             "/calls/call-1/control",
-            json={"action": "transfer", "target": "123", "response_to_event_id": 44},
+            json={"action": "transfer", "target": " 123 ", "response_to_event_id": 44},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -86,6 +86,19 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertEqual([event.type for event in persisted], ["call_control_requested", "call_control_completed"])
         self.assertTrue(persisted[1].data["ok"])
         self.assertEqual(persisted[1].data["message"], "transferred call-1 to 123")
+
+    def test_transfer_rejects_control_characters_in_target(self) -> None:
+        client, events, tracker = self.build_client(asterisk=FakeAsterisk())
+
+        response = client.post(
+            "/calls/call-1/control",
+            json={"action": "transfer", "target": "123\r\nAction: Hangup", "response_to_event_id": 48},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "transfer target must not contain control characters")
+        self.assertNotIn(48, tracker.responded_event_ids)
+        self.assertEqual([event.type for event in events.list_events(call_id="call-1")], ["call_control_requested"])
 
     def test_call_control_records_send_dtmf_result(self) -> None:
         client, events, tracker = self.build_client(asterisk=FakeAsterisk())

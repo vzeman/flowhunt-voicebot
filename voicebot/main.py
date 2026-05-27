@@ -5,7 +5,8 @@ import threading
 
 import uvicorn
 
-from .api import AgentTaskTracker, WebSocketHub, create_app
+from .agent_tasks import AgentTaskTracker
+from .api import WebSocketHub, create_app
 from .asterisk_control import AsteriskAMI
 from .audiosocket_server import ThreadingAudioSocketServer
 from .calls import CallRegistry

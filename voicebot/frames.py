@@ -23,6 +23,7 @@ FrameKind = Literal[
     "transcription_empty",
     "user_transcript",
     "agent_request",
+    "agent_response_partial",
     "agent_response",
     "agent_response_dropped",
     "tts_started",
@@ -212,6 +213,7 @@ class TextFrame(Frame):
         self,
         kind: Literal[
             "agent_request",
+            "agent_response_partial",
             "agent_response",
             "agent_response_dropped",
             "tts_started",

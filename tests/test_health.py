@@ -48,6 +48,31 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(check["corrupt_transcript_count"], 1)
         self.assertEqual(check["corrupt_call_ids"], ["call-1"])
 
+    def test_readiness_transcript_stats_are_not_limited(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transcripts = TranscriptStore(directory)
+            for index in range(3):
+                transcripts.append(
+                    type(
+                        "Event",
+                        (),
+                        {
+                            "id": index + 1,
+                            "call_id": f"call-{index + 1}",
+                            "type": "call_started",
+                            "timestamp": "2026-05-27T00:00:00Z",
+                            "data": {},
+                        },
+                    )()
+                )
+            report = readiness_report(
+                transcripts=transcripts,
+                asterisk=None,
+                active_call_ids=[],
+            )
+
+        self.assertEqual(report["checks"]["transcripts"]["transcript_count"], 3)
+
     def test_ami_check_reports_config_without_password(self) -> None:
         asterisk = AsteriskAMI("127.0.0.1", 5038, "admin", "secret")
 

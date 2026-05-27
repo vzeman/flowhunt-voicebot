@@ -18,6 +18,7 @@ from .providers import (
     SUPPORTED_TTS_PROVIDERS,
     TTS_OPENAI_COMPATIBLE_PROVIDERS,
 )
+from .tool_executor import AgentToolExecutor
 from .transcripts import TranscriptStore
 from .tools import tool_definitions_json_schema, tool_definitions_legacy
 
@@ -97,6 +98,7 @@ def create_app(
     asterisk: AsteriskAMI | None,
 ) -> FastAPI:
     app = FastAPI(title="Flowhunt Voicebot", version="0.1.0")
+    tool_executor = AgentToolExecutor()
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -163,44 +165,10 @@ def create_app(
 
     @app.post("/agent/tools/{tool_name}")
     async def agent_tool(tool_name: str, request: AgentToolRequest) -> dict[str, Any]:
-        args = request.arguments
-        if tool_name == "say":
-            call_id = require_arg(args, "call_id")
-            text = require_arg(args, "text")
-            response = AgentResponseRequest(
-                text=text,
-                response_to_event_id=args.get("response_to_event_id"),
-            )
-            return await submit_response(call_id, response)
-        if tool_name == "hangup_call":
-            call_id = require_arg(args, "call_id")
-            return await call_control(
-                call_id,
-                CallControlRequest(action="hangup", response_to_event_id=args.get("response_to_event_id")),
-            )
-        if tool_name == "transfer_call":
-            call_id = require_arg(args, "call_id")
-            target = require_arg(args, "target")
-            return await call_control(
-                call_id,
-                CallControlRequest(
-                    action="transfer",
-                    target=target,
-                    response_to_event_id=args.get("response_to_event_id"),
-                ),
-            )
-        if tool_name == "get_transcript":
-            call_id = require_arg(args, "call_id")
-            return call_transcript(call_id)
-        if tool_name == "get_events":
-            return list_events(
-                after=int(args.get("after", 0)),
-                call_id=args.get("call_id"),
-                limit=int(args.get("limit", 200)),
-            )
-        if tool_name == "get_active_calls":
-            return {"active_calls": registry.active_call_ids()}
-        raise HTTPException(status_code=404, detail=f"unknown agent tool: {tool_name}")
+        try:
+            return await tool_executor.execute(tool_name, request.arguments)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"unknown agent tool: {tool_name}") from None
 
     @app.post("/calls/{call_id}/responses")
     async def submit_response(call_id: str, request: AgentResponseRequest) -> dict[str, Any]:
@@ -295,6 +263,55 @@ def create_app(
                 await asyncio.sleep(0.25)
         except WebSocketDisconnect:
             hub.disconnect(websocket)
+
+    async def tool_say(args: dict[str, Any]) -> dict[str, Any]:
+        call_id = require_arg(args, "call_id")
+        text = require_arg(args, "text")
+        response = AgentResponseRequest(
+            text=text,
+            response_to_event_id=args.get("response_to_event_id"),
+        )
+        return await submit_response(call_id, response)
+
+    async def tool_hangup_call(args: dict[str, Any]) -> dict[str, Any]:
+        call_id = require_arg(args, "call_id")
+        return await call_control(
+            call_id,
+            CallControlRequest(action="hangup", response_to_event_id=args.get("response_to_event_id")),
+        )
+
+    async def tool_transfer_call(args: dict[str, Any]) -> dict[str, Any]:
+        call_id = require_arg(args, "call_id")
+        target = require_arg(args, "target")
+        return await call_control(
+            call_id,
+            CallControlRequest(
+                action="transfer",
+                target=target,
+                response_to_event_id=args.get("response_to_event_id"),
+            ),
+        )
+
+    def tool_get_transcript(args: dict[str, Any]) -> dict[str, Any]:
+        call_id = require_arg(args, "call_id")
+        return call_transcript(call_id)
+
+    def tool_get_events(args: dict[str, Any]) -> dict[str, Any]:
+        return list_events(
+            after=int(args.get("after", 0)),
+            call_id=args.get("call_id"),
+            limit=int(args.get("limit", 200)),
+        )
+
+    def tool_get_active_calls(args: dict[str, Any]) -> dict[str, Any]:
+        return {"active_calls": registry.active_call_ids()}
+
+    tool_executor.register("say", tool_say)
+    tool_executor.register("hangup_call", tool_hangup_call)
+    tool_executor.register("transfer_call", tool_transfer_call)
+    tool_executor.register("get_transcript", tool_get_transcript)
+    tool_executor.register("get_events", tool_get_events)
+    tool_executor.register("get_active_calls", tool_get_active_calls)
 
     return app
 

@@ -308,6 +308,10 @@ def create_app(
             )
         }
 
+    @app.get("/transcripts/stats")
+    def transcript_stats() -> dict[str, Any]:
+        return transcripts.stats()
+
     @app.post("/calls/{call_id}/control")
     async def call_control(call_id: str, request: CallControlRequest) -> dict[str, Any]:
         requested = events.append(call_id, "call_control_requested", request.model_dump())
@@ -475,6 +479,9 @@ def create_app(
             limit=validated_limit(optional_int_arg(args, "limit", 200)),
         )
 
+    def tool_get_transcript_stats(args: dict[str, Any]) -> dict[str, Any]:
+        return transcript_stats()
+
     def tool_get_events(args: dict[str, Any]) -> dict[str, Any]:
         return list_events(
             after=optional_int_arg(args, "after", 0),
@@ -513,6 +520,7 @@ def create_app(
     tool_executor.register("stop_playback", tool_stop_playback)
     tool_executor.register("list_transcripts", tool_list_transcripts)
     tool_executor.register("list_transcript_summaries", tool_list_transcript_summaries)
+    tool_executor.register("get_transcript_stats", tool_get_transcript_stats)
     tool_executor.register("get_transcript", tool_get_transcript)
     tool_executor.register("get_events", tool_get_events)
     tool_executor.register("get_metrics", tool_get_metrics)

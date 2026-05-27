@@ -229,6 +229,26 @@ class TranscriptTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual([item["call_id"] for item in response.json()["transcripts"]], ["call-2"])
 
+    def test_transcript_stats_endpoint_reports_aggregate_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transcripts = TranscriptStore(directory)
+            transcripts.append(FakeEvent(1, "call-1", "call_started", "2026-05-27T00:00:00Z", {}))
+            app = create_app(
+                EventStore(max_context_events=20),
+                CallRegistry(),
+                AgentTaskTracker(),
+                WebSocketHub(),
+                transcripts,
+                None,
+            )
+            client = TestClient(app)
+
+            response = client.get("/transcripts/stats")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["transcript_count"], 1)
+            self.assertEqual(response.json()["event_count"], 1)
+
     def test_call_transcript_endpoint_applies_pagination(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             transcripts = TranscriptStore(directory)
@@ -344,6 +364,26 @@ class TranscriptTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             self.assertEqual([item["call_id"] for item in response.json()["transcripts"]], ["call-2"])
+
+    def test_get_transcript_stats_agent_tool_reports_aggregate_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transcripts = TranscriptStore(directory)
+            transcripts.append(FakeEvent(1, "call-1", "call_started", "2026-05-27T00:00:00Z", {}))
+            app = create_app(
+                EventStore(max_context_events=20),
+                CallRegistry(),
+                AgentTaskTracker(),
+                WebSocketHub(),
+                transcripts,
+                None,
+            )
+            client = TestClient(app)
+
+            response = client.post("/agent/tools/get_transcript_stats", json={"arguments": {}})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["transcript_count"], 1)
+            self.assertEqual(response.json()["event_count"], 1)
 
     def test_get_transcript_agent_tool_applies_pagination(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

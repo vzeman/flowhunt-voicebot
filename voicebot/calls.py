@@ -127,6 +127,7 @@ class CallSession:
         self._interrupt_generation_lock = threading.Lock()
         self._response_generation_lock = threading.Lock()
         self._response_generations: dict[int, int] = {}
+        self._response_request_times: dict[int, float] = {}
         self._speech_jobs: queue.Queue[tuple[int, np.ndarray]] = queue.Queue()
         self._active_turn = 0
         self._active_turn_lock = threading.Lock()
@@ -149,6 +150,7 @@ class CallSession:
             self.events.append(self.call_id, "call_ended", {})
 
     def submit_agent_response(self, response: AgentResponse) -> VoicebotEvent:
+        self._record_agent_latency(response.response_to_event_id)
         event = self.events.append(
             self.call_id,
             "agent_response_received",
@@ -208,6 +210,11 @@ class CallSession:
                 )
             elif isinstance(frame, PlaybackFrame) and frame.kind == "tts_finished":
                 duration = float(frame.data.get("duration", 0.0))
+                self._record_metric(
+                    "tts_duration_seconds",
+                    duration,
+                    {"response_to_event_id": response.response_to_event_id},
+                )
                 self.events.append(
                     self.call_id,
                     "tts_finished",
@@ -351,6 +358,7 @@ class CallSession:
             duration = len(audio) / CALL_SAMPLE_RATE
             turn_id = self._current_turn()
             self.events.append(self.call_id, "user_speech_finished", {"turn_id": turn_id, "duration": duration})
+            self._record_metric("speech_duration_seconds", duration, {"turn_id": turn_id})
             if duration >= self.settings.min_seconds:
                 self._speech_jobs.put((turn_id, audio))
 
@@ -402,6 +410,11 @@ class CallSession:
                         },
                     )
                 elif frame.kind == "transcription_empty":
+                    self._record_metric(
+                        "stt_duration_seconds",
+                        float(frame.data.get("elapsed") or 0.0),
+                        {"turn_id": frame.turn_id, "result": "empty"},
+                    )
                     self.events.append(
                         self.call_id,
                         "stt_no_text",
@@ -413,6 +426,11 @@ class CallSession:
                         },
                     )
                 elif frame.kind == "transcription_finished":
+                    self._record_metric(
+                        "stt_duration_seconds",
+                        float(frame.data.get("elapsed") or 0.0),
+                        {"turn_id": frame.turn_id, "result": "text"},
+                    )
                     self.events.append(
                         self.call_id,
                         "stt_finished",
@@ -496,12 +514,24 @@ class CallSession:
     def _remember_response_generation(self, event_id: int) -> None:
         with self._response_generation_lock:
             self._response_generations[event_id] = self._current_interrupt_generation()
+            self._response_request_times[event_id] = time.monotonic()
 
     def _response_generation(self, event_id: int | None) -> int:
         if event_id is None:
             return self._current_interrupt_generation()
         with self._response_generation_lock:
             return self._response_generations.get(event_id, self._current_interrupt_generation())
+
+    def _record_agent_latency(self, event_id: int | None) -> None:
+        if event_id is None:
+            return
+        with self._response_generation_lock:
+            started = self._response_request_times.pop(event_id, None)
+        if started is not None:
+            self._record_metric("agent_response_latency_seconds", time.monotonic() - started, {"event_id": event_id})
+
+    def _record_metric(self, name: str, value: float, data: dict | None = None) -> None:
+        self.events.append(self.call_id, "metrics", {"name": name, "value": value, **(data or {})})
 
 
 class CallRegistry:

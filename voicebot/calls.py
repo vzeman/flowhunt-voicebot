@@ -270,6 +270,15 @@ class CallSession:
         )
         return event
 
+    def snapshot(self) -> dict:
+        return {
+            "call_id": self.call_id,
+            "recording": self.recording_event.is_set(),
+            "playback_active": self.playback.is_active(),
+            "stopped": self.stop_event.is_set(),
+            "active_turn": self._current_turn(),
+        }
+
     def _receive_loop(self) -> None:
         is_recording = False
         collected: list[np.ndarray] = []
@@ -572,3 +581,15 @@ class CallRegistry:
     def active_call_ids(self) -> list[str]:
         with self._lock:
             return sorted(self._calls)
+
+    def snapshot(self, call_id: str) -> dict | None:
+        with self._lock:
+            session = self._calls.get(call_id)
+        if session is None:
+            return None
+        return session.snapshot()
+
+    def snapshots(self) -> list[dict]:
+        with self._lock:
+            sessions = list(self._calls.values())
+        return sorted((session.snapshot() for session in sessions), key=lambda item: item["call_id"])

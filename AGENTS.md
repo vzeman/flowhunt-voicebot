@@ -81,6 +81,13 @@ Health:
 curl http://127.0.0.1:8080/health
 ```
 
+List active call state:
+
+```bash
+curl http://127.0.0.1:8080/calls
+curl http://127.0.0.1:8080/calls/CALL_ID
+```
+
 Read events:
 
 ```bash

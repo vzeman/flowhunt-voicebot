@@ -13,6 +13,7 @@ ToolName = Literal[
     "get_transcript",
     "get_events",
     "get_active_calls",
+    "get_call_state",
 ]
 
 
@@ -135,6 +136,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         ),
     ),
     ToolDefinition("get_active_calls", "List currently active call IDs.", ()),
+    ToolDefinition("get_call_state", "Read runtime state for one active call.", (ToolArgument("call_id", "Active call ID."),)),
 )
 
 

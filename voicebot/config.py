@@ -27,6 +27,9 @@ class Settings:
     audiosocket_port: int = env_int("VOICEBOT_AUDIOSOCKET_PORT", 9019)
 
     stt_provider: str = os.getenv("VOICEBOT_STT_PROVIDER", "whisper")
+    stt_api_key: str = os.getenv("VOICEBOT_STT_API_KEY", "")
+    stt_base_url: str = os.getenv("VOICEBOT_STT_BASE_URL", "")
+    stt_model: str = os.getenv("VOICEBOT_STT_MODEL", "")
     whisper_model: str = os.getenv("VOICEBOT_WHISPER_MODEL", "base")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_base_url: str = os.getenv("VOICEBOT_OPENAI_BASE_URL", os.getenv("OPENAI_BASE_URL", ""))
@@ -37,6 +40,9 @@ class Settings:
     stt_min_chars: int = env_int("VOICEBOT_STT_MIN_CHARS", 2)
 
     tts_provider: str = os.getenv("VOICEBOT_TTS_PROVIDER", "supertonic")
+    tts_api_key: str = os.getenv("VOICEBOT_TTS_API_KEY", "")
+    tts_base_url: str = os.getenv("VOICEBOT_TTS_BASE_URL", "")
+    tts_model: str = os.getenv("VOICEBOT_TTS_MODEL", "")
     tts_voice: str = os.getenv("VOICEBOT_TTS_VOICE", "M1")
     openai_tts_model: str = os.getenv("VOICEBOT_OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
     openai_tts_voice: str = os.getenv("VOICEBOT_OPENAI_TTS_VOICE", "alloy")

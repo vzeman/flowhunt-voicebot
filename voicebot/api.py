@@ -10,6 +10,14 @@ from pydantic import BaseModel
 from .asterisk_control import AsteriskAMI
 from .calls import AgentResponse, CallRegistry
 from .events import EventStore, VoicebotEvent, event_to_dict
+from .providers import (
+    AGENT_CHAT_COMPATIBLE_PROVIDERS,
+    STT_OPENAI_COMPATIBLE_PROVIDERS,
+    SUPPORTED_AGENT_PROVIDERS,
+    SUPPORTED_STT_PROVIDERS,
+    SUPPORTED_TTS_PROVIDERS,
+    TTS_OPENAI_COMPATIBLE_PROVIDERS,
+)
 from .transcripts import TranscriptStore
 
 
@@ -92,6 +100,26 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, Any]:
         return {"ok": True, "active_calls": registry.active_call_ids()}
+
+    @app.get("/providers")
+    def providers() -> dict[str, Any]:
+        return {
+            "stt": {
+                "supported": sorted(SUPPORTED_STT_PROVIDERS),
+                "native": ["whisper"],
+                "openai_compatible": sorted(STT_OPENAI_COMPATIBLE_PROVIDERS),
+            },
+            "tts": {
+                "supported": sorted(SUPPORTED_TTS_PROVIDERS),
+                "native": ["supertonic"],
+                "openai_compatible": sorted(TTS_OPENAI_COMPATIBLE_PROVIDERS),
+            },
+            "agent": {
+                "supported": sorted(SUPPORTED_AGENT_PROVIDERS),
+                "native": ["openai-responses"],
+                "chat_compatible": sorted(AGENT_CHAT_COMPATIBLE_PROVIDERS),
+            },
+        }
 
     @app.get("/events")
     def list_events(after: int = 0, call_id: str | None = None, limit: int = 200) -> dict[str, Any]:

@@ -11,6 +11,7 @@ from supertonic import TTS
 
 from .audio import CALL_SAMPLE_RATE, resample_audio
 from .config import Settings
+from .providers import normalize_provider, provider_api_key, provider_base_url
 
 
 class TTSProvider(ABC):
@@ -42,14 +43,19 @@ class SupertonicTTSProvider(TTSProvider):
 
 class OpenAITTSProvider(TTSProvider):
     def __init__(self, settings: Settings) -> None:
-        if not settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required when VOICEBOT_TTS_PROVIDER=openai")
-        print(f"Using OpenAI TTS model: {settings.openai_tts_model} voice={settings.openai_tts_voice}")
-        client_kwargs = {"api_key": settings.openai_api_key}
-        if settings.openai_base_url:
-            client_kwargs["base_url"] = settings.openai_base_url
+        provider = normalize_provider(settings.tts_provider)
+        api_key = provider_api_key(provider, settings.tts_api_key, settings.openai_api_key)
+        base_url = provider_base_url(provider, settings.tts_base_url, settings.openai_base_url)
+        model = settings.tts_model or settings.openai_tts_model
+        if not api_key:
+            raise ValueError(f"API key is required when VOICEBOT_TTS_PROVIDER={provider}")
+        print(f"Using {provider} TTS model: {model} voice={settings.openai_tts_voice}")
+        client_kwargs = {"api_key": api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
         self._client = OpenAI(**client_kwargs)
-        self._model = settings.openai_tts_model
+        self._provider = provider
+        self._model = model
         self._voice = settings.openai_tts_voice
         self._lock = threading.Lock()
 

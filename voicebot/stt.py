@@ -14,6 +14,7 @@ import whisper
 
 from .audio import CALL_SAMPLE_RATE, STT_SAMPLE_RATE, resample_audio
 from .config import Settings
+from .providers import normalize_provider, provider_api_key, provider_base_url
 
 
 @dataclass(frozen=True)
@@ -91,14 +92,19 @@ class WhisperSTTProvider(STTProvider):
 
 class OpenAISTTProvider(STTProvider):
     def __init__(self, settings: Settings) -> None:
-        if not settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required when VOICEBOT_STT_PROVIDER=openai")
-        print(f"Using OpenAI STT model: {settings.openai_stt_model}")
-        client_kwargs = {"api_key": settings.openai_api_key}
-        if settings.openai_base_url:
-            client_kwargs["base_url"] = settings.openai_base_url
+        provider = normalize_provider(settings.stt_provider)
+        api_key = provider_api_key(provider, settings.stt_api_key, settings.openai_api_key)
+        base_url = provider_base_url(provider, settings.stt_base_url, settings.openai_base_url)
+        model = settings.stt_model or settings.openai_stt_model
+        if not api_key:
+            raise ValueError(f"API key is required when VOICEBOT_STT_PROVIDER={provider}")
+        print(f"Using {provider} STT model: {model}")
+        client_kwargs = {"api_key": api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
         self._client = OpenAI(**client_kwargs)
-        self._model = settings.openai_stt_model
+        self._provider = provider
+        self._model = model
         self._language = settings.language
         self._min_chars = settings.stt_min_chars
         self._lock = threading.Lock()
@@ -129,7 +135,7 @@ class OpenAISTTProvider(STTProvider):
     def _metadata(self, result) -> dict:
         segments = getattr(result, "segments", None) or []
         return {
-            "provider": "openai",
+            "provider": self._provider,
             "model": self._model,
             "language": getattr(result, "language", None),
             "duration": getattr(result, "duration", None),

@@ -13,6 +13,7 @@ from pathlib import Path
 from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from local_command_agent import (
     attach_response_event_id,
@@ -24,12 +25,22 @@ from local_command_agent import (
     is_echo_answer,
     parse_agent_output,
 )
+from voicebot.providers import (
+    AGENT_CHAT_COMPATIBLE_PROVIDERS,
+    SUPPORTED_AGENT_PROVIDERS,
+    normalize_provider,
+    provider_api_key,
+    provider_base_url,
+    unsupported_provider_message,
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Answer pending voicebot tasks with OpenAI.")
     parser.add_argument("--base-url", default=os.getenv("VOICEBOT_AGENT_BASE_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--provider", default=os.getenv("VOICEBOT_AGENT_PROVIDER", "openai-responses"))
+    parser.add_argument("--provider-base-url", default=os.getenv("VOICEBOT_AGENT_OPENAI_BASE_URL", ""))
+    parser.add_argument("--api-key", default=os.getenv("VOICEBOT_AGENT_API_KEY", ""))
     parser.add_argument("--model", default=os.getenv("VOICEBOT_OPENAI_AGENT_MODEL", "gpt-4.1-mini"))
     parser.add_argument("--interval", type=float, default=float(os.getenv("VOICEBOT_OPENAI_AGENT_INTERVAL", "0.5")))
     parser.add_argument("--timeout", type=float, default=float(os.getenv("VOICEBOT_OPENAI_AGENT_TIMEOUT", "30")))
@@ -45,18 +56,21 @@ def run_openai_agent(
     timeout: float,
     max_output_tokens: int,
 ) -> str:
+    provider = normalize_provider(provider)
     if provider == "openai-responses":
         return run_responses_agent(client, model, prompt, timeout, max_output_tokens)
-    if provider in {
-        "openai-chat",
-        "openai-chat-compatible",
-        "openrouter",
-        "groq",
-        "together",
-        "ollama",
-        "lmstudio",
-    }:
+    if provider in AGENT_CHAT_COMPATIBLE_PROVIDERS:
         return run_chat_agent(client, model, prompt, timeout, max_output_tokens)
+    if provider in SUPPORTED_AGENT_PROVIDERS:
+        raise RuntimeError(
+            unsupported_provider_message(
+                "agent",
+                provider,
+                SUPPORTED_AGENT_PROVIDERS,
+                "Use VOICEBOT_AGENT_PROVIDER=openai-chat-compatible with VOICEBOT_AGENT_OPENAI_BASE_URL, "
+                "VOICEBOT_AGENT_API_KEY, and VOICEBOT_OPENAI_AGENT_MODEL until a native adapter is added.",
+            )
+        )
     raise RuntimeError(f"unsupported agent provider: {provider}")
 
 
@@ -83,11 +97,13 @@ def run_chat_agent(client: OpenAI, model: str, prompt: str, timeout: float, max_
 
 def main() -> None:
     args = parse_args()
-    if not os.getenv("OPENAI_API_KEY"):
-        raise RuntimeError("OPENAI_API_KEY is required")
+    provider = normalize_provider(args.provider)
+    api_key = provider_api_key(provider, args.api_key, os.getenv("OPENAI_API_KEY", ""))
+    if not api_key and provider != "ollama":
+        raise RuntimeError(f"API key is required when VOICEBOT_AGENT_PROVIDER={provider}")
 
-    client_kwargs = {"api_key": os.environ["OPENAI_API_KEY"]}
-    base_url = os.getenv("VOICEBOT_AGENT_OPENAI_BASE_URL") or os.getenv("OPENAI_BASE_URL") or ""
+    client_kwargs = {"api_key": api_key or "ollama"}
+    base_url = provider_base_url(provider, args.provider_base_url, os.getenv("OPENAI_BASE_URL", ""))
     if base_url:
         client_kwargs["base_url"] = base_url
     elif os.environ.get("OPENAI_BASE_URL") == "":
@@ -123,7 +139,7 @@ def main() -> None:
             prompt = build_prompt(pending, response.get("context", {}), tools)
             raw_answer = run_openai_agent(
                 client,
-                args.provider,
+                provider,
                 args.model,
                 prompt,
                 args.timeout,
@@ -134,7 +150,7 @@ def main() -> None:
                 retry_prompt = build_retry_prompt(prompt, answer)
                 raw_answer = run_openai_agent(
                     client,
-                    args.provider,
+                    provider,
                     args.model,
                     retry_prompt,
                     args.timeout,

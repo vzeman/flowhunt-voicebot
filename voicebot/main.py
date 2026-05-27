@@ -11,25 +11,56 @@ from .audiosocket_server import ThreadingAudioSocketServer
 from .calls import CallRegistry
 from .config import Settings
 from .events import EventStore
+from .providers import (
+    STT_OPENAI_COMPATIBLE_PROVIDERS,
+    SUPPORTED_STT_PROVIDERS,
+    SUPPORTED_TTS_PROVIDERS,
+    TTS_OPENAI_COMPATIBLE_PROVIDERS,
+    normalize_provider,
+    unsupported_provider_message,
+)
 from .stt import OpenAISTTProvider, WhisperSTTProvider
 from .transcripts import TranscriptStore
 from .tts import OpenAITTSProvider, SupertonicTTSProvider
 
 
 def build_stt(settings: Settings):
-    if settings.stt_provider == "whisper":
+    provider = normalize_provider(settings.stt_provider)
+    if provider == "whisper":
         return WhisperSTTProvider(settings)
-    if settings.stt_provider in {"openai", "openai-compatible"}:
+    if provider in STT_OPENAI_COMPATIBLE_PROVIDERS:
         return OpenAISTTProvider(settings)
-    raise ValueError(f"Unsupported STT provider: {settings.stt_provider}")
+    if provider in SUPPORTED_STT_PROVIDERS:
+        raise ValueError(
+            unsupported_provider_message(
+                "STT",
+                provider,
+                SUPPORTED_STT_PROVIDERS,
+                "Use an OpenAI-compatible endpoint with VOICEBOT_STT_PROVIDER=openai-compatible, "
+                "VOICEBOT_STT_BASE_URL, VOICEBOT_STT_API_KEY, and VOICEBOT_STT_MODEL until a native adapter is added.",
+            )
+        )
+    raise ValueError(f"Unknown STT provider: {settings.stt_provider}")
 
 
 def build_tts(settings: Settings):
-    if settings.tts_provider == "supertonic":
+    provider = normalize_provider(settings.tts_provider)
+    if provider == "supertonic":
         return SupertonicTTSProvider(settings.tts_voice, settings.language)
-    if settings.tts_provider in {"openai", "openai-compatible"}:
+    if provider in TTS_OPENAI_COMPATIBLE_PROVIDERS:
         return OpenAITTSProvider(settings)
-    raise ValueError(f"Unsupported TTS provider: {settings.tts_provider}")
+    if provider in SUPPORTED_TTS_PROVIDERS:
+        raise ValueError(
+            unsupported_provider_message(
+                "TTS",
+                provider,
+                SUPPORTED_TTS_PROVIDERS,
+                "Use an OpenAI-compatible endpoint with VOICEBOT_TTS_PROVIDER=openai-compatible, "
+                "VOICEBOT_TTS_BASE_URL, VOICEBOT_TTS_API_KEY, VOICEBOT_TTS_MODEL, and "
+                "VOICEBOT_OPENAI_TTS_VOICE until a native adapter is added.",
+            )
+        )
+    raise ValueError(f"Unknown TTS provider: {settings.tts_provider}")
 
 
 def main() -> None:

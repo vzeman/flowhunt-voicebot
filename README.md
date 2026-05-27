@@ -120,11 +120,18 @@ local `.env` file; `.env` is ignored by git.
 SIP_PASSWORD='your-sip-password-here'
 OPENAI_API_KEY='your-openai-api-key-here'
 VOICEBOT_STT_PROVIDER=openai
+VOICEBOT_STT_API_KEY=
+VOICEBOT_STT_BASE_URL=
+VOICEBOT_STT_MODEL=
 VOICEBOT_OPENAI_STT_MODEL=whisper-1
 VOICEBOT_TTS_PROVIDER=openai
+VOICEBOT_TTS_API_KEY=
+VOICEBOT_TTS_BASE_URL=
+VOICEBOT_TTS_MODEL=
 VOICEBOT_OPENAI_TTS_MODEL=gpt-4o-mini-tts
 VOICEBOT_OPENAI_TTS_VOICE=alloy
 VOICEBOT_AGENT_PROVIDER=openai-responses
+VOICEBOT_AGENT_API_KEY=
 VOICEBOT_OPENAI_AGENT_MODEL=gpt-4.1-mini
 ```
 
@@ -145,13 +152,24 @@ Provider names:
 
 - STT: `whisper` for local open-source Whisper, `openai` or
   `openai-compatible` for OpenAI or a compatible transcription endpoint via
-  `VOICEBOT_OPENAI_BASE_URL`.
+  `VOICEBOT_STT_BASE_URL`. Aliases `groq`, `mistral`, `nvidia`, and `xai` use
+  the same transcription adapter with provider-specific API key env vars and
+  default base URLs.
 - TTS: `supertonic` for local Supertonic, `openai` or `openai-compatible` for
-  OpenAI or a compatible speech endpoint via `VOICEBOT_OPENAI_BASE_URL`.
+  OpenAI or a compatible speech endpoint via `VOICEBOT_TTS_BASE_URL`. Aliases
+  `groq`, `mistral`, `nvidia`, and `xai` use the same speech adapter with
+  provider-specific API key env vars and default base URLs.
 - Agent: `openai-responses` for the OpenAI Responses API, or
   `openai-chat-compatible` for chat-completions providers via
-  `VOICEBOT_AGENT_OPENAI_BASE_URL`. Provider aliases `openrouter`, `groq`,
-  `together`, `ollama`, and `lmstudio` map to the same chat-compatible adapter.
+  `VOICEBOT_AGENT_OPENAI_BASE_URL`. Provider aliases `azure`, `cerebras`,
+  `deepseek`, `fireworks`, `grok`, `groq`, `mistral`, `nebius`, `novita`,
+  `nvidia`, `ollama`, `openrouter`, `perplexity`, `qwen`, `sambanova`,
+  `sarvam`, `together`, and `xai` map to the same chat-compatible adapter.
+
+The provider registry also recognizes the broader provider names used by modern
+voice-agent stacks. If a provider needs a protocol-specific native adapter, the
+runtime fails fast with the exact variables to set for an OpenAI-compatible
+gateway until that native adapter is added.
 
 ## Local Microphone Echo Demo
 

@@ -25,10 +25,10 @@ from .audio import (
     write_audiosocket_message,
 )
 from .config import Settings
-from .core_processors import AgentRequestProcessor, STTProcessor, TTSProcessor
 from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, AudioOutputFrame, PlaybackFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
+from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
 
 if TYPE_CHECKING:
     from .stt import STTProvider
@@ -40,6 +40,10 @@ class AgentResponse:
     call_id: str
     text: str
     response_to_event_id: int | None = None
+
+
+DEFAULT_STT_PIPELINE = (ProcessorSpec("stt"), ProcessorSpec("agent-request"))
+DEFAULT_TTS_PIPELINE = (ProcessorSpec("tts"),)
 
 
 class PlaybackBuffer:
@@ -109,6 +113,9 @@ class CallSession:
         event_store: EventStore,
         stt: STTProvider,
         tts: TTSProvider,
+        processor_registry: ProcessorRegistry | None = None,
+        stt_pipeline_specs: tuple[ProcessorSpec, ...] = DEFAULT_STT_PIPELINE,
+        tts_pipeline_specs: tuple[ProcessorSpec, ...] = DEFAULT_TTS_PIPELINE,
     ) -> None:
         self.call_id = call_id
         self.sock = sock
@@ -116,8 +123,14 @@ class CallSession:
         self.events = event_store
         self.stt = stt
         self.tts = tts
-        self.stt_pipeline = PipelineRunner([STTProcessor(stt), AgentRequestProcessor()])
-        self.tts_pipeline = PipelineRunner([TTSProcessor(tts)])
+        self.processor_registry = processor_registry or default_processor_registry()
+        processor_dependencies = ProcessorDependencies(events=event_store, stt=stt, tts=tts)
+        self.stt_pipeline = PipelineRunner(
+            self.processor_registry.create_many(stt_pipeline_specs, processor_dependencies)
+        )
+        self.tts_pipeline = PipelineRunner(
+            self.processor_registry.create_many(tts_pipeline_specs, processor_dependencies)
+        )
         self.playback = PlaybackBuffer()
         self.stop_event = threading.Event()
         self.recording_event = threading.Event()

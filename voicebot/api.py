@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import asyncio
+import threading
+import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -43,16 +45,55 @@ class AgentToolRequest(BaseModel):
     arguments: dict[str, Any] = {}
 
 
+class AgentTaskClaimRequest(BaseModel):
+    event_ids: list[int]
+    owner: str = "agent"
+    ttl_seconds: float = 60.0
+
+
 @dataclass
 class AgentTaskTracker:
     responded_event_ids: set[int]
 
     def __init__(self) -> None:
         self.responded_event_ids = set()
+        self._claimed_event_ids: dict[int, tuple[str, float]] = {}
+        self._lock = threading.Lock()
 
     def mark_responded(self, event_id: int | None) -> None:
         if event_id is not None:
-            self.responded_event_ids.add(event_id)
+            with self._lock:
+                self.responded_event_ids.add(event_id)
+                self._claimed_event_ids.pop(event_id, None)
+
+    def is_pending(self, event_id: int, now: float | None = None) -> bool:
+        with self._lock:
+            self._expire_claims_locked(now or time.monotonic())
+            return event_id not in self.responded_event_ids and event_id not in self._claimed_event_ids
+
+    def claim(self, event_ids: list[int], owner: str, ttl_seconds: float) -> list[int]:
+        now = time.monotonic()
+        expires_at = now + max(ttl_seconds, 0.1)
+        claimed: list[int] = []
+        with self._lock:
+            self._expire_claims_locked(now)
+            for event_id in event_ids:
+                if event_id in self.responded_event_ids or event_id in self._claimed_event_ids:
+                    continue
+                self._claimed_event_ids[event_id] = (owner, expires_at)
+                claimed.append(event_id)
+        return claimed
+
+    def release(self, event_id: int | None) -> None:
+        if event_id is None:
+            return
+        with self._lock:
+            self._claimed_event_ids.pop(event_id, None)
+
+    def _expire_claims_locked(self, now: float) -> None:
+        expired = [event_id for event_id, (_owner, expires_at) in self._claimed_event_ids.items() if expires_at <= now]
+        for event_id in expired:
+            self._claimed_event_ids.pop(event_id, None)
 
 
 class WebSocketHub:
@@ -146,13 +187,20 @@ def create_app(
             event
             for event in all_events
             if event.type == "agent_response_requested"
-            and event.id not in tracker.responded_event_ids
+            and tracker.is_pending(event.id)
             and event.call_id in active_call_ids
             and (call_id is None or event.call_id == call_id)
         ]
         return {
             "pending": [event_to_dict(event) for event in pending[:limit]],
             "context": events.context(call_id=call_id),
+        }
+
+    @app.post("/agent/tasks/claim")
+    def claim_agent_tasks(request: AgentTaskClaimRequest) -> dict[str, Any]:
+        return {
+            "claimed_event_ids": tracker.claim(request.event_ids, request.owner, request.ttl_seconds),
+            "owner": request.owner,
         }
 
     @app.get("/agent/tools")

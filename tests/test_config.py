@@ -38,6 +38,15 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(result["ami_password"], {"configured": True, "redacted": True})
         self.assertEqual(result["stt_pipeline"], [{"name": "stt"}])
         self.assertEqual(result["stt_provider"], settings.stt_provider)
+        self.assertEqual(result["agent_task_responded_event_retention"], 10000)
+
+    def test_agent_task_retention_can_be_configured(self) -> None:
+        settings = Settings(agent_task_responded_event_retention=25)
+
+        result = redacted_settings(settings)
+
+        self.assertEqual(settings.agent_task_responded_event_retention, 25)
+        self.assertEqual(result["agent_task_responded_event_retention"], 25)
 
 
 if __name__ == "__main__":

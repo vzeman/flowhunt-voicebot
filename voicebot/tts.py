@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from io import BytesIO
 import threading
 
@@ -18,6 +19,9 @@ class TTSProvider(ABC):
     @abstractmethod
     def synthesize(self, text: str) -> tuple[np.ndarray, float]:
         raise NotImplementedError
+
+    def synthesize_stream(self, text: str) -> Iterable[tuple[np.ndarray, float]]:
+        yield self.synthesize(text)
 
 
 class SupertonicTTSProvider(TTSProvider):

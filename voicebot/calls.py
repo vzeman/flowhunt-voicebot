@@ -197,8 +197,8 @@ class CallSession:
             )
             raise
 
-        audio: np.ndarray | None = None
-        duration: float | None = None
+        audio_chunks: list[np.ndarray] = []
+        duration = 0.0
         for frame in frames:
             if isinstance(frame, TextFrame) and frame.kind == "tts_started":
                 self.events.append(
@@ -221,10 +221,9 @@ class CallSession:
                 )
                 raise RuntimeError(frame.text)
             elif isinstance(frame, AudioOutputFrame):
-                audio = frame.audio
-                duration = float(frame.data.get("duration", duration or 0.0))
+                audio_chunks.append(frame.audio)
 
-        if audio is None:
+        if not audio_chunks:
             self.events.append(
                 self.call_id,
                 "tts_failed",
@@ -242,7 +241,8 @@ class CallSession:
                 },
             )
             return event
-        self.playback.enqueue(audio)
+        for chunk in audio_chunks:
+            self.playback.enqueue(chunk)
         self.events.append(
             self.call_id,
             "agent_response_queued",

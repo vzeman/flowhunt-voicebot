@@ -30,6 +30,9 @@ class TTSService(Protocol):
     def synthesize(self, text: str):
         raise NotImplementedError
 
+    def synthesize_stream(self, text: str):
+        raise NotImplementedError
+
 
 FRAME_EVENT_TYPES = {
     "call_started": "call_started",
@@ -192,7 +195,24 @@ class TTSProcessor(FrameProcessorBase):
             trace_id=frame.trace_id,
         )
         try:
-            audio, duration = self.tts.synthesize(frame.text)
+            synthesize_stream = getattr(self.tts, "synthesize_stream", None)
+            chunks = synthesize_stream(frame.text) if synthesize_stream else [self.tts.synthesize(frame.text)]
+            output: list[Frame] = [frame, started]
+            total_duration = 0.0
+            for audio, duration in chunks:
+                total_duration += float(duration)
+                output.append(
+                    AudioOutputFrame(
+                        frame.call_id,
+                        audio,
+                        CALL_SAMPLE_RATE,
+                        trace_id=frame.trace_id,
+                        data={
+                            "duration": float(duration),
+                            "response_to_frame_id": frame.response_to_frame_id,
+                        },
+                    )
+                )
         except Exception as exc:
             failed = TextFrame(
                 "tts_failed",
@@ -203,17 +223,11 @@ class TTSProcessor(FrameProcessorBase):
             )
             return [frame, started, failed, ErrorFrame(frame.call_id, str(exc), trace_id=frame.trace_id)]
 
-        output = AudioOutputFrame(
-            frame.call_id,
-            audio,
-            CALL_SAMPLE_RATE,
-            trace_id=frame.trace_id,
-            data={"duration": duration, "response_to_frame_id": frame.response_to_frame_id},
-        )
         finished = PlaybackFrame(
             "tts_finished",
             frame.call_id,
             trace_id=frame.trace_id,
-            data={"duration": duration, "response_to_frame_id": frame.response_to_frame_id},
+            data={"duration": total_duration, "response_to_frame_id": frame.response_to_frame_id},
         )
-        return [frame, started, finished, output]
+        output.append(finished)
+        return output

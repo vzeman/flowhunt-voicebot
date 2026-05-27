@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass
 import re
 import tempfile
@@ -22,12 +23,16 @@ class TranscriptionResult:
     text: str
     reason: str | None = None
     metadata: dict | None = None
+    is_final: bool = True
 
 
 class STTProvider(ABC):
     @abstractmethod
     def transcribe(self, call_audio: np.ndarray) -> TranscriptionResult:
         raise NotImplementedError
+
+    def transcribe_stream(self, call_audio: np.ndarray) -> Iterable[TranscriptionResult]:
+        yield self.transcribe(call_audio)
 
 
 class WhisperSTTProvider(STTProvider):

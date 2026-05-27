@@ -224,17 +224,53 @@ def create_app(
 
     @app.post("/calls/{call_id}/control")
     async def call_control(call_id: str, request: CallControlRequest) -> dict[str, Any]:
+        requested = events.append(call_id, "call_control_requested", request.model_dump())
         if asterisk is None:
+            completed = events.append(
+                call_id,
+                "call_control_completed",
+                {
+                    "action": request.action,
+                    "ok": False,
+                    "message": "Asterisk AMI control is not configured",
+                    "request_event_id": requested.id,
+                },
+            )
+            tracker.mark_responded(request.response_to_event_id)
+            await hub.broadcast(completed)
             raise HTTPException(status_code=503, detail="Asterisk AMI control is not configured")
 
-        requested = events.append(call_id, "call_control_requested", request.model_dump())
         if request.action == "hangup":
             result = asterisk.hangup(call_id)
-        elif request.action == "transfer":
-            if not request.target:
-                raise HTTPException(status_code=400, detail="transfer requires target")
+        elif request.action == "transfer" and request.target:
             result = asterisk.transfer(call_id, request.target)
+        elif request.action == "transfer":
+            completed = events.append(
+                call_id,
+                "call_control_completed",
+                {
+                    "action": request.action,
+                    "ok": False,
+                    "message": "transfer requires target",
+                    "request_event_id": requested.id,
+                },
+            )
+            tracker.mark_responded(request.response_to_event_id)
+            await hub.broadcast(completed)
+            raise HTTPException(status_code=400, detail="transfer requires target")
         else:
+            completed = events.append(
+                call_id,
+                "call_control_completed",
+                {
+                    "action": request.action,
+                    "ok": False,
+                    "message": f"unsupported control action: {request.action}",
+                    "request_event_id": requested.id,
+                },
+            )
+            tracker.mark_responded(request.response_to_event_id)
+            await hub.broadcast(completed)
             raise HTTPException(status_code=400, detail=f"unsupported control action: {request.action}")
 
         completed = events.append(

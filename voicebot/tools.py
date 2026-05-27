@@ -11,6 +11,7 @@ ToolName = Literal[
     "send_dtmf",
     "stop_playback",
     "list_transcripts",
+    "list_transcript_summaries",
     "get_transcript",
     "get_events",
     "get_metrics",
@@ -143,6 +144,11 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "list_transcripts",
         "List call IDs with persisted transcripts.",
+        (),
+    ),
+    ToolDefinition(
+        "list_transcript_summaries",
+        "List persisted transcripts with event counts and first/last timestamps.",
         (),
     ),
     ToolDefinition(

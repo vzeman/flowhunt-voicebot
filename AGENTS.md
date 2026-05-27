@@ -99,6 +99,12 @@ Read pending agent tasks with compacted context:
 curl http://127.0.0.1:8080/agent/tasks
 ```
 
+For parallel call handling, filter tasks to one call or bound each poll:
+
+```bash
+curl 'http://127.0.0.1:8080/agent/tasks?call_id=CALL_ID&limit=10'
+```
+
 Discover callable tools:
 
 ```bash

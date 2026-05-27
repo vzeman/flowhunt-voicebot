@@ -17,6 +17,7 @@ ToolName = Literal[
     "get_active_calls",
     "get_call_state",
     "get_runtime_config",
+    "get_agent_task_status",
 ]
 
 
@@ -165,6 +166,11 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition("get_active_calls", "List currently active call IDs.", ()),
     ToolDefinition("get_call_state", "Read runtime state for one active call.", (ToolArgument("call_id", "Active call ID."),)),
     ToolDefinition("get_runtime_config", "Read redacted runtime configuration.", ()),
+    ToolDefinition(
+        "get_agent_task_status",
+        "Read agent task response and claim status.",
+        (ToolArgument("owner", "Optional claim owner filter.", required=False, schema={"type": ["string", "null"]}),),
+    ),
 )
 
 

@@ -68,6 +68,16 @@ class AgentTaskTrackerTests(unittest.TestCase):
 
         self.assertFalse(tracker.is_pending(1))
 
+    def test_snapshot_can_filter_claims_by_owner(self) -> None:
+        tracker = AgentTaskTracker()
+        tracker.claim([1], "worker-1", 30)
+        tracker.claim([2], "worker-2", 30)
+
+        snapshot = tracker.snapshot(owner="worker-1")
+
+        self.assertEqual(list(snapshot["claims"]), ["1"])
+        self.assertEqual(snapshot["claims"]["1"]["owner"], "worker-1")
+
     def test_responded_events_are_bounded(self) -> None:
         tracker = AgentTaskTracker(max_responded_event_ids=2)
 

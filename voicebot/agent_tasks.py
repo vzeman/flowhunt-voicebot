@@ -85,16 +85,17 @@ class AgentTaskTracker:
                     renewed.append(event_id)
         return renewed
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, owner: str | None = None) -> dict[str, Any]:
         now = time.monotonic()
         with self._lock:
             self._expire_claims_locked(now)
             claims = {
                 str(event_id): {
-                    "owner": owner,
+                    "owner": claim_owner,
                     "expires_in_seconds": max(0.0, expires_at - now),
                 }
-                for event_id, (owner, expires_at) in sorted(self._claimed_event_ids.items())
+                for event_id, (claim_owner, expires_at) in sorted(self._claimed_event_ids.items())
+                if owner is None or claim_owner == owner
             }
             responded = sorted(self.responded_event_ids)
         return {

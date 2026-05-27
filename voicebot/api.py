@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from .asterisk_control import AsteriskAMI
 from .calls import AgentResponse, CallRegistry
+from .event_catalog import event_catalog
 from .events import EventStore, VoicebotEvent, event_to_dict
 from .providers import (
     AGENT_CHAT_COMPATIBLE_PROVIDERS,
@@ -129,6 +130,10 @@ def create_app(
     def list_events(after: int = 0, call_id: str | None = None, limit: int = 200) -> dict[str, Any]:
         result = [event_to_dict(event) for event in events.list_events(after=after, call_id=call_id, limit=limit)]
         return {"events": result}
+
+    @app.get("/events/catalog")
+    def list_event_catalog() -> dict[str, Any]:
+        return {"events": event_catalog()}
 
     @app.get("/context")
     def context(call_id: str | None = None) -> dict[str, Any]:

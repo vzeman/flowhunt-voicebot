@@ -38,6 +38,7 @@ Caller media and STT:
 - `stt_started`: STT started for a speech turn.
 - `stt_finished`: STT finished and recognized text.
 - `stt_no_text`: STT finished without usable text.
+- `user_transcript_partial`: Partial recognized caller text from streaming STT.
 - `user_transcript`: Recognized caller text.
 - `dtmf`: Caller sent a DTMF digit.
 
@@ -45,6 +46,7 @@ Agent tasks and responses:
 
 - `agent_response_requested`: Agent should decide what to do. Reasons include
   `call_connected` and caller transcript turns.
+- `agent_response_partial`: Partial text response from a streaming agent.
 - `agent_response_received`: Service received a response from an agent.
 - `agent_response_dropped`: Response was intentionally not played, usually
   because the caller was already speaking.
@@ -64,6 +66,7 @@ Control and context:
 - `call_control_requested`: Agent or API requested a call control action.
 - `call_control_completed`: Asterisk returned a result for the control action.
 - `context_compacted`: Long event context was summarized.
+- `metrics`: Timing or operational metric emitted by the runtime.
 - `system`: Operational fallback event for unexpected or low-level conditions.
 
 New provider-specific events should be additive. Agents should ignore event
@@ -82,6 +85,12 @@ Read events:
 
 ```bash
 curl 'http://127.0.0.1:8080/events?after=0'
+```
+
+Read the machine-readable event catalog:
+
+```bash
+curl http://127.0.0.1:8080/events/catalog
 ```
 
 Read pending agent tasks with compacted context:

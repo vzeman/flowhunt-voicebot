@@ -311,9 +311,11 @@ def main() -> None:
     args = parse_args()
     owner = f"local-command-agent:{os.getpid()}"
     seen: set[int] = set()
+    claimed_pending: list[dict] = []
 
     while True:
         try:
+            claimed_pending = []
             active_call_ids = set(http_json("GET", f"{args.base_url}/health").get("active_calls", []))
             response = http_json("GET", f"{args.base_url}/agent/tasks")
             pending = [
@@ -329,6 +331,7 @@ def main() -> None:
             if not pending:
                 time.sleep(args.interval)
                 continue
+            claimed_pending = pending
 
             latest = pending[-1]
             deterministic_call = fast_tool_call(latest)
@@ -367,8 +370,15 @@ def main() -> None:
                 )
             for task in pending:
                 seen.add(task["id"])
+            claimed_pending = []
             print(f"answered {len(pending)} pending event(s) for call {latest['call_id']}", flush=True)
         except (OSError, urllib.error.URLError, TimeoutError, RuntimeError, subprocess.SubprocessError) as exc:
+            if claimed_pending:
+                try:
+                    release_tasks(args.base_url, claimed_pending)
+                except (OSError, urllib.error.URLError, TimeoutError, RuntimeError):
+                    pass
+                claimed_pending = []
             print(f"agent error: {exc}", flush=True)
             time.sleep(max(args.interval, 2.0))
 

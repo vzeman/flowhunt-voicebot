@@ -74,12 +74,21 @@ def claim_tasks(base_url: str, tasks: list[dict], owner: str) -> list[dict]:
     return [task for task in tasks if task["id"] in claimed_ids]
 
 
+def release_tasks(base_url: str, tasks: list[dict]) -> dict:
+    event_ids = [int(task["id"]) for task in tasks]
+    if not event_ids:
+        return {"released_event_ids": []}
+    return http_json("POST", f"{base_url}/agent/tasks/release", {"event_ids": event_ids})
+
+
 def main() -> None:
     args = parse_args()
     owner = f"fast-test-agent:{os.getpid()}"
     seen: set[int] = set()
+    claimed_pending: list[dict] = []
     while True:
         try:
+            claimed_pending = []
             tasks = http_json("GET", f"{args.base_url}/agent/tasks").get("pending", [])
             pending = [task for task in tasks if task["id"] not in seen]
             if not pending:
@@ -90,6 +99,7 @@ def main() -> None:
             if not pending:
                 time.sleep(args.interval)
                 continue
+            claimed_pending = pending
 
             latest = pending[-1]
             tool = control_tool(latest)
@@ -106,8 +116,15 @@ def main() -> None:
             http_json("POST", f"{args.base_url}/agent/tools/{tool_name}", {"arguments": arguments})
             for task in pending:
                 seen.add(task["id"])
+            claimed_pending = []
             print(f"answered event {latest['id']} for call {latest['call_id']}", flush=True)
         except Exception as exc:
+            if claimed_pending:
+                try:
+                    release_tasks(args.base_url, claimed_pending)
+                except Exception:
+                    pass
+                claimed_pending = []
             print(f"agent error: {exc}", flush=True)
             time.sleep(max(args.interval, 2.0))
 

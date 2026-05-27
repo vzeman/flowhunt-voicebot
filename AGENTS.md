@@ -125,6 +125,12 @@ Read the full transcript for one call:
 curl http://127.0.0.1:8080/calls/CALL_ID/transcript
 ```
 
+List persisted transcript call IDs:
+
+```bash
+curl http://127.0.0.1:8080/transcripts
+```
+
 Hang up a call:
 
 ```bash

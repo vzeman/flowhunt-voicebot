@@ -33,6 +33,10 @@ class TranscriptStore:
         with path.open("r", encoding="utf-8") as handle:
             return [json.loads(line) for line in handle if line.strip()]
 
+    def list_call_ids(self) -> list[str]:
+        with self._lock:
+            return sorted(path.stem for path in self.directory.glob("*.jsonl") if path.is_file())
+
 
 def safe_name(value: str) -> str:
     return "".join(char if char.isalnum() or char in "-_" else "_" for char in value)

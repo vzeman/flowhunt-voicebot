@@ -36,6 +36,7 @@ FRAME_EVENT_TYPES = {
     "speech_started": "user_speech_started",
     "speech_finished": "user_speech_finished",
     "transcription_started": "stt_started",
+    "transcription_partial": "user_transcript_partial",
     "transcription_finished": "stt_finished",
     "transcription_empty": "stt_no_text",
     "user_transcript": "user_transcript",

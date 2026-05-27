@@ -18,6 +18,7 @@ FrameKind = Literal[
     "speech_started",
     "speech_finished",
     "transcription_started",
+    "transcription_partial",
     "transcription_finished",
     "transcription_empty",
     "user_transcript",
@@ -171,7 +172,13 @@ class TranscriptionFrame(Frame):
 
     def __init__(
         self,
-        kind: Literal["transcription_started", "transcription_finished", "transcription_empty", "user_transcript"],
+        kind: Literal[
+            "transcription_started",
+            "transcription_partial",
+            "transcription_finished",
+            "transcription_empty",
+            "user_transcript",
+        ],
         call_id: str,
         turn_id: int,
         *,

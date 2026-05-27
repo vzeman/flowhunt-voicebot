@@ -176,6 +176,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         "get_agent_task_summary",
         "List agent task events with pending, claimed, responded, or inactive state.",
         (
+            ToolArgument("after", "Optional event ID cursor.", required=False, schema={"type": "integer"}),
             ToolArgument("call_id", "Optional call filter.", required=False, schema={"type": ["string", "null"]}),
             ToolArgument("owner", "Optional claim owner filter.", required=False, schema={"type": ["string", "null"]}),
             ToolArgument("limit", "Optional maximum number of tasks.", required=False, schema={"type": "integer"}),

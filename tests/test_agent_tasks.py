@@ -291,6 +291,16 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual([task["event"]["id"] for task in payload["tasks"]], [first.id])
         self.assertEqual(payload["counts"], {"claimed": 1})
 
+    def test_agent_task_summary_applies_after_cursor(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+        second = events.append("call-1", "agent_response_requested", {"text": "second"})
+
+        response = client.get(f"/agent/tasks/summary?after={first.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([task["event"]["id"] for task in response.json()["tasks"]], [second.id])
+
     def test_get_agent_task_summary_tool_reports_classified_tasks(self) -> None:
         client, events, _tracker = self.build_client()
         first = events.append("call-1", "agent_response_requested", {"text": "first"})
@@ -302,6 +312,19 @@ class AgentTasksTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual([task["event"]["id"] for task in response.json()["tasks"]], [first.id])
+
+    def test_get_agent_task_summary_tool_applies_after_cursor(self) -> None:
+        client, events, _tracker = self.build_client()
+        first = events.append("call-1", "agent_response_requested", {"text": "first"})
+        second = events.append("call-1", "agent_response_requested", {"text": "second"})
+
+        response = client.post(
+            "/agent/tools/get_agent_task_summary",
+            json={"arguments": {"after": first.id}},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([task["event"]["id"] for task in response.json()["tasks"]], [second.id])
 
     def test_agent_task_renew_extends_matching_claims(self) -> None:
         client, events, _tracker = self.build_client()

@@ -264,7 +264,7 @@ def create_app(
         if request.action == "hangup":
             result = asterisk.hangup(call_id)
         elif request.action == "transfer" and request.target:
-            result = asterisk.transfer(call_id, request.target)
+            result = asterisk.transfer(call_id, validated_transfer_target(request.target))
         elif request.action == "transfer":
             completed = events.append(
                 call_id,
@@ -361,7 +361,7 @@ def create_app(
 
     async def tool_transfer_call(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
-        target = require_arg(args, "target")
+        target = validated_transfer_target(require_arg(args, "target"))
         return await call_control(
             call_id,
             CallControlRequest(
@@ -462,3 +462,14 @@ def validated_dtmf_digit(value: Any) -> str:
     if len(digit) != 1 or digit not in "0123456789*#ABCD":
         raise HTTPException(status_code=400, detail="digit must be one DTMF character: 0-9, *, #, A-D")
     return digit
+
+
+def validated_transfer_target(value: Any) -> str:
+    target = str(value).strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="transfer target must not be empty")
+    if len(target) > 128:
+        raise HTTPException(status_code=400, detail="transfer target must be at most 128 characters")
+    if any(ord(char) < 32 or ord(char) == 127 for char in target):
+        raise HTTPException(status_code=400, detail="transfer target must not contain control characters")
+    return target

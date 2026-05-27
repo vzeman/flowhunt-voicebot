@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import tempfile
 import unittest
 
@@ -72,6 +73,22 @@ class TranscriptTests(unittest.TestCase):
             events = transcripts.read("call-1", after=1, limit=1)
 
             self.assertEqual([event["id"] for event in events], [2])
+
+    def test_transcript_store_skips_malformed_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "call-1.jsonl"
+            path.write_text(
+                '{"id":1,"call_id":"call-1","type":"call_started","timestamp":"2026-05-27T00:00:00Z","data":{}}\n'
+                "not-json\n"
+                '["not", "an", "event"]\n'
+                '{"id":2,"call_id":"call-1","type":"call_ended","timestamp":"2026-05-27T00:00:01Z","data":{}}\n',
+                encoding="utf-8",
+            )
+            transcripts = TranscriptStore(directory)
+
+            events = transcripts.read("call-1")
+
+            self.assertEqual([event["id"] for event in events], [1, 2])
 
     def test_transcripts_endpoint_lists_persisted_call_ids(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

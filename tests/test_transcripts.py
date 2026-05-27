@@ -48,6 +48,7 @@ class TranscriptTests(unittest.TestCase):
                         "last_event_id": 2,
                         "first_timestamp": "2026-05-27T00:00:00Z",
                         "last_timestamp": "2026-05-27T00:00:03Z",
+                        "skipped_line_count": 0,
                     }
                 ],
             )
@@ -89,6 +90,21 @@ class TranscriptTests(unittest.TestCase):
             events = transcripts.read("call-1")
 
             self.assertEqual([event["id"] for event in events], [1, 2])
+
+    def test_transcript_summary_reports_skipped_line_count(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "call-1.jsonl"
+            path.write_text(
+                '{"id":1,"call_id":"call-1","type":"call_started","timestamp":"2026-05-27T00:00:00Z","data":{}}\n'
+                "not-json\n"
+                '["not", "an", "event"]\n',
+                encoding="utf-8",
+            )
+            transcripts = TranscriptStore(directory)
+
+            summaries = transcripts.summaries()
+
+            self.assertEqual(summaries[0]["skipped_line_count"], 2)
 
     def test_transcript_store_ignores_invalid_event_ids_when_paging(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

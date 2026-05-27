@@ -47,7 +47,7 @@ class TranscriptStore:
         if limit is not None:
             paths = paths[:limit]
         for path in paths:
-            events = self._read_path(path)
+            events, skipped_line_count = self._read_path_with_errors(path)
             if not events:
                 continue
             result.append(
@@ -58,14 +58,20 @@ class TranscriptStore:
                     "last_event_id": events[-1].get("id"),
                     "first_timestamp": events[0].get("timestamp"),
                     "last_timestamp": events[-1].get("timestamp"),
+                    "skipped_line_count": skipped_line_count,
                 }
             )
         return result
 
     def _read_path(self, path: Path) -> list[dict]:
+        events, _skipped_line_count = self._read_path_with_errors(path)
+        return events
+
+    def _read_path_with_errors(self, path: Path) -> tuple[list[dict], int]:
         if not path.exists():
-            return []
+            return [], 0
         events = []
+        skipped_line_count = 0
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
@@ -73,10 +79,13 @@ class TranscriptStore:
                 try:
                     payload = json.loads(line)
                 except json.JSONDecodeError:
+                    skipped_line_count += 1
                     continue
                 if isinstance(payload, dict):
                     events.append(payload)
-        return events
+                else:
+                    skipped_line_count += 1
+        return events, skipped_line_count
 
 
 def safe_name(value: str) -> str:

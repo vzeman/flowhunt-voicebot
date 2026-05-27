@@ -65,8 +65,18 @@ class TranscriptStore:
     def _read_path(self, path: Path) -> list[dict]:
         if not path.exists():
             return []
+        events = []
         with path.open("r", encoding="utf-8") as handle:
-            return [json.loads(line) for line in handle if line.strip()]
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    events.append(payload)
+        return events
 
 
 def safe_name(value: str) -> str:

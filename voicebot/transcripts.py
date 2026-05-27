@@ -34,10 +34,15 @@ class TranscriptStore:
         with self._lock:
             return sorted(path.stem for path in self.directory.glob("*.jsonl") if path.is_file())
 
-    def summaries(self) -> list[dict]:
+    def summaries(self, after_call_id: str | None = None, limit: int | None = None) -> list[dict]:
         result = []
         with self._lock:
             paths = sorted(path for path in self.directory.glob("*.jsonl") if path.is_file())
+        if after_call_id:
+            safe_after = safe_name(after_call_id)
+            paths = [path for path in paths if path.stem > safe_after]
+        if limit is not None:
+            paths = paths[:limit]
         for path in paths:
             events = self._read_path(path)
             if not events:

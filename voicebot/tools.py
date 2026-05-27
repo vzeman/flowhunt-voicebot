@@ -149,7 +149,10 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "list_transcript_summaries",
         "List persisted transcripts with event counts and first/last timestamps.",
-        (),
+        (
+            ToolArgument("after_call_id", "Optional call ID cursor.", required=False, schema={"type": ["string", "null"]}),
+            ToolArgument("limit", "Optional maximum number of transcript summaries.", required=False, schema={"type": "integer"}),
+        ),
     ),
     ToolDefinition(
         "get_transcript",

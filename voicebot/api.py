@@ -99,6 +99,17 @@ def create_app(
     def health() -> dict[str, Any]:
         return {"ok": True, "active_calls": registry.active_call_ids()}
 
+    @app.get("/calls")
+    def list_calls() -> dict[str, Any]:
+        return {"calls": registry.snapshots()}
+
+    @app.get("/calls/{call_id}")
+    def call_state(call_id: str) -> dict[str, Any]:
+        snapshot = registry.snapshot(call_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail=f"Active call not found: {call_id}")
+        return snapshot
+
     @app.get("/providers")
     def providers() -> dict[str, Any]:
         return provider_catalog()
@@ -325,6 +336,10 @@ def create_app(
     def tool_get_active_calls(args: dict[str, Any]) -> dict[str, Any]:
         return {"active_calls": registry.active_call_ids()}
 
+    def tool_get_call_state(args: dict[str, Any]) -> dict[str, Any]:
+        call_id = require_arg(args, "call_id")
+        return call_state(call_id)
+
     tool_executor.register("say", tool_say)
     tool_executor.register("hangup_call", tool_hangup_call)
     tool_executor.register("transfer_call", tool_transfer_call)
@@ -333,6 +348,7 @@ def create_app(
     tool_executor.register("get_transcript", tool_get_transcript)
     tool_executor.register("get_events", tool_get_events)
     tool_executor.register("get_active_calls", tool_get_active_calls)
+    tool_executor.register("get_call_state", tool_get_call_state)
 
     return app
 

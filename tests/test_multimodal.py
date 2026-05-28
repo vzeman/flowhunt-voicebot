@@ -8,7 +8,13 @@ from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
-from voicebot.multimodal import ModalityCapabilities, MultimodalContent, MultimodalContext, MultimodalContextStore
+from voicebot.multimodal import (
+    ModalityCapabilities,
+    MultimodalContent,
+    MultimodalContext,
+    MultimodalContextStore,
+    validate_multimodal_content,
+)
 from voicebot.providers import ProviderCapabilities
 from voicebot.transcripts import TranscriptStore
 from voicebot.transports import WEBRTC_CAPABILITIES
@@ -76,6 +82,17 @@ class MultimodalTests(unittest.TestCase):
 
         self.assertEqual(context.workspace_id, "workspace-1")
         self.assertEqual([part.modality for part in context.parts], ["chat", "visual_card"])
+
+    def test_multimodal_validation_checks_capabilities_and_content_shape(self) -> None:
+        capabilities = ModalityCapabilities(input=frozenset({"audio"}), output=frozenset({"audio", "text"}))
+
+        issues = validate_multimodal_content(MultimodalContent("image", "input", uri="s3://image.png"), capabilities)
+        empty = validate_multimodal_content(MultimodalContent("text", "output"), capabilities)
+
+        self.assertEqual(issues[0].field, "modality")
+        self.assertIn("not supported", issues[0].message)
+        self.assertEqual(empty[0].field, "content")
+        self.assertEqual(validate_multimodal_content(MultimodalContent("text", "output", text="hello"), capabilities), ())
 
     def test_multimodal_api_adds_part_and_emits_event(self) -> None:
         events = EventStore(max_context_events=20)

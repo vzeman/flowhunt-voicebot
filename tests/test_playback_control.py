@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
-from voicebot.calls import AgentResponse, CallRegistry, CallSession
+from voicebot.calls import AgentResponse, CallRegistry, CallSession, limit_spoken_response_text
 from voicebot.config import Settings
 from voicebot.events import EventStore
 from voicebot.transcripts import TranscriptStore
@@ -228,6 +228,39 @@ class PlaybackControlTests(unittest.TestCase):
             self.assertFalse(session.playback.is_active())
         finally:
             session.stop()
+
+    def test_tts_synthesis_latency_metric_is_recorded(self) -> None:
+        events = EventStore(max_context_events=30)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"text": "question"})
+
+            session.submit_agent_response(AgentResponse("call-1", "Short answer.", response_to_event_id=request.id))
+
+            metric_names = [
+                event.data.get("name")
+                for event in events.list_events(call_id="call-1")
+                if event.type == "metrics"
+            ]
+            self.assertIn("tts_synthesis_latency_seconds", metric_names)
+            self.assertIn("tts_duration_seconds", metric_names)
+        finally:
+            session.stop()
+
+    def test_spoken_response_text_is_limited(self) -> None:
+        text = "This is a long first sentence that should stay intact. This second sentence is extra detail."
+
+        self.assertEqual(
+            limit_spoken_response_text(text, 55),
+            "This is a long first sentence that should stay intact.",
+        )
 
     def test_webrtc_barge_in_uses_start_threshold_not_high_echo_threshold(self) -> None:
         events = EventStore(max_context_events=30)

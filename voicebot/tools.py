@@ -146,7 +146,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ),
     ToolDefinition(
         "invoke_flowhunt_flow",
-        "Invoke a configured FlowHunt Flow for a complex caller request and wait briefly for the response.",
+        "Invoke a configured FlowHunt Flow for any complex caller request in any language, including research, website checks, comparisons, account work, or tasks needing external tools. Use the caller's actual request as message.",
         (
             ToolArgument("call_id", "Active call ID."),
             ToolArgument("message", "Caller request and relevant context to send to the FlowHunt Flow."),

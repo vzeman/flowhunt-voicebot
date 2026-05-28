@@ -97,8 +97,8 @@ Your job is to help the caller, answer their questions, solve practical
 problems, and use tools when a phone action is needed.
 
 Do not repeat the caller's words back as the whole answer. Treat transcripts as
-requests, not dictation. Answer naturally and concisely in one or two spoken
-sentences unless the caller asks for detail. Do not mention implementation
+requests, not dictation. Answer naturally and concisely in one short spoken
+sentence by default, or two short sentences only when needed. Do not mention implementation
 details, events, queues, STT, TTS, Asterisk, or SIP. If there are multiple
 unhandled user messages, answer them together in one coherent response.
 You are the only voice the customer should hear. Colleague/project issue
@@ -121,14 +121,14 @@ terminate, stop, or hang up the call. If a short transcript only says "bye" or
 If the caller asks something you can inspect on this computer, use your local
 shell/tooling to find the answer before responding. If you cannot complete a
 request, say what is missing and ask one short follow-up question.
-For complex tasks, website checks, account work, research, or anything that
-needs external tools, call invoke_flowhunt_flow. It asks a FlowHunt colleague
-flow to work on the request and returns or later emits the result. If the flow
-tool is not available, call create_flowhunt_project_issue instead. When the
-tool or a later colleague update returns information, use it to prepare a
-polished answer for the caller. Never pretend you completed external work
-without a colleague result. Never answer by saying only that you heard the
-request.
+For complex tasks in any caller language, website checks, account work,
+research, comparisons, or anything that needs external tools, call
+invoke_flowhunt_flow. It asks a FlowHunt colleague flow to work on the request
+and returns or later emits the result. If the flow tool is not available, call
+create_flowhunt_project_issue instead. When the tool or a later colleague update
+returns information, use it to prepare a polished answer for the caller. Never
+pretend you completed external work without a colleague result. Never answer by
+saying only that you heard the request.
 When creating a colleague issue, base the title and description only on the
 actual pending caller request and relevant conversation facts. Include the
 caller request verbatim in the description. Do not create an issue from STT
@@ -389,7 +389,7 @@ def attach_response_event_id(tool_calls: list[dict], event_id: int) -> list[dict
     return tool_calls
 
 
-def fast_tool_call(task: dict) -> dict | None:
+def fast_tool_calls(task: dict) -> list[dict]:
     data = task.get("data", {})
     event_id = task["id"]
     call_id = task["call_id"]
@@ -397,46 +397,51 @@ def fast_tool_call(task: dict) -> dict | None:
     normalized = _normalize(text)
 
     if data.get("reason") == "call_connected":
-        return {
+        return [{
             "name": "say",
             "arguments": {
                 "call_id": call_id,
                 "text": "Hello, this is the FlowHunt voicebot. How can I help you?",
                 "response_to_event_id": event_id,
             },
-        }
+        }]
 
     if is_colleague_update_task(task):
         answer = colleague_update_answer(task)
         if not answer:
-            return None
-        return {
+            return []
+        return [{
             "name": "say",
             "arguments": {
                 "call_id": call_id,
                 "text": answer,
                 "response_to_event_id": event_id,
             },
-        }
+        }]
 
     if wants_hangup(normalized):
-        return {
+        return [{
             "name": "hangup_call",
             "arguments": {"call_id": call_id, "response_to_event_id": event_id},
-        }
+        }]
 
     transfer_target = requested_transfer_target(text)
     if transfer_target:
-        return {
+        return [{
             "name": "transfer_call",
             "arguments": {
                 "call_id": call_id,
                 "target": transfer_target,
                 "response_to_event_id": event_id,
             },
-        }
+        }]
 
-    return None
+    return []
+
+
+def fast_tool_call(task: dict) -> dict | None:
+    calls = fast_tool_calls(task)
+    return calls[0] if calls else None
 
 
 def colleague_update_answer(task: dict) -> str:
@@ -461,7 +466,7 @@ def colleague_update_answer(task: dict) -> str:
     spoken = customer_facing_colleague_text(candidate)
     if not spoken:
         return "I checked with a colleague, but I do not have a clear customer-facing result yet."
-    return _speech_limit(f"I checked with a colleague. {spoken}", max_chars=420)
+    return _speech_limit(f"I checked with a colleague. {spoken}", max_chars=260)
 
 
 def customer_facing_colleague_text(text: str) -> str:
@@ -672,12 +677,12 @@ def main() -> None:
             ttl_seconds = max(args.command_timeout * 2, 30.0)
             with ClaimRenewer(args.base_url, pending, owner, ttl_seconds):
                 latest = pending[-1]
-                deterministic_call = fast_tool_call(latest)
-                if deterministic_call:
-                    execute_tool_call(args.base_url, deterministic_call)
+                deterministic_calls = fast_tool_calls(latest)
+                if deterministic_calls:
+                    execute_tool_calls(args.base_url, deterministic_calls)
                     seen.add(latest["id"])
                     print(
-                        f"executed deterministic tool {deterministic_call['name']} for event {latest['id']}",
+                        f"executed {len(deterministic_calls)} deterministic tool(s) for event {latest['id']}",
                         flush=True,
                     )
                     claimed_pending = []

@@ -25,6 +25,12 @@ added without changing session orchestration.
 capabilities now include these modality flags. Provider capabilities can also
 declare future multimodal agent support, such as image input or visual output.
 
+`validate_multimodal_content(part, capabilities)` checks that a normalized part
+is allowed for the declared input/output direction and that it carries at least
+one content reference (`text`, `uri`, or metadata). This gives transports and
+provider adapters a shared validation path before they hand multimodal context to
+the session pipeline.
+
 ## Design Rule
 
 Media/session orchestration should not know how a model consumes images or

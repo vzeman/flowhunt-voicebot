@@ -115,3 +115,26 @@ class ModalityCapabilities:
 
     def to_dict(self) -> dict[str, list[str]]:
         return {"input": sorted(self.input), "output": sorted(self.output)}
+
+
+@dataclass(frozen=True)
+class MultimodalValidationIssue:
+    field: str
+    message: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"field": self.field, "message": self.message}
+
+
+def validate_multimodal_content(
+    part: MultimodalContent,
+    capabilities: ModalityCapabilities,
+) -> tuple[MultimodalValidationIssue, ...]:
+    issues: list[MultimodalValidationIssue] = []
+    if part.direction == "input" and not capabilities.supports_input(part.modality):
+        issues.append(MultimodalValidationIssue("modality", f"input modality is not supported: {part.modality}"))
+    if part.direction == "output" and not capabilities.supports_output(part.modality):
+        issues.append(MultimodalValidationIssue("modality", f"output modality is not supported: {part.modality}"))
+    if part.uri is None and part.text is None and not part.metadata:
+        issues.append(MultimodalValidationIssue("content", "content must include text, uri, or metadata"))
+    return tuple(issues)

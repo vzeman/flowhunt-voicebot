@@ -185,6 +185,12 @@ class RealtimeAudioTests(unittest.TestCase):
         enabled.clear()
         self.assertEqual(enabled.summary()["duration_seconds"], 0.0)
 
+    def test_debug_audio_capture_rejects_invalid_settings(self) -> None:
+        with self.assertRaisesRegex(ValueError, "sample_rate"):
+            DebugAudioCapture(enabled=True, sample_rate=0)
+        with self.assertRaisesRegex(ValueError, "max_seconds"):
+            DebugAudioCapture(enabled=True, sample_rate=1000, max_seconds=-1)
+
 
 if __name__ == "__main__":
     unittest.main()

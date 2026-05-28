@@ -115,8 +115,10 @@ so SIP, WebRTC, and future providers share the same VAD behavior.
 `DebugAudioCapture` is a gated in-memory ring buffer for recent normalized audio
 blocks. When disabled, `append()` is a no-op. When enabled, it keeps only the
 configured number of seconds and exposes a small summary with sample count and
-duration. This gives runtime diagnostics a shared primitive for debug audio
-capture without retaining caller audio by default.
+duration. Capture settings reject non-positive sample rates and negative
+retention windows so diagnostics cannot report misleading durations. This gives
+runtime diagnostics a shared primitive for debug audio capture without retaining
+caller audio by default.
 
 ## Next Integration Steps
 

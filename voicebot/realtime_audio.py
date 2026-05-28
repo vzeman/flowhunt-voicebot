@@ -131,6 +131,12 @@ class DebugAudioCapture:
     _blocks: deque[np.ndarray] = field(default_factory=deque)
     _samples: int = 0
 
+    def __post_init__(self) -> None:
+        if self.sample_rate <= 0:
+            raise ValueError("sample_rate must be greater than 0")
+        if self.max_seconds < 0:
+            raise ValueError("max_seconds must be greater than or equal to 0")
+
     def append(self, block: np.ndarray) -> None:
         if not self.enabled:
             return

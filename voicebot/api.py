@@ -244,13 +244,16 @@ def create_app(
         validation_issues = validate_multimodal_content(part, _API_MULTIMODAL_CAPABILITIES)
         if validation_issues:
             raise HTTPException(status_code=400, detail=[issue.to_dict() for issue in validation_issues])
-        context = multimodal_store.add_part(
-            call_id,
-            part,
-            workspace_id=request.workspace_id,
-            voicebot_id=request.voicebot_id,
-            session_id=request.session_id,
-        )
+        try:
+            context = multimodal_store.add_part(
+                call_id,
+                part,
+                workspace_id=request.workspace_id,
+                voicebot_id=request.voicebot_id,
+                session_id=request.session_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
         event = events.append(
             call_id,
             "multimodal_content_added",

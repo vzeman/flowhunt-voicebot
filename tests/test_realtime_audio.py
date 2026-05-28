@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from voicebot.realtime_audio import TurnDetectionConfig, TurnDetector
+from voicebot.realtime_audio import AudioChunkNormalizer, TurnDetectionConfig, TurnDetector
 
 
 def config() -> TurnDetectionConfig:
@@ -70,6 +70,39 @@ class RealtimeAudioTests(unittest.TestCase):
 
         self.assertEqual(result.decision, "speech_too_short")
         self.assertTrue(result.finished)
+
+    def test_turn_detection_result_exposes_metric_data(self) -> None:
+        detector = TurnDetector(config())
+
+        result = detector.process_block(np.full(100, 0.8, dtype=np.float32), playback_active=True)
+        data = result.metric_data(session_id="session-1", turn_id=1)
+
+        self.assertEqual(data["decision"], "speech_started")
+        self.assertEqual(data["block_ms"], 100)
+        self.assertTrue(data["started"])
+        self.assertFalse(data["finished"])
+        self.assertTrue(data["interrupt_playback"])
+        self.assertEqual(data["duration"], 0.0)
+        self.assertEqual(data["session_id"], "session-1")
+        self.assertEqual(data["turn_id"], 1)
+        self.assertAlmostEqual(data["level"], 0.8, places=6)
+
+    def test_audio_chunk_normalizer_downmixes_and_resamples(self) -> None:
+        stereo = np.ones((2, 480), dtype=np.int16) * 8192
+        normalizer = AudioChunkNormalizer(source_rate=48000, target_rate=16000, channels=2)
+
+        audio = normalizer.normalize(stereo)
+
+        self.assertEqual(len(audio), 160)
+        self.assertAlmostEqual(float(audio.mean()), 0.25, delta=0.02)
+
+    def test_audio_chunk_normalizer_scales_float_audio_outside_unit_range(self) -> None:
+        samples = np.ones(80, dtype=np.float32) * 8192.0
+        normalizer = AudioChunkNormalizer(source_rate=8000, target_rate=8000)
+
+        audio = normalizer.normalize(samples)
+
+        self.assertAlmostEqual(float(audio.mean()), 0.25, delta=0.02)
 
 
 if __name__ == "__main__":

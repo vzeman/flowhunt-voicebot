@@ -7,6 +7,7 @@ from voicebot.conversation_flow import (
     ConversationFlowDefinition,
     ConversationFlowEngine,
     ConversationFlowStore,
+    ConversationSessionState,
     ConversationSessionStateStore,
     ConversationStateDefinition,
     ConversationTransition,
@@ -223,6 +224,21 @@ class ConversationFlowTests(unittest.TestCase):
         self.assertEqual(store.list("workspace-1", "voicebot-1"), (handled.session,))
         self.assertTrue(store.delete("call-1"))
         self.assertIsNone(store.get("call-1"))
+
+    def test_session_state_store_rejects_scope_moves_for_existing_call(self) -> None:
+        store = ConversationSessionStateStore()
+        store.save(ConversationSessionState("call-1", "flow-1", "start", "workspace-1", "voicebot-1"))
+
+        invalid_sessions = [
+            ConversationSessionState("call-1", "flow-1", "start", "workspace-2", "voicebot-1"),
+            ConversationSessionState("call-1", "flow-1", "start", "workspace-1", "voicebot-2"),
+            ConversationSessionState("call-1", "flow-2", "start", "workspace-1", "voicebot-1"),
+        ]
+
+        for session in invalid_sessions:
+            with self.subTest(session=session):
+                with self.assertRaisesRegex(ValueError, "cannot move conversation session"):
+                    store.save(session)
 
 
 if __name__ == "__main__":

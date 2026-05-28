@@ -4,6 +4,7 @@ import unittest
 
 from voicebot.config import Settings
 from voicebot.provider_registry import ProviderRegistry, default_provider_registry
+from voicebot.providers import ProviderCapabilities, ProviderDescriptor
 from voicebot.transports import CallRoute
 
 
@@ -56,6 +57,30 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertEqual(stt.capabilities.latency_profile, "interactive")
         self.assertIsNotNone(tts)
         self.assertEqual(tts.capabilities.output_audio_format, "pcm_f32_8000")
+
+    def test_registry_rejects_invalid_provider_descriptor(self) -> None:
+        registry = ProviderRegistry()
+        descriptor = ProviderDescriptor(
+            provider="custom-stt",
+            family="stt",
+            adapter="native",
+            capabilities=ProviderCapabilities(modalities=frozenset()),
+        )
+
+        with self.assertRaisesRegex(ValueError, "Invalid provider descriptor"):
+            registry.register_stt("custom_stt", lambda settings: None, descriptor)
+
+    def test_registry_rejects_descriptor_for_different_provider(self) -> None:
+        registry = ProviderRegistry()
+        descriptor = ProviderDescriptor(
+            provider="other-stt",
+            family="stt",
+            adapter="native",
+            capabilities=ProviderCapabilities(modalities=frozenset({"stt"})),
+        )
+
+        with self.assertRaisesRegex(ValueError, "descriptor provider must match"):
+            registry.register_stt("custom_stt", lambda settings: None, descriptor)
 
     def test_registry_resolves_provider_by_workspace_and_voicebot_route(self) -> None:
         registry = ProviderRegistry()

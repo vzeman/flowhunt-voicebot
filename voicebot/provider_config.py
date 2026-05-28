@@ -146,6 +146,8 @@ def validate_provider_config(
         if descriptor is None:
             issues.append(ProviderValidationIssue(family, provider, "provider is not registered"))
             continue
+        if choice.model and descriptor.models and choice.model not in descriptor.models:
+            issues.append(ProviderValidationIssue(family, provider, f"model is not supported by provider: {choice.model}"))
         required = descriptor.capabilities.required_credentials
         if required and choice.secret_ref is None:
             issues.append(ProviderValidationIssue(family, provider, "provider requires a secret reference"))

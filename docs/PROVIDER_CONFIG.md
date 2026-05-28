@@ -54,6 +54,10 @@ This first store is process-local. In FlowHunt production the same payload
 should be backed by workspace-scoped database rows and secret references should
 resolve through FlowHunt's secret store.
 
+If a provider descriptor declares a fixed model list, validation rejects models
+outside that list. Providers without a descriptor model catalog can still accept
+workspace-specific model names.
+
 ## Fallback Policy
 
 Each family can define a fallback provider. The first implementation only models

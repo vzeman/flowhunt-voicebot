@@ -59,7 +59,9 @@ create session_id
 
 The first implementation provides an in-memory `ChannelResolver` contract. In
 FlowHunt production, channel bindings should live in workspace-scoped database
-tables.
+tables. The resolver supports registering and unregistering bindings by route
+key or channel id so the admin layer can connect/disconnect SIP trunks, phone
+numbers, and WebRTC widgets without restarting runtime workers.
 
 ## Subagents
 

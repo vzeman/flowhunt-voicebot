@@ -34,12 +34,20 @@ def env_json_list(name: str, default: list[dict[str, Any]]) -> tuple[dict[str, A
     return tuple(parsed)
 
 
+def env_csv_tuple(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     api_host: str = os.getenv("VOICEBOT_API_HOST", "0.0.0.0")
     api_port: int = env_int("VOICEBOT_API_PORT", 8080)
     audiosocket_host: str = os.getenv("VOICEBOT_AUDIOSOCKET_HOST", "0.0.0.0")
     audiosocket_port: int = env_int("VOICEBOT_AUDIOSOCKET_PORT", 9019)
+    webrtc_stun_urls: tuple[str, ...] = env_csv_tuple("VOICEBOT_WEBRTC_STUN_URLS", ("stun:stun.l.google.com:19302",))
 
     stt_provider: str = os.getenv("VOICEBOT_STT_PROVIDER", "whisper")
     stt_api_key: str = os.getenv("VOICEBOT_STT_API_KEY", "")
@@ -49,10 +57,13 @@ class Settings:
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_base_url: str = os.getenv("VOICEBOT_OPENAI_BASE_URL", os.getenv("OPENAI_BASE_URL", ""))
     openai_stt_model: str = os.getenv("VOICEBOT_OPENAI_STT_MODEL", "whisper-1")
-    language: str | None = os.getenv("VOICEBOT_LANGUAGE") or None
+    language: str | None = os.getenv("VOICEBOT_LANGUAGE", "en") or None
+    stt_prompt: str = os.getenv("VOICEBOT_STT_PROMPT", "")
     stt_no_speech_threshold: float = env_float("VOICEBOT_STT_NO_SPEECH_THRESHOLD", 0.60)
     stt_logprob_threshold: float = env_float("VOICEBOT_STT_LOGPROB_THRESHOLD", -1.0)
     stt_min_chars: int = env_int("VOICEBOT_STT_MIN_CHARS", 2)
+    debug_audio_capture: bool = env_bool("VOICEBOT_DEBUG_AUDIO_CAPTURE", False)
+    debug_audio_dir: str = os.getenv("VOICEBOT_DEBUG_AUDIO_DIR", "/data/debug-audio")
 
     tts_provider: str = os.getenv("VOICEBOT_TTS_PROVIDER", "supertonic")
     tts_api_key: str = os.getenv("VOICEBOT_TTS_API_KEY", "")
@@ -61,15 +72,18 @@ class Settings:
     tts_voice: str = os.getenv("VOICEBOT_TTS_VOICE", "M1")
     openai_tts_model: str = os.getenv("VOICEBOT_OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
     openai_tts_voice: str = os.getenv("VOICEBOT_OPENAI_TTS_VOICE", "alloy")
+    tts_cache_enabled: bool = env_bool("VOICEBOT_TTS_CACHE_ENABLED", True)
+    tts_cache_dir: str = os.getenv("VOICEBOT_TTS_CACHE_DIR", "/data/tts-cache")
 
-    start_threshold: float = env_float("VOICEBOT_START_THRESHOLD", 0.030)
-    stop_threshold: float = env_float("VOICEBOT_STOP_THRESHOLD", 0.012)
+    start_threshold: float = env_float("VOICEBOT_START_THRESHOLD", 0.020)
+    stop_threshold: float = env_float("VOICEBOT_STOP_THRESHOLD", 0.010)
     vad_start_ms: int = env_int("VOICEBOT_VAD_START_MS", 120)
     barge_in_threshold: float = env_float("VOICEBOT_BARGE_IN_THRESHOLD", 0.30)
     echo_tail_ms: int = env_int("VOICEBOT_ECHO_TAIL_MS", 800)
-    silence_ms: int = env_int("VOICEBOT_SILENCE_MS", 900)
-    min_seconds: float = env_float("VOICEBOT_MIN_SECONDS", 0.5)
+    silence_ms: int = env_int("VOICEBOT_SILENCE_MS", 1200)
+    min_seconds: float = env_float("VOICEBOT_MIN_SECONDS", 0.8)
     max_seconds: float = env_float("VOICEBOT_MAX_SECONDS", 20.0)
+    deferred_response_wait_seconds: float = env_float("VOICEBOT_DEFERRED_RESPONSE_WAIT_SECONDS", 30.0)
     packet_ms: int = env_int("VOICEBOT_PACKET_MS", 20)
 
     max_context_events: int = env_int("VOICEBOT_MAX_CONTEXT_EVENTS", 80)
@@ -90,6 +104,20 @@ class Settings:
     ami_port: int = env_int("VOICEBOT_AMI_PORT", 5038)
     ami_username: str = os.getenv("VOICEBOT_AMI_USERNAME", "voicebot")
     ami_password: str = os.getenv("VOICEBOT_AMI_PASSWORD", "")
+
+    flowhunt_api_key: str = os.getenv("FLOWHUNT_API_KEY", os.getenv("VOICEBOT_FLOWHUNT_API_KEY", ""))
+    flowhunt_workspace_id: str = os.getenv("FLOWHUNT_WORKSPACE_ID", os.getenv("VOICEBOT_FLOWHUNT_WORKSPACE_ID", ""))
+    flowhunt_base_url: str = os.getenv("VOICEBOT_FLOWHUNT_BASE_URL", "https://api.flowhunt.io")
+    flowhunt_timeout: float = env_float("VOICEBOT_FLOWHUNT_TIMEOUT", 30.0)
+    flowhunt_complex_backend: str = os.getenv("VOICEBOT_FLOWHUNT_COMPLEX_BACKEND", "project").strip().lower()
+    flowhunt_project_id: str = os.getenv("FLOWHUNT_PROJECT_ID", os.getenv("VOICEBOT_FLOWHUNT_PROJECT_ID", ""))
+    flowhunt_flow_id: str = os.getenv("FLOWHUNT_FLOW_ID", os.getenv("VOICEBOT_FLOWHUNT_FLOW_ID", ""))
+    flowhunt_issue_wait_seconds: float = env_float("VOICEBOT_FLOWHUNT_ISSUE_WAIT_SECONDS", 45.0)
+    flowhunt_issue_poll_interval_seconds: float = env_float("VOICEBOT_FLOWHUNT_ISSUE_POLL_INTERVAL_SECONDS", 2.0)
+    flowhunt_progress_update_seconds: float = env_float("VOICEBOT_FLOWHUNT_PROGRESS_UPDATE_SECONDS", 12.0)
+    flowhunt_issue_background_wait_seconds: float = env_float("VOICEBOT_FLOWHUNT_ISSUE_BACKGROUND_WAIT_SECONDS", 600.0)
+    flowhunt_flow_wait_seconds: float = env_float("VOICEBOT_FLOWHUNT_FLOW_WAIT_SECONDS", 0.0)
+    flowhunt_flow_poll_interval_seconds: float = env_float("VOICEBOT_FLOWHUNT_FLOW_POLL_INTERVAL_SECONDS", 3.0)
 
     stt_pipeline: tuple[dict[str, Any], ...] = env_json_list(
         "VOICEBOT_STT_PIPELINE",

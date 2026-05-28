@@ -47,7 +47,7 @@ def http_json(method: str, url: str, payload: dict | None = None) -> dict:
         method=method,
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=float(os.getenv("VOICEBOT_AGENT_HTTP_TIMEOUT", "90"))) as response:
         return json.loads(response.read().decode())
 
 
@@ -56,7 +56,12 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
     for task in tasks:
         data = task.get("data", {})
         reason = data.get("reason", "user_transcript")
-        label = "instruction" if reason == "call_connected" else "user said"
+        if reason == "call_connected":
+            label = "call event"
+        elif reason in {"colleague_result", "colleague_progress"}:
+            label = "colleague update"
+        else:
+            label = "user said"
         pending_lines.append(
             f"- event_id={task['id']} call_id={task['call_id']} "
             f"reason={reason} {label}: {data.get('text', '')}"
@@ -67,6 +72,23 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
             {"name": "hangup_call", "arguments": {"call_id": "...", "response_to_event_id": 123}},
             {"name": "transfer_call", "arguments": {"call_id": "...", "target": "123", "response_to_event_id": 123}},
             {"name": "send_dtmf", "arguments": {"call_id": "...", "digit": "1", "response_to_event_id": 123}},
+            {
+                "name": "invoke_flowhunt_flow",
+                "arguments": {
+                    "call_id": "...",
+                    "message": "full task and context",
+                    "response_to_event_id": 123,
+                },
+            },
+            {
+                "name": "create_flowhunt_project_issue",
+                "arguments": {
+                    "call_id": "...",
+                    "title": "short title",
+                    "description": "full task and context",
+                    "response_to_event_id": 123,
+                },
+            },
         ],
     }
 
@@ -79,15 +101,40 @@ requests, not dictation. Answer naturally and concisely in one or two spoken
 sentences unless the caller asks for detail. Do not mention implementation
 details, events, queues, STT, TTS, Asterisk, or SIP. If there are multiple
 unhandled user messages, answer them together in one coherent response.
+You are the only voice the customer should hear. Colleague/project issue
+updates are private working context, not scripts to read aloud. Turn them into
+a fluent customer-facing answer: deduplicate repeated progress messages,
+combine related updates, and only mention the useful result or the next clear
+step. If a colleague result contains raw logs, JSON, issue statuses, or repeated
+messages, extract the meaning and say it plainly. If the colleague task is still
+running, give a short natural progress update only when it adds value; do not
+repeat the same waiting message. Never call invoke_flowhunt_flow or
+create_flowhunt_project_issue while handling a colleague update; use the
+colleague update as the result or status of the already-running work.
 If the caller asks to end the call, call the hangup_call tool. If the caller
 asks to transfer the call, call transfer_call with the requested extension or
 target. If the caller asks you to press or send a keypad digit, call send_dtmf
 with one digit. Include response_to_event_id on every tool call.
+Only call hangup_call when the caller explicitly asks you to disconnect,
+terminate, stop, or hang up the call. If a short transcript only says "bye" or
+"goodbye", speak a brief farewell instead of using a tool.
 If the caller asks something you can inspect on this computer, use your local
 shell/tooling to find the answer before responding. If you cannot complete a
 request, say what is missing and ask one short follow-up question.
-For website questions, try to inspect the URL with available local networking
-tools before answering. Never answer by saying only that you heard the request.
+For complex tasks, website checks, account work, research, or anything that
+needs external tools, call invoke_flowhunt_flow. It asks a FlowHunt colleague
+flow to work on the request and returns or later emits the result. If the flow
+tool is not available, call create_flowhunt_project_issue instead. When the
+tool or a later colleague update returns information, use it to prepare a
+polished answer for the caller. Never pretend you completed external work
+without a colleague result. Never answer by saying only that you heard the
+request.
+When creating a colleague issue, base the title and description only on the
+actual pending caller request and relevant conversation facts. Include the
+caller request verbatim in the description. Do not create an issue from STT
+prompt vocabulary, provider names, event metadata, or a vague topic list. If the
+latest transcript is only a list or summary of possible topics, ask the caller
+one short clarification question instead.
 
 Conversation summary:
 {context.get("summary") or "(none)"}
@@ -115,6 +162,21 @@ helping them:
 
 Produce a useful answer now. Do not use phrases like "I heard" or restate the
 caller's request as the whole response.
+"""
+
+
+def build_tool_result_prompt(original_prompt: str, tool_results: list[dict]) -> str:
+    return f"""{original_prompt}
+
+Tool results from your previous step:
+{json.dumps(tool_results, ensure_ascii=False, indent=2)[:12000]}
+
+Now produce the final concise spoken answer for the caller. Do not read tool
+results literally. Remove duplicate status text, convert colleague/project
+updates into natural speech, and say only what helps the caller understand the
+result or current progress. Do not call another inspection tool. If the tool
+result is not enough, say what you could or could not verify and ask one short
+follow-up question.
 """
 
 
@@ -195,6 +257,68 @@ def execute_tool_call(base_url: str, call: dict) -> dict:
     if not isinstance(arguments, dict):
         raise RuntimeError(f"tool call {name} arguments must be an object")
     return http_json("POST", f"{base_url}/agent/tools/{name}", {"arguments": arguments})
+
+
+def execute_tool_calls(base_url: str, calls: list[dict]) -> list[dict]:
+    results = []
+    for call in calls:
+        name = call.get("name")
+        try:
+            result = execute_tool_call(base_url, call)
+            results.append({"name": name, "ok": True, "result": result})
+        except Exception as exc:
+            results.append({"name": name, "ok": False, "error": str(exc)})
+    return results
+
+
+READ_ONLY_TOOL_NAMES = {
+    "list_transcripts",
+    "list_transcript_summaries",
+    "get_transcript_stats",
+    "get_transcript",
+    "get_events",
+    "get_metrics",
+    "get_active_calls",
+    "get_call_state",
+    "get_runtime_config",
+    "get_agent_task_status",
+    "get_agent_task_summary",
+}
+
+
+COLLEAGUE_TOOL_NAMES = {
+    "invoke_flowhunt_flow",
+    "create_flowhunt_project_issue",
+}
+
+
+VOICE_AGENT_TOOL_NAMES = {
+    "say",
+    "hangup_call",
+    "transfer_call",
+    "send_dtmf",
+    "stop_playback",
+    "invoke_flowhunt_flow",
+    "create_flowhunt_project_issue",
+}
+
+
+def needs_spoken_followup(tool_calls: list[dict]) -> bool:
+    return any(call.get("name") in READ_ONLY_TOOL_NAMES for call in tool_calls)
+
+
+def is_colleague_update_task(task: dict) -> bool:
+    return str(task.get("data", {}).get("reason") or "") in {"colleague_result", "colleague_progress"}
+
+
+def remove_colleague_reentrant_tool_calls(tasks: list[dict], tool_calls: list[dict]) -> list[dict]:
+    if not any(is_colleague_update_task(task) for task in tasks):
+        return tool_calls
+    return [call for call in tool_calls if call.get("name") not in COLLEAGUE_TOOL_NAMES]
+
+
+def filter_voice_agent_tools(tools: list[dict]) -> list[dict]:
+    return [tool for tool in tools if tool.get("name") in VOICE_AGENT_TOOL_NAMES]
 
 
 def claim_tasks(base_url: str, tasks: list[dict], owner: str, ttl_seconds: float) -> list[dict]:
@@ -388,7 +512,7 @@ def main() -> None:
                     claimed_pending = []
                     continue
 
-                tools = http_json("GET", f"{args.base_url}/agent/tools").get("tools", [])
+                tools = filter_voice_agent_tools(http_json("GET", f"{args.base_url}/agent/tools").get("tools", []))
                 prompt = build_prompt(pending, response.get("context", {}), tools)
                 raw_answer = run_agent_command(args.command, prompt, args.command_timeout)
                 answer, tool_calls = parse_agent_output(raw_answer)
@@ -398,6 +522,7 @@ def main() -> None:
                     if answer and is_echo_answer(answer, pending):
                         raise RuntimeError(f"agent returned echo response twice: {answer}")
                 tool_calls = attach_response_event_id(tool_calls, latest["id"])
+                tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
                 for call in tool_calls:
                     execute_tool_call(args.base_url, call)
                 if answer:

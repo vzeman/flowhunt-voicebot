@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from typing import Protocol
+import inspect
 
 from .audio import CALL_SAMPLE_RATE
 from .events import EventStore
@@ -20,10 +21,10 @@ from .processors import FrameProcessorBase, ProcessorResult
 
 
 class STTService(Protocol):
-    def transcribe(self, call_audio):
+    def transcribe(self, call_audio, sample_rate: int = CALL_SAMPLE_RATE):
         raise NotImplementedError
 
-    def transcribe_stream(self, call_audio):
+    def transcribe_stream(self, call_audio, sample_rate: int = CALL_SAMPLE_RATE):
         raise NotImplementedError
 
 
@@ -62,7 +63,10 @@ class STTProcessor(FrameProcessorBase):
         output: list[Frame] = [started]
         final_seen = False
         transcribe_stream = getattr(self.stt, "transcribe_stream", None)
-        results = transcribe_stream(frame.audio) if transcribe_stream else [self.stt.transcribe(frame.audio)]
+        if transcribe_stream:
+            results = call_stt_method(transcribe_stream, frame.audio, frame.sample_rate)
+        else:
+            results = [call_stt_method(self.stt.transcribe, frame.audio, frame.sample_rate)]
         for result in results:
             elapsed = time.perf_counter() - start_time
             metadata = result.metadata or {}
@@ -129,6 +133,16 @@ class STTProcessor(FrameProcessorBase):
                 )
             )
         return output
+
+
+def call_stt_method(method, audio, sample_rate: int):
+    try:
+        signature = inspect.signature(method)
+    except (TypeError, ValueError):
+        return method(audio, sample_rate)
+    if len(signature.parameters) >= 2:
+        return method(audio, sample_rate)
+    return method(audio)
 
 
 class AgentRequestProcessor(FrameProcessorBase):

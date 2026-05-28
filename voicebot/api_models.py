@@ -35,6 +35,12 @@ class SipTrunkRequest(BaseModel):
     forbidden_retry_interval: int = 300
 
 
+class WebRTCOfferRequest(BaseModel):
+    sdp: str
+    type: str = "offer"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class PlaybackInterruptRequest(BaseModel):
     reason: str = "agent_requested"
     response_to_event_id: int | None = None

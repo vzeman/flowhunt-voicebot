@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import unittest
+
+from voicebot.execution_model import (
+    ExecutionScope,
+    frame_category,
+    frame_is_cancellation,
+    frame_is_session_ordered,
+    ids_from_frame,
+    scope_from_frame,
+)
+from voicebot.frames import ControlFrame, TextFrame, TranscriptionFrame
+
+
+class ExecutionModelTests(unittest.TestCase):
+    def test_scope_from_frame_uses_workspace_voicebot_and_session_metadata(self) -> None:
+        frame = TextFrame(
+            "agent_request",
+            "call-1",
+            "hello",
+            data={
+                "workspace_id": "workspace-1",
+                "voicebot_id": "voicebot-1",
+                "session_id": "session-1",
+            },
+        )
+
+        self.assertEqual(
+            scope_from_frame(frame),
+            ExecutionScope(
+                workspace_id="workspace-1",
+                voicebot_id="voicebot-1",
+                session_id="session-1",
+                call_id="call-1",
+            ),
+        )
+
+    def test_scope_from_frame_falls_back_to_call_id_as_session_id(self) -> None:
+        frame = TextFrame("system", "call-1", "hello")
+
+        self.assertEqual(scope_from_frame(frame).session_id, "call-1")
+
+    def test_ids_from_frame_extracts_turn_request_and_external_task_ids(self) -> None:
+        frame = TranscriptionFrame(
+            "user_transcript",
+            "call-1",
+            7,
+            text="hello",
+            trace_id="trace-1",
+            data={"response_to_event_id": 12, "task_id": "task-1"},
+        )
+
+        ids = ids_from_frame(frame)
+
+        self.assertEqual(ids.frame_id, frame.frame_id)
+        self.assertEqual(ids.turn_id, 7)
+        self.assertEqual(ids.response_to_event_id, 12)
+        self.assertEqual(ids.external_task_id, "task-1")
+        self.assertEqual(ids.trace_id, "trace-1")
+
+    def test_frame_categories_and_ordering_are_stable(self) -> None:
+        self.assertEqual(frame_category("audio_input"), "audio")
+        self.assertEqual(frame_category("agent_response"), "agent")
+        self.assertEqual(frame_category("call_control_completed"), "call_control")
+        self.assertEqual(frame_category("unknown"), "system")
+        self.assertTrue(frame_is_session_ordered(TextFrame("agent_response", "call-1", "ok")))
+        self.assertFalse(frame_is_session_ordered(TextFrame("system", "call-1", "ok")))
+
+    def test_cancellation_frames_are_identified(self) -> None:
+        self.assertTrue(frame_is_cancellation(ControlFrame("cancel_tts", "call-1", reason="barge_in")))
+        self.assertFalse(frame_is_cancellation(TextFrame("agent_response", "call-1", "ok")))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -3,126 +3,100 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 import queue
-import socket
 import threading
 import time
-from typing import TYPE_CHECKING
 import uuid
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from scipy.io import wavfile
 
-from .audio import (
-    CALL_SAMPLE_RATE,
-    MSG_DTMF,
-    MSG_SLIN8,
-    MSG_TERMINATE,
-    MSG_UUID,
-    float32_to_pcm16_bytes,
-    pcm16_bytes_to_float32,
-    read_audiosocket_message,
-    rms,
-    write_audiosocket_message,
-)
+from .audio import CALL_SAMPLE_RATE, STT_SAMPLE_RATE, resample_audio, rms
+from .calls import AgentResponse, DEFAULT_STT_PIPELINE, DEFAULT_TTS_PIPELINE, PlaybackBuffer
 from .config import Settings
 from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, AudioOutputFrame, PlaybackFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
 
+try:
+    from aiortc import MediaStreamTrack, RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
+    from av import AudioFrame
+except ModuleNotFoundError:
+    MediaStreamTrack = object
+    RTCConfiguration = None
+    RTCIceServer = None
+    RTCPeerConnection = None
+    RTCSessionDescription = None
+    AudioFrame = None
+
 if TYPE_CHECKING:
+    from .calls import CallRegistry
     from .stt import STTProvider
     from .tts import TTSProvider
 
 
 @dataclass(frozen=True)
-class AgentResponse:
+class WebRTCSessionSnapshot:
     call_id: str
-    text: str
-    response_to_event_id: int | None = None
+    session_id: str
+    connection_state: str
+    recording: bool
+    playback_active: bool
+    stopped: bool
+    active_turn: int
 
 
-DEFAULT_STT_PIPELINE = (ProcessorSpec("stt"), ProcessorSpec("agent-request"))
-DEFAULT_TTS_PIPELINE = (ProcessorSpec("tts"),)
+class WebRTCAudioOutputTrack(MediaStreamTrack):
+    kind = "audio"
+
+    def __init__(self, session: "WebRTCCallSession") -> None:
+        super().__init__()
+        self.session = session
+        self.packet_samples = max(1, int(CALL_SAMPLE_RATE * session.settings.packet_ms / 1000))
+        self.packet_seconds = session.settings.packet_ms / 1000
+        self._timestamp = 0
+
+    async def recv(self):
+        await asyncio.sleep(self.packet_seconds)
+        packet, started, finished = self.session.next_playback_packet(self.packet_samples)
+        if started:
+            self.session.events.append(self.session.call_id, "bot_playback_started", {})
+        if finished:
+            self.session.events.append(self.session.call_id, "bot_playback_finished", {})
+
+        frame = AudioFrame(format="s16", layout="mono", samples=self.packet_samples)
+        frame.sample_rate = CALL_SAMPLE_RATE
+        frame.pts = self._timestamp
+        frame.time_base = fractions_time_base(CALL_SAMPLE_RATE)
+        self._timestamp += self.packet_samples
+        frame.planes[0].update((np.clip(packet, -1.0, 1.0) * 32767.0).astype("<i2").tobytes())
+        return frame
 
 
-class PlaybackBuffer:
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._queue: deque[np.ndarray] = deque()
-        self._current: np.ndarray | None = None
-        self._position = 0
-        self._generation = 0
-        self._playing = False
-
-    def interrupt(self) -> bool:
-        with self._lock:
-            was_playing = self._playing or self._current is not None or bool(self._queue)
-            self._queue.clear()
-            self._current = None
-            self._position = 0
-            self._generation += 1
-            self._playing = False
-            return was_playing
-
-    def enqueue(self, audio: np.ndarray) -> int:
-        with self._lock:
-            self._queue.append(audio.astype(np.float32, copy=False).reshape(-1))
-            self._generation += 1
-            return self._generation
-
-    def is_active(self) -> bool:
-        with self._lock:
-            return self._playing or self._current is not None or bool(self._queue)
-
-    def next_packet(self, packet_samples: int) -> tuple[np.ndarray, bool, bool]:
-        with self._lock:
-            started = False
-            finished = False
-            if self._current is None and self._queue:
-                self._current = self._queue.popleft()
-                self._position = 0
-                self._playing = True
-                started = True
-
-            if self._current is None:
-                return np.zeros(packet_samples, dtype=np.float32), started, finished
-
-            packet = self._current[self._position : self._position + packet_samples]
-            self._position += len(packet)
-            if len(packet) < packet_samples:
-                packet = np.pad(packet, (0, packet_samples - len(packet)))
-                self._current = None
-                self._position = 0
-                self._playing = False
-                finished = True
-            elif self._position >= len(self._current):
-                self._current = None
-                self._position = 0
-                self._playing = False
-                finished = True
-            return packet, started, finished
-
-
-class CallSession:
+class WebRTCCallSession:
     def __init__(
         self,
         call_id: str,
-        sock: socket.socket,
+        session_id: str,
         settings: Settings,
         event_store: EventStore,
-        stt: STTProvider,
-        tts: TTSProvider,
+        stt: "STTProvider",
+        tts: "TTSProvider",
         processor_registry: ProcessorRegistry | None = None,
         stt_pipeline_specs: tuple[ProcessorSpec, ...] = DEFAULT_STT_PIPELINE,
         tts_pipeline_specs: tuple[ProcessorSpec, ...] = DEFAULT_TTS_PIPELINE,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         self.call_id = call_id
-        self.sock = sock
+        self.session_id = session_id
         self.settings = settings
         self.events = event_store
         self.stt = stt
         self.tts = tts
+        self.metadata = metadata or {}
         self.processor_registry = processor_registry or default_processor_registry()
         processor_dependencies = ProcessorDependencies(events=event_store, stt=stt, tts=tts)
         self.stt_pipeline = PipelineRunner(
@@ -134,6 +108,7 @@ class CallSession:
         self.playback = PlaybackBuffer()
         self.stop_event = threading.Event()
         self.recording_event = threading.Event()
+        self.connection_state = "new"
         self._ignore_input_until = 0.0
         self._ignore_input_lock = threading.Lock()
         self._interrupt_generation = 0
@@ -146,23 +121,104 @@ class CallSession:
         self._speech_jobs: queue.Queue[tuple[int, np.ndarray]] = queue.Queue()
         self._active_turn = 0
         self._active_turn_lock = threading.Lock()
-        self._call_id_change_callback = None
+        self._vad_state = _VadState()
+        self._speech_worker = threading.Thread(target=self._speech_worker_loop, daemon=True)
+        self._speech_worker.start()
 
-    def set_call_id_change_callback(self, callback) -> None:
-        self._call_id_change_callback = callback
+    def start(self) -> None:
+        self.events.append(
+            self.call_id,
+            "call_started",
+            {"session_id": self.session_id, "transport": "webrtc", **self.metadata},
+        )
+        connected = self.events.append(
+            self.call_id,
+            "call_connected",
+            {"session_id": self.session_id, "transport": "webrtc", **self.metadata},
+        )
+        if self.settings.greet_on_connect:
+            request = self.events.append(
+                self.call_id,
+                "agent_response_requested",
+                {
+                    "reason": "call_connected",
+                    "trigger_event_id": connected.id,
+                    "text": self.settings.connect_greeting_prompt,
+                },
+            )
+            self._remember_response_generation(request.id)
+            self._protect_startup_response(request.id)
 
-    def run(self) -> None:
-        sender = threading.Thread(target=self._send_loop, daemon=True)
-        speech_worker = threading.Thread(target=self._speech_worker_loop, daemon=True)
-        sender.start()
-        speech_worker.start()
+    async def receive_track(self, track) -> None:
         try:
-            self._receive_loop()
-        finally:
-            self.stop_event.set()
-            sender.join(timeout=1.0)
-            speech_worker.join(timeout=1.0)
-            self.events.append(self.call_id, "call_ended", {})
+            while not self.stop_event.is_set():
+                frame = await track.recv()
+                self.process_audio_block(audio_frame_to_call_audio(frame))
+        except Exception as exc:
+            if not self.stop_event.is_set():
+                self.events.append(self.call_id, "transport_error", {"transport": "webrtc", "error": str(exc)})
+                self.stop()
+
+    def process_audio_block(self, block: np.ndarray) -> None:
+        if block.size == 0 or self.stop_event.is_set():
+            return
+        block = block.astype(np.float32, copy=False).reshape(-1)
+        block_ms = int(len(block) / STT_SAMPLE_RATE * 1000)
+        level = rms(block)
+        state = self._vad_state
+
+        if not state.is_recording:
+            if self._should_ignore_input(level):
+                state.pending_start.clear()
+                state.pending_start_ms = 0
+                return
+            if level < self.settings.start_threshold:
+                state.pending_start.clear()
+                state.pending_start_ms = 0
+                return
+
+            state.pending_start.append(block)
+            state.pending_start_ms += block_ms
+            if state.pending_start_ms < self.settings.vad_start_ms:
+                return
+
+            state.is_recording = True
+            self.recording_event.set()
+            state.collected = list(state.pending_start)
+            state.pending_start.clear()
+            state.pending_start_ms = 0
+            state.silence_ms = 0
+            state.speech_ms = sum(int(len(item) / STT_SAMPLE_RATE * 1000) for item in state.collected)
+            turn_id = self._new_turn()
+            self.events.append(self.call_id, "user_speech_started", {"turn_id": turn_id, "level": level})
+            self._mark_interrupted("user_speech_started")
+            if self.playback.interrupt():
+                self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "user_speech_started"})
+            return
+
+        state.collected.append(block)
+        state.speech_ms += block_ms
+        if level < self.settings.stop_threshold:
+            state.silence_ms += block_ms
+        else:
+            state.silence_ms = 0
+
+        if state.silence_ms < self.settings.silence_ms and state.speech_ms < int(self.settings.max_seconds * 1000):
+            return
+
+        audio = np.concatenate(state.collected)
+        state.is_recording = False
+        self.recording_event.clear()
+        state.collected = []
+        state.silence_ms = 0
+        state.speech_ms = 0
+
+        duration = len(audio) / STT_SAMPLE_RATE
+        turn_id = self._current_turn()
+        self.events.append(self.call_id, "user_speech_finished", {"turn_id": turn_id, "duration": duration})
+        self._record_metric("speech_duration_seconds", duration, {"turn_id": turn_id})
+        if duration >= self.settings.min_seconds:
+            self._speech_jobs.put((turn_id, audio))
 
     def submit_agent_response(self, response: AgentResponse) -> VoicebotEvent:
         self._record_agent_latency(response.response_to_event_id)
@@ -180,10 +236,7 @@ class CallSession:
             self.events.append(
                 self.call_id,
                 "agent_response_dropped",
-                {
-                    "reason": "caller_is_speaking",
-                    "response_to_event_id": response.response_to_event_id,
-                },
+                {"reason": "caller_is_speaking", "response_to_event_id": response.response_to_event_id},
             )
             return event
 
@@ -199,7 +252,6 @@ class CallSession:
             )
             return event
 
-        interrupt_generation = request_generation
         try:
             frames = asyncio.run(
                 self.tts_pipeline.push(
@@ -258,10 +310,10 @@ class CallSession:
             )
             raise RuntimeError("TTS produced no audio")
 
-        if (self.recording_event.is_set() or interrupt_generation != self._current_interrupt_generation()) and not startup_response:
+        if (self.recording_event.is_set() or request_generation != self._current_interrupt_generation()) and not startup_response:
             if self.recording_event.is_set() and self._should_defer_response(response.response_to_event_id):
                 self._defer_until_caller_silence(response.response_to_event_id, "caller_started_speaking_during_tts")
-            if not self.recording_event.is_set() and interrupt_generation == self._current_interrupt_generation():
+            if not self.recording_event.is_set() and request_generation == self._current_interrupt_generation():
                 for chunk in audio_chunks:
                     self.playback.enqueue(chunk)
                 self.events.append(
@@ -300,120 +352,40 @@ class CallSession:
             {"reason": reason, "interrupted": interrupted},
         )
 
-    def snapshot(self) -> dict:
+    def next_playback_packet(self, packet_samples: int) -> tuple[np.ndarray, bool, bool]:
+        if self.recording_event.is_set():
+            if self._startup_playback_guard and self.playback.is_active():
+                return np.zeros(packet_samples, dtype=np.float32), False, False
+            if self.playback.interrupt():
+                self._mark_interrupted("caller_is_speaking")
+                self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "caller_is_speaking"})
+            return np.zeros(packet_samples, dtype=np.float32), False, False
+        packet, started, finished = self.playback.next_packet(packet_samples)
+        if started or finished:
+            if started:
+                self._startup_playback_guard = False
+            self._set_echo_tail(self.settings.echo_tail_ms)
+        return packet, started, finished
+
+    def snapshot(self) -> dict[str, Any]:
         return {
             "call_id": self.call_id,
+            "session_id": self.session_id,
+            "transport": "webrtc",
+            "connection_state": self.connection_state,
             "recording": self.recording_event.is_set(),
             "playback_active": self.playback.is_active(),
             "stopped": self.stop_event.is_set(),
             "active_turn": self._current_turn(),
+            "metadata": self.metadata,
         }
 
-    def _receive_loop(self) -> None:
-        is_recording = False
-        collected: list[np.ndarray] = []
-        pending_start: list[np.ndarray] = []
-        pending_start_ms = 0
-        silence_ms = 0
-        speech_ms = 0
-
-        while not self.stop_event.is_set():
-            try:
-                msg_type, payload = read_audiosocket_message(self.sock)
-            except EOFError:
-                return
-
-            if msg_type == MSG_TERMINATE:
-                return
-            if msg_type == MSG_UUID:
-                audiosocket_uuid = str(uuid.UUID(bytes=payload)) if len(payload) == 16 else payload.hex()
-                old_call_id = self.call_id
-                self.call_id = audiosocket_uuid
-                if self._call_id_change_callback is not None:
-                    self._call_id_change_callback(old_call_id, self)
-                self.events.append(self.call_id, "call_started", {"audiosocket_uuid": audiosocket_uuid})
-                connected = self.events.append(
-                    self.call_id,
-                    "call_connected",
-                    {"audiosocket_uuid": audiosocket_uuid, "transport": "asterisk_audiosocket"},
-                )
-                if self.settings.greet_on_connect:
-                    request = self.events.append(
-                        self.call_id,
-                        "agent_response_requested",
-                        {
-                            "reason": "call_connected",
-                            "trigger_event_id": connected.id,
-                            "text": self.settings.connect_greeting_prompt,
-                        },
-                    )
-                    self._remember_response_generation(request.id)
-                    self._protect_startup_response(request.id)
-                continue
-            if msg_type == MSG_DTMF:
-                self.events.append(self.call_id, "dtmf", {"digit": payload.decode(errors="replace")})
-                continue
-            if msg_type != MSG_SLIN8:
-                self.events.append(self.call_id, "system", {"message": f"ignored audiosocket message {msg_type}"})
-                continue
-
-            block = pcm16_bytes_to_float32(payload)
-            block_ms = int(len(block) / CALL_SAMPLE_RATE * 1000)
-            level = rms(block)
-
-            if not is_recording:
-                if self._should_ignore_input(level):
-                    pending_start = []
-                    pending_start_ms = 0
-                    continue
-                if level < self.settings.start_threshold:
-                    pending_start = []
-                    pending_start_ms = 0
-                    continue
-
-                pending_start.append(block)
-                pending_start_ms += block_ms
-                if pending_start_ms < self.settings.vad_start_ms:
-                    continue
-
-                is_recording = True
-                self.recording_event.set()
-                collected = pending_start
-                pending_start = []
-                pending_start_ms = 0
-                silence_ms = 0
-                speech_ms = sum(int(len(item) / CALL_SAMPLE_RATE * 1000) for item in collected)
-                turn_id = self._new_turn()
-                self.events.append(self.call_id, "user_speech_started", {"turn_id": turn_id, "level": level})
-                self._mark_interrupted("user_speech_started")
-
-                if self.playback.interrupt():
-                    self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "user_speech_started"})
-                continue
-
-            collected.append(block)
-            speech_ms += block_ms
-            if level < self.settings.stop_threshold:
-                silence_ms += block_ms
-            else:
-                silence_ms = 0
-
-            if silence_ms < self.settings.silence_ms and speech_ms < int(self.settings.max_seconds * 1000):
-                continue
-
-            audio = np.concatenate(collected)
-            is_recording = False
-            self.recording_event.clear()
-            collected = []
-            silence_ms = 0
-            speech_ms = 0
-
-            duration = len(audio) / CALL_SAMPLE_RATE
-            turn_id = self._current_turn()
-            self.events.append(self.call_id, "user_speech_finished", {"turn_id": turn_id, "duration": duration})
-            self._record_metric("speech_duration_seconds", duration, {"turn_id": turn_id})
-            if duration >= self.settings.min_seconds:
-                self._speech_jobs.put((turn_id, audio))
+    def stop(self) -> None:
+        if self.stop_event.is_set():
+            return
+        self.stop_event.set()
+        self.connection_state = "closed"
+        self.events.append(self.call_id, "call_ended", {"transport": "webrtc", "session_id": self.session_id})
 
     def _speech_worker_loop(self) -> None:
         while not self.stop_event.is_set():
@@ -422,12 +394,28 @@ class CallSession:
             except queue.Empty:
                 continue
 
+            debug_path = self._capture_debug_audio(turn_id, audio)
+            if debug_path:
+                self.events.append(
+                    self.call_id,
+                    "debug_audio_captured",
+                    {
+                        "turn_id": turn_id,
+                        "path": debug_path,
+                        "sample_rate": STT_SAMPLE_RATE,
+                        "samples": int(len(audio)),
+                        "duration": len(audio) / STT_SAMPLE_RATE,
+                        "rms": rms(audio),
+                        "peak": float(np.max(np.abs(audio), initial=0.0)),
+                    },
+                )
+
             frames = asyncio.run(
                 self.stt_pipeline.push(
                     AudioInputFrame(
                         self.call_id,
                         audio,
-                        CALL_SAMPLE_RATE,
+                        STT_SAMPLE_RATE,
                         data={"turn_id": turn_id},
                     )
                 )
@@ -505,47 +493,6 @@ class CallSession:
                     )
                     transcript_event_ids[frame.frame_id] = transcript.id
 
-    def _send_loop(self) -> None:
-        packet_samples = max(1, int(CALL_SAMPLE_RATE * self.settings.packet_ms / 1000))
-        packet_seconds = self.settings.packet_ms / 1000
-        while not self.stop_event.is_set():
-            if self.recording_event.is_set():
-                if self._startup_playback_guard and self.playback.is_active():
-                    packet = np.zeros(packet_samples, dtype=np.float32)
-                    try:
-                        write_audiosocket_message(self.sock, MSG_SLIN8, float32_to_pcm16_bytes(packet))
-                    except OSError:
-                        self.stop_event.set()
-                        return
-                    time.sleep(packet_seconds)
-                    continue
-                if self.playback.interrupt():
-                    self._mark_interrupted("caller_is_speaking")
-                    self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "caller_is_speaking"})
-                packet = np.zeros(packet_samples, dtype=np.float32)
-                try:
-                    write_audiosocket_message(self.sock, MSG_SLIN8, float32_to_pcm16_bytes(packet))
-                except OSError:
-                    self.stop_event.set()
-                    return
-                time.sleep(packet_seconds)
-                continue
-
-            packet, started, finished = self.playback.next_packet(packet_samples)
-            if started:
-                self._startup_playback_guard = False
-                self._set_echo_tail(self.settings.echo_tail_ms)
-                self.events.append(self.call_id, "bot_playback_started", {})
-            try:
-                write_audiosocket_message(self.sock, MSG_SLIN8, float32_to_pcm16_bytes(packet))
-            except OSError:
-                self.stop_event.set()
-                return
-            if finished:
-                self._set_echo_tail(self.settings.echo_tail_ms)
-                self.events.append(self.call_id, "bot_playback_finished", {})
-            time.sleep(packet_seconds)
-
     def _new_turn(self) -> int:
         with self._active_turn_lock:
             self._active_turn += 1
@@ -612,6 +559,16 @@ class CallSession:
     def _record_metric(self, name: str, value: float, data: dict | None = None) -> None:
         self.events.append(self.call_id, "metrics", {"name": name, "value": value, **(data or {})})
 
+    def _capture_debug_audio(self, turn_id: int, audio: np.ndarray) -> str | None:
+        if not self.settings.debug_audio_capture:
+            return None
+        directory = Path(self.settings.debug_audio_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        filename = f"{self.call_id}_turn-{turn_id}.wav".replace("/", "_")
+        path = directory / filename
+        wavfile.write(path, STT_SAMPLE_RATE, np.clip(audio, -1.0, 1.0))
+        return str(path)
+
     def _should_defer_response(self, event_id: int | None) -> bool:
         if event_id is None:
             return False
@@ -634,40 +591,178 @@ class CallSession:
             time.sleep(0.05)
 
 
-class CallRegistry:
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._calls: dict[str, CallSession] = {}
+class WebRTCSessionManager:
+    def __init__(
+        self,
+        settings: Settings,
+        events: EventStore,
+        registry: "CallRegistry",
+        stt: "STTProvider",
+        tts: "TTSProvider",
+        stt_pipeline_specs: tuple[ProcessorSpec, ...],
+        tts_pipeline_specs: tuple[ProcessorSpec, ...],
+    ) -> None:
+        self.settings = settings
+        self.events = events
+        self.registry = registry
+        self.stt = stt
+        self.tts = tts
+        self.stt_pipeline_specs = stt_pipeline_specs
+        self.tts_pipeline_specs = tts_pipeline_specs
+        self._lock = asyncio.Lock()
+        self._sessions: dict[str, tuple[Any, WebRTCCallSession]] = {}
 
-    def add(self, session: CallSession) -> None:
-        with self._lock:
-            self._calls[session.call_id] = session
+    def available(self) -> bool:
+        return RTCPeerConnection is not None
 
-    def replace_id(self, old_call_id: str, session: CallSession) -> None:
-        with self._lock:
-            self._calls.pop(old_call_id, None)
-            self._calls[session.call_id] = session
+    async def create_session(self, offer_sdp: str, offer_type: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        if not self.available():
+            raise RuntimeError("aiortc is not installed")
+        session_id = str(uuid.uuid4())
+        call_id = f"webrtc-{session_id}"
+        pc = RTCPeerConnection(configuration=self._rtc_configuration())
+        session = WebRTCCallSession(
+            call_id=call_id,
+            session_id=session_id,
+            settings=self.settings,
+            event_store=self.events,
+            stt=self.stt,
+            tts=self.tts,
+            stt_pipeline_specs=self.stt_pipeline_specs,
+            tts_pipeline_specs=self.tts_pipeline_specs,
+            metadata=metadata,
+        )
+        self.registry.add(session)
+        pc.addTrack(WebRTCAudioOutputTrack(session))
 
-    def remove(self, call_id: str) -> None:
-        with self._lock:
-            self._calls.pop(call_id, None)
+        @pc.on("track")
+        def on_track(track) -> None:
+            if track.kind == "audio":
+                asyncio.create_task(session.receive_track(track))
 
-    def get(self, call_id: str) -> CallSession | None:
-        with self._lock:
-            return self._calls.get(call_id)
+        @pc.on("connectionstatechange")
+        async def on_connectionstatechange() -> None:
+            session.connection_state = pc.connectionState
+            self.events.append(
+                session.call_id,
+                "system",
+                {"message": "webrtc_connection_state", "state": pc.connectionState, "session_id": session_id},
+            )
+            if pc.connectionState in {"failed", "closed", "disconnected"}:
+                await self.close_session(session_id)
 
-    def active_call_ids(self) -> list[str]:
-        with self._lock:
-            return sorted(self._calls)
+        await pc.setRemoteDescription(RTCSessionDescription(sdp=offer_sdp, type=offer_type))
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        async with self._lock:
+            self._sessions[session_id] = (pc, session)
+        session.start()
+        return {
+            "session_id": session_id,
+            "call_id": call_id,
+            "answer": {
+                "sdp": pc.localDescription.sdp,
+                "type": pc.localDescription.type,
+            },
+        }
 
-    def snapshot(self, call_id: str) -> dict | None:
-        with self._lock:
-            session = self._calls.get(call_id)
-        if session is None:
+    async def close_session(self, session_id: str) -> bool:
+        async with self._lock:
+            pair = self._sessions.pop(session_id, None)
+        if pair is None:
+            return False
+        pc, session = pair
+        session.stop()
+        self.registry.remove(session.call_id)
+        await pc.close()
+        return True
+
+    async def close_call(self, call_id: str) -> bool:
+        async with self._lock:
+            session_id = next(
+                (
+                    candidate
+                    for candidate, (_pc, session) in self._sessions.items()
+                    if session.call_id == call_id
+                ),
+                None,
+            )
+        if session_id is None:
+            return False
+        return await self.close_session(session_id)
+
+    def snapshots(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "session_id": session_id,
+                **session.snapshot(),
+            }
+            for session_id, (_pc, session) in sorted(self._sessions.items())
+        ]
+
+    def _rtc_configuration(self):
+        if not self.settings.webrtc_stun_urls:
             return None
-        return session.snapshot()
+        servers = [RTCIceServer(urls=url) for url in self.settings.webrtc_stun_urls]
+        return RTCConfiguration(iceServers=servers)
 
-    def snapshots(self) -> list[dict]:
-        with self._lock:
-            sessions = list(self._calls.values())
-        return sorted((session.snapshot() for session in sessions), key=lambda item: item["call_id"])
+
+@dataclass
+class _VadState:
+    is_recording: bool = False
+    collected: list[np.ndarray] = None
+    pending_start: deque[np.ndarray] = None
+    pending_start_ms: int = 0
+    silence_ms: int = 0
+    speech_ms: int = 0
+
+    def __post_init__(self) -> None:
+        self.collected = []
+        self.pending_start = deque()
+
+
+def audio_frame_to_call_audio(frame) -> np.ndarray:
+    samples = np.asarray(frame.to_ndarray())
+    original_dtype = samples.dtype
+    channel_count = audio_frame_channel_count(frame)
+    frame_samples = int(getattr(frame, "samples", 0) or 0)
+    if samples.ndim == 2 and samples.shape[0] == 1 and channel_count > 1:
+        packed = samples.reshape(-1)
+        if frame_samples > 0 and packed.size >= frame_samples * channel_count:
+            packed = packed[: frame_samples * channel_count]
+        if packed.size % channel_count == 0:
+            samples = packed.reshape(-1, channel_count).mean(axis=1)
+        else:
+            samples = packed
+    elif samples.ndim > 1:
+        channel_axis = 0 if samples.shape[0] == channel_count else samples.ndim - 1
+        samples = samples.mean(axis=channel_axis)
+    if original_dtype.kind in {"i", "u"}:
+        max_value = float(np.iinfo(original_dtype).max)
+        samples = samples.astype(np.float32) / max_value
+    else:
+        samples = samples.astype(np.float32)
+        if np.max(np.abs(samples), initial=0.0) > 1.0:
+            samples /= 32768.0
+    sample_rate = int(getattr(frame, "sample_rate", CALL_SAMPLE_RATE) or CALL_SAMPLE_RATE)
+    return resample_audio(samples.reshape(-1), sample_rate, STT_SAMPLE_RATE)
+
+
+def audio_frame_channel_count(frame) -> int:
+    layout = getattr(frame, "layout", None)
+    channels = getattr(layout, "channels", None)
+    if channels is None:
+        return 1
+    try:
+        return max(1, len(channels))
+    except TypeError:
+        try:
+            return max(1, int(channels))
+        except (TypeError, ValueError):
+            return 1
+
+
+def fractions_time_base(sample_rate: int):
+    from fractions import Fraction
+
+    return Fraction(1, sample_rate)

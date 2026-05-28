@@ -23,6 +23,12 @@ class ProviderCatalogTests(unittest.TestCase):
         self.assertIn("whisper", catalog["stt"]["native"])
         self.assertIn("supertonic", catalog["tts"]["native"])
         self.assertIn("openai-responses", catalog["agent"]["native"])
+        self.assertTrue(catalog["stt"]["capabilities"]["openai"]["capabilities"]["interruption_support"])
+        self.assertEqual(
+            catalog["tts"]["capabilities"]["supertonic"]["capabilities"]["output_audio_format"],
+            "pcm_f32_8000",
+        )
+        self.assertTrue(catalog["agent"]["capabilities"]["openai-responses"]["capabilities"]["native_tools"])
 
     def test_providers_endpoint_returns_provider_catalog(self) -> None:
         app = create_app(

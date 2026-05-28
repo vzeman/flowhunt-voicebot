@@ -338,6 +338,114 @@ Errors:
 
 - `404`: active call not found.
 
+## WebRTC Browser Calls
+
+These endpoints create direct browser WebRTC calls. The browser sends
+microphone audio to voicebot over WebRTC, and voicebot returns synthesized bot
+audio as a remote audio track. After audio reaches the runtime, WebRTC calls use
+the same VAD, STT, event, agent, TTS, playback, and transcript path as SIP calls.
+
+For manual local testing, open:
+
+```text
+http://127.0.0.1:8080/webrtc/test
+```
+
+### GET `/webrtc/sessions`
+
+Lists active WebRTC sessions.
+
+Response:
+
+```json
+{
+  "sessions": [
+    {
+      "session_id": "session-abc",
+      "call_id": "webrtc-session-abc",
+      "transport": "webrtc",
+      "connection_state": "connected",
+      "recording": false,
+      "playback_active": false,
+      "stopped": false,
+      "active_turn": 1,
+      "metadata": {
+        "client": "browser-test"
+      }
+    }
+  ]
+}
+```
+
+Errors:
+
+- `503`: WebRTC transport is not configured.
+
+### POST `/webrtc/sessions`
+
+Creates a WebRTC session from a browser SDP offer and returns the SDP answer.
+
+Request:
+
+```json
+{
+  "sdp": "v=0...",
+  "type": "offer",
+  "metadata": {
+    "tenant_id": "tenant-1",
+    "client": "browser"
+  }
+}
+```
+
+Fields:
+
+- `sdp`: required SDP offer.
+- `type`: must be `offer`.
+- `metadata`: optional object copied into call lifecycle events and snapshots.
+
+Response:
+
+```json
+{
+  "session_id": "session-abc",
+  "call_id": "webrtc-session-abc",
+  "answer": {
+    "sdp": "v=0...",
+    "type": "answer"
+  }
+}
+```
+
+Errors:
+
+- `400`: request type is not `offer`.
+- `503`: WebRTC transport is not configured or `aiortc` is unavailable.
+
+### DELETE `/webrtc/sessions/{session_id}`
+
+Closes a WebRTC session and removes its active call from the registry.
+
+Response:
+
+```json
+{
+  "closed": true,
+  "session_id": "session-abc"
+}
+```
+
+Errors:
+
+- `404`: WebRTC session not found.
+- `503`: WebRTC transport is not configured.
+
+### GET `/webrtc/test`
+
+Returns a minimal browser test page. It uses `getUserMedia`, creates an
+`RTCPeerConnection`, posts the SDP offer to `/webrtc/sessions`, and plays the
+remote bot audio track in an `<audio>` element.
+
 ## Dynamic SIP Trunks
 
 The voicebot service can manage many SIP trunks dynamically. It persists trunk

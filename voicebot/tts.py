@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
+from dataclasses import dataclass
+import hashlib
 from io import BytesIO
+import json
+from pathlib import Path
+import tempfile
 import threading
 
 import numpy as np
@@ -22,6 +27,70 @@ class TTSProvider(ABC):
 
     def synthesize_stream(self, text: str) -> Iterable[tuple[np.ndarray, float]]:
         yield self.synthesize(text)
+
+
+@dataclass(frozen=True)
+class TTSCacheConfig:
+    provider: str
+    model: str
+    voice: str
+    language: str | None
+    sample_rate: int = CALL_SAMPLE_RATE
+
+
+class CachedTTSProvider(TTSProvider):
+    def __init__(self, inner: TTSProvider, cache_dir: str, config: TTSCacheConfig) -> None:
+        self._inner = inner
+        self._cache_dir = Path(cache_dir)
+        self._config = config
+        self._lock = threading.Lock()
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def synthesize(self, text: str) -> tuple[np.ndarray, float]:
+        key = self._cache_key(text)
+        path = self._cache_dir / f"{key}.npz"
+        cached = self._read(path)
+        if cached is not None:
+            return cached
+
+        audio, duration = self._inner.synthesize(text)
+        self._write(path, audio, duration)
+        return audio, duration
+
+    def _cache_key(self, text: str) -> str:
+        payload = {
+            "version": 1,
+            "config": {
+                "provider": self._config.provider,
+                "model": self._config.model,
+                "voice": self._config.voice,
+                "language": self._config.language,
+                "sample_rate": self._config.sample_rate,
+            },
+            "text": text,
+        }
+        serialized = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(serialized).hexdigest()
+
+    def _read(self, path: Path) -> tuple[np.ndarray, float] | None:
+        try:
+            with self._lock:
+                if not path.exists():
+                    return None
+                with np.load(path) as cached:
+                    audio = np.asarray(cached["audio"], dtype=np.float32)
+                    duration = float(np.asarray(cached["duration"]).reshape(-1)[0])
+        except (OSError, KeyError, ValueError):
+            return None
+        return audio, duration
+
+    def _write(self, path: Path, audio: np.ndarray, duration: float) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".npz", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+                np.savez_compressed(tmp, audio=audio.astype(np.float32, copy=False), duration=np.asarray([duration]))
+            tmp_path.replace(path)
 
 
 class SupertonicTTSProvider(TTSProvider):

@@ -3,19 +3,24 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass
+import difflib
 import re
 import tempfile
 import threading
 import unicodedata
 
 import numpy as np
-from openai import OpenAI
 from scipy.io import wavfile
 import whisper
 
 from .audio import CALL_SAMPLE_RATE, STT_SAMPLE_RATE, resample_audio
 from .config import Settings
 from .providers import normalize_provider, provider_api_key, provider_base_url
+
+try:
+    from openai import OpenAI
+except ModuleNotFoundError:
+    OpenAI = None
 
 
 @dataclass(frozen=True)
@@ -28,11 +33,11 @@ class TranscriptionResult:
 
 class STTProvider(ABC):
     @abstractmethod
-    def transcribe(self, call_audio: np.ndarray) -> TranscriptionResult:
+    def transcribe(self, call_audio: np.ndarray, sample_rate: int = CALL_SAMPLE_RATE) -> TranscriptionResult:
         raise NotImplementedError
 
-    def transcribe_stream(self, call_audio: np.ndarray) -> Iterable[TranscriptionResult]:
-        yield self.transcribe(call_audio)
+    def transcribe_stream(self, call_audio: np.ndarray, sample_rate: int = CALL_SAMPLE_RATE) -> Iterable[TranscriptionResult]:
+        yield self.transcribe(call_audio, sample_rate)
 
 
 class WhisperSTTProvider(STTProvider):
@@ -45,8 +50,8 @@ class WhisperSTTProvider(STTProvider):
         self._min_chars = settings.stt_min_chars
         self._lock = threading.Lock()
 
-    def transcribe(self, call_audio: np.ndarray) -> TranscriptionResult:
-        audio = resample_audio(call_audio, CALL_SAMPLE_RATE, STT_SAMPLE_RATE)
+    def transcribe(self, call_audio: np.ndarray, sample_rate: int = CALL_SAMPLE_RATE) -> TranscriptionResult:
+        audio = resample_audio(call_audio, sample_rate, STT_SAMPLE_RATE)
         with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
             wavfile.write(tmp.name, STT_SAMPLE_RATE, np.clip(audio, -1.0, 1.0))
             with self._lock:
@@ -97,6 +102,8 @@ class WhisperSTTProvider(STTProvider):
 
 class OpenAISTTProvider(STTProvider):
     def __init__(self, settings: Settings) -> None:
+        if OpenAI is None:
+            raise RuntimeError("The openai package is required when using OpenAI-compatible STT")
         provider = normalize_provider(settings.stt_provider)
         api_key = provider_api_key(provider, settings.stt_api_key, settings.openai_api_key)
         base_url = provider_base_url(provider, settings.stt_base_url, settings.openai_base_url)
@@ -111,30 +118,43 @@ class OpenAISTTProvider(STTProvider):
         self._provider = provider
         self._model = model
         self._language = settings.language
+        self._prompt = settings.stt_prompt
         self._min_chars = settings.stt_min_chars
         self._lock = threading.Lock()
 
-    def transcribe(self, call_audio: np.ndarray) -> TranscriptionResult:
-        audio = resample_audio(call_audio, CALL_SAMPLE_RATE, STT_SAMPLE_RATE)
+    def transcribe(self, call_audio: np.ndarray, sample_rate: int = CALL_SAMPLE_RATE) -> TranscriptionResult:
+        audio = resample_audio(call_audio, sample_rate, STT_SAMPLE_RATE)
+        return self._transcribe_audio(audio, use_prompt=bool(self._prompt))
+
+    def _transcribe_audio(self, audio: np.ndarray, use_prompt: bool) -> TranscriptionResult:
         with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
             wavfile.write(tmp.name, STT_SAMPLE_RATE, np.clip(audio, -1.0, 1.0))
             with open(tmp.name, "rb") as audio_file:
                 kwargs = {
                     "model": self._model,
                     "file": audio_file,
-                    "response_format": "verbose_json",
+                    "response_format": self._response_format(),
                 }
                 if self._language:
                     kwargs["language"] = self._language
+                if use_prompt and self._prompt:
+                    kwargs["prompt"] = self._prompt
                 with self._lock:
                     result = self._client.audio.transcriptions.create(**kwargs)
 
         text = str(getattr(result, "text", "") or "").strip()
         metadata = self._metadata(result)
+        metadata["stt_prompt_used"] = use_prompt and bool(self._prompt)
         if len(text) < self._min_chars:
             return TranscriptionResult("", "empty_or_too_short", metadata)
         if re.search(r"<\|.*?\|>", text):
             return TranscriptionResult("", "whisper_token_artifact", metadata)
+        if self._looks_like_prompt_echo(text):
+            metadata["rejected_text_preview"] = text[:200]
+            metadata["stt_prompt_configured"] = True
+            if use_prompt:
+                return self._transcribe_audio(audio, use_prompt=False)
+            return TranscriptionResult("", "stt_prompt_echo", metadata)
         return TranscriptionResult(text, None, metadata)
 
     def _metadata(self, result) -> dict:
@@ -147,11 +167,59 @@ class OpenAISTTProvider(STTProvider):
             "segments": len(segments),
         }
 
+    def _response_format(self) -> str:
+        if self._model in {"gpt-4o-transcribe", "gpt-4o-mini-transcribe"}:
+            return "json"
+        return "verbose_json"
+
+    def _looks_like_prompt_echo(self, text: str) -> bool:
+        if not self._prompt:
+            return False
+        normalized_text = _normalize_for_similarity(text)
+        normalized_prompt = _normalize_for_similarity(self._prompt)
+        if not normalized_text or not normalized_prompt:
+            return False
+        if difflib.SequenceMatcher(None, normalized_text, normalized_prompt).ratio() >= 0.70:
+            return True
+
+        prompt_terms = _keyword_set(normalized_prompt)
+        text_terms = _keyword_set(normalized_text)
+        overlap_ratio = len(prompt_terms & text_terms) / max(len(prompt_terms), 1)
+        prompt_summary_markers = (
+            "caller mentioned",
+            "range of topics",
+            "may have questions",
+            "support ticket details",
+            "technologies and services",
+        )
+        if overlap_ratio >= 0.25 and any(marker in normalized_text for marker in prompt_summary_markers):
+            return True
+        return False
+
 
 def _average(values: list[float]) -> float | None:
     if not values:
         return None
     return float(sum(values) / len(values))
+
+
+def _normalize_for_similarity(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", text.lower())).strip()
+
+
+def _keyword_set(normalized_text: str) -> set[str]:
+    stopwords = {
+        "caller",
+        "mention",
+        "mentioned",
+        "mentions",
+        "details",
+        "support",
+        "ticket",
+        "project",
+        "projects",
+    }
+    return {word for word in normalized_text.split() if len(word) >= 4 and word not in stopwords}
 
 
 def _non_latin_letter_ratio(text: str) -> float:

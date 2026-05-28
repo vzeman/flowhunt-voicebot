@@ -159,6 +159,12 @@ class SubagentTaskLifecycleRunner:
         }
 
     def _poll_due_task(self, task: SubagentTask, now: datetime) -> SubagentTask:
+        if not self.coordinator.supports_async_polling(task.provider):
+            next_poll_at = _iso(now + timedelta(seconds=self.policy.initial_interval_seconds))
+            return self.coordinator.store.update(
+                task.with_status("running", progress_message="Provider does not support async polling.")
+                .with_poll_schedule(next_poll_at=next_poll_at)
+            )
         attempts = task.attempts + 1
         self.coordinator.store.update(task.with_poll_schedule(attempts=attempts))
         try:

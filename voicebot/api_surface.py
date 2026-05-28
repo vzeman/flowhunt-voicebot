@@ -18,6 +18,7 @@ ApiArea = Literal[
 ]
 
 ApiVisibility = Literal["public", "internal", "prototype"]
+ApiScopeSource = Literal["path", "payload", "route_binding", "none"]
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class ApiEndpointSpec:
     area: ApiArea
     visibility: ApiVisibility
     workspace_scoped: bool = True
+    scope_source: ApiScopeSource = "path"
     description: str = ""
 
 
@@ -49,10 +51,10 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/timeline", "session", "public", description="Event timeline."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/transcript", "transcript", "public", description="Transcript."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/tasks", "task", "public", description="External task status."),
-    ApiEndpointSpec("POST", "/runtime/webrtc/sessions", "runtime", "public", description="Create WebRTC runtime session."),
-    ApiEndpointSpec("POST", "/runtime/sip-trunks/{trunk_id}/register", "runtime", "internal", description="Register SIP trunk runtime binding."),
-    ApiEndpointSpec("GET", "/webrtc/test", "testing", "prototype", workspace_scoped=False, description="Local browser test app."),
-    ApiEndpointSpec("GET", "/agent/tasks", "internal", "internal", workspace_scoped=False, description="Worker task lease API."),
+    ApiEndpointSpec("POST", "/runtime/webrtc/sessions", "runtime", "public", scope_source="payload", description="Create WebRTC runtime session."),
+    ApiEndpointSpec("POST", "/runtime/sip-trunks/{trunk_id}/register", "runtime", "internal", scope_source="route_binding", description="Register SIP trunk runtime binding."),
+    ApiEndpointSpec("GET", "/webrtc/test", "testing", "prototype", workspace_scoped=False, scope_source="none", description="Local browser test app."),
+    ApiEndpointSpec("GET", "/agent/tasks", "internal", "internal", workspace_scoped=False, scope_source="none", description="Worker task lease API."),
 )
 
 
@@ -68,7 +70,20 @@ def prototype_endpoints() -> list[dict]:
 
 
 def public_endpoints_are_workspace_scoped() -> bool:
-    return all(endpoint.workspace_scoped for endpoint in FLOWHUNT_API_SURFACE if endpoint.visibility == "public")
+    return not api_scope_violations()
+
+
+def api_scope_violations() -> list[dict]:
+    violations = []
+    for endpoint in FLOWHUNT_API_SURFACE:
+        if endpoint.visibility != "public":
+            continue
+        if not endpoint.workspace_scoped or endpoint.scope_source == "none":
+            violations.append({**api_endpoint_to_dict(endpoint), "violation": "public endpoint is not workspace scoped"})
+            continue
+        if endpoint.scope_source == "path" and "/workspaces/{workspace_id}" not in endpoint.path:
+            violations.append({**api_endpoint_to_dict(endpoint), "violation": "path-scoped endpoint lacks workspace_id path"})
+    return violations
 
 
 def api_endpoint_to_dict(endpoint: ApiEndpointSpec) -> dict:
@@ -78,5 +93,6 @@ def api_endpoint_to_dict(endpoint: ApiEndpointSpec) -> dict:
         "area": endpoint.area,
         "visibility": endpoint.visibility,
         "workspace_scoped": endpoint.workspace_scoped,
+        "scope_source": endpoint.scope_source,
         "description": endpoint.description,
     }

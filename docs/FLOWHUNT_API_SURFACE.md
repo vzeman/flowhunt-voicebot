@@ -14,8 +14,14 @@ APIs and marks prototype-only endpoints.
 
 ## Surface Discovery
 
-`GET /api/surface` returns the grouped API surface catalog and whether all public
-endpoints are workspace-scoped.
+`GET /api/surface` returns the grouped API surface catalog, whether all public
+endpoints are workspace-scoped, and any scope violations. Each endpoint declares
+`scope_source`:
+
+- `path`: workspace is in `/workspaces/{workspace_id}/...`
+- `payload`: workspace/voicebot route is resolved from request data
+- `route_binding`: workspace is resolved from an existing channel/trunk binding
+- `none`: prototype or internal endpoint without workspace permission scope
 
 `GET /api/surface/prototypes` returns prototype-only endpoints that must not be
 exposed as public product APIs.

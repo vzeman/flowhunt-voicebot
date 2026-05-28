@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
 from .agent_tasks import AgentTaskTracker
-from .api_surface import api_surface_by_area, prototype_endpoints, public_endpoints_are_workspace_scoped
+from .api_surface import api_scope_violations, api_surface_by_area, prototype_endpoints, public_endpoints_are_workspace_scoped
 from .api_models import (
     AgentResponseRequest,
     AgentTaskClaimRequest,
@@ -249,6 +249,7 @@ def create_app(
         return {
             "areas": api_surface_by_area(),
             "public_endpoints_are_workspace_scoped": public_endpoints_are_workspace_scoped(),
+            "scope_violations": api_scope_violations(),
         }
 
     @app.get("/api/surface/prototypes")

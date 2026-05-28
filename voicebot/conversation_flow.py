@@ -73,6 +73,13 @@ class ConversationFlowDefinition:
         except KeyError as exc:
             raise ValueError(f"Conversation flow '{self.flow_id}' references unknown state '{state_id}'") from exc
 
+    def validate(self) -> None:
+        self.state(self.initial_state)
+        for state in self.states.values():
+            for transition in state.transitions:
+                if transition.to is not None:
+                    self.state(transition.to)
+
 
 @dataclass(frozen=True)
 class ConversationSessionState:
@@ -95,7 +102,7 @@ class ConversationStepResult:
 class ConversationFlowEngine:
     def __init__(self, definition: ConversationFlowDefinition) -> None:
         self.definition = definition
-        self.definition.state(self.definition.initial_state)
+        self.definition.validate()
 
     def start(self, call_id: str) -> ConversationStepResult:
         session = ConversationSessionState(
@@ -199,7 +206,7 @@ class ConversationFlowStore:
     def save(self, definition: ConversationFlowDefinition) -> ConversationFlowDefinition:
         if not definition.workspace_id:
             raise ValueError("Conversation flow definitions must be workspace-scoped")
-        ConversationFlowEngine(definition)
+        definition.validate()
         self._definitions[self._key(definition.workspace_id, definition.voicebot_id, definition.flow_id)] = definition
         return definition
 

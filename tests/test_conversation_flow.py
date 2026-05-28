@@ -130,6 +130,26 @@ class ConversationFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown state 'missing'"):
             ConversationFlowEngine(definition)
 
+    def test_unknown_transition_target_fails_early(self) -> None:
+        definition = ConversationFlowDefinition(
+            flow_id="broken-transition",
+            workspace_id="workspace-1",
+            voicebot_id="voicebot-1",
+            mode="structured",
+            initial_state="start",
+            states={
+                "start": ConversationStateDefinition(
+                    "start",
+                    transitions=(ConversationTransition(on="user_transcript", to="missing"),),
+                )
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "unknown state 'missing'"):
+            ConversationFlowEngine(definition)
+        with self.assertRaisesRegex(ValueError, "unknown state 'missing'"):
+            ConversationFlowStore().save(definition)
+
     def test_flow_store_requires_workspace_scoped_definitions(self) -> None:
         store = ConversationFlowStore()
 

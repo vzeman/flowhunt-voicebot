@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
-from voicebot.api_surface import api_surface_by_area, prototype_endpoints, public_endpoints_are_workspace_scoped
+from voicebot.api_surface import api_scope_violations, api_surface_by_area, prototype_endpoints, public_endpoints_are_workspace_scoped
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.transcripts import TranscriptStore
@@ -15,6 +15,7 @@ from voicebot.transcripts import TranscriptStore
 class ApiSurfaceTests(unittest.TestCase):
     def test_public_endpoints_are_workspace_scoped(self) -> None:
         self.assertTrue(public_endpoints_are_workspace_scoped())
+        self.assertEqual(api_scope_violations(), [])
 
     def test_api_surface_covers_required_areas(self) -> None:
         grouped = api_surface_by_area()
@@ -34,7 +35,15 @@ class ApiSurfaceTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["public_endpoints_are_workspace_scoped"])
+        self.assertEqual(response.json()["scope_violations"], [])
         self.assertIn("admin", response.json()["areas"])
+
+    def test_runtime_endpoint_declares_payload_workspace_scope(self) -> None:
+        grouped = api_surface_by_area()
+        runtime = next(endpoint for endpoint in grouped["runtime"] if endpoint["path"] == "/runtime/webrtc/sessions")
+
+        self.assertEqual(runtime["scope_source"], "payload")
+        self.assertTrue(runtime["workspace_scoped"])
 
     def test_api_surface_prototypes_endpoint_lists_prototypes(self) -> None:
         response = self.build_client().get("/api/surface/prototypes")

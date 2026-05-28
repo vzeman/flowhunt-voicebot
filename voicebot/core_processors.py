@@ -6,6 +6,7 @@ import inspect
 
 from .audio import CALL_SAMPLE_RATE
 from .events import EventStore
+from .execution_model import ids_from_frame, scope_from_frame
 from .frame_events import frame_to_event_data, frame_to_event_type
 from .frames import (
     AudioInputFrame,
@@ -44,7 +45,7 @@ class EventLogProcessor(FrameProcessorBase):
     def handle(self, frame: Frame, context: PipelineContext) -> Frame:
         event_type = frame_to_event_type(frame)
         if event_type is not None:
-            self.events.append(frame.call_id, event_type, frame_to_event_data(frame))
+            self.events.append_scoped(scope_from_frame(frame), event_type, frame_to_event_data(frame), ids_from_frame(frame))
         return frame
 
 

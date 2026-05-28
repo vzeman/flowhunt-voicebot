@@ -24,6 +24,11 @@ New runtime code should prefer `EventStore.append_scoped()`. It combines
 consistently carry workspace, voicebot, session, trace, turn, request, response,
 and external task identifiers.
 
+Pipeline-generated events use the same path through `EventLogProcessor`, which
+extracts scope and correlation identifiers from frames before persisting events.
+This keeps events emitted by processors aligned with events emitted directly by
+API and task-lifecycle code.
+
 ## Correlation Identifiers
 
 Use these identifiers consistently across events, frames, logs, and provider calls:

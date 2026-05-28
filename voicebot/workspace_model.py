@@ -55,6 +55,15 @@ class ChannelResolver:
     def register(self, binding: VoicebotChannelBinding) -> None:
         self._bindings[(binding.kind, binding.external_id)] = binding
 
+    def unregister(self, kind: ChannelKind, external_id: str) -> VoicebotChannelBinding | None:
+        return self._bindings.pop((kind, external_id), None)
+
+    def unregister_channel(self, channel_id: str) -> VoicebotChannelBinding | None:
+        for key, binding in list(self._bindings.items()):
+            if binding.channel_id == channel_id:
+                return self._bindings.pop(key)
+        return None
+
     def resolve(self, kind: ChannelKind, external_id: str) -> WorkspaceScope | None:
         binding = self._bindings.get((kind, external_id))
         if binding is None or not binding.enabled:

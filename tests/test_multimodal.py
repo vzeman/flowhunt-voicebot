@@ -83,6 +83,14 @@ class MultimodalTests(unittest.TestCase):
         self.assertEqual(context.workspace_id, "workspace-1")
         self.assertEqual([part.modality for part in context.parts], ["chat", "visual_card"])
 
+    def test_context_store_deletes_call_context_for_cleanup(self) -> None:
+        store = MultimodalContextStore()
+        store.add_part("call-1", MultimodalContent("chat", "input", text="hello"), workspace_id="workspace-1")
+
+        self.assertTrue(store.delete("call-1"))
+        self.assertFalse(store.delete("call-1"))
+        self.assertEqual(store.get("call-1").parts, ())
+
     def test_multimodal_validation_checks_capabilities_and_content_shape(self) -> None:
         capabilities = ModalityCapabilities(input=frozenset({"audio"}), output=frozenset({"audio", "text"}))
 

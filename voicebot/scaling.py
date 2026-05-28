@@ -84,6 +84,14 @@ class WorkerInstance:
     status: Literal["active", "draining"] = "active"
     last_heartbeat_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
+    def __post_init__(self) -> None:
+        if not self.worker_id:
+            raise ValueError("worker_id is required")
+        if not self.queue:
+            raise ValueError("queue is required")
+        if self.capacity < 1:
+            raise ValueError("capacity must be greater than or equal to 1")
+
     def as_dict(self) -> dict:
         return {
             "worker_id": self.worker_id,

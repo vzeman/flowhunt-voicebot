@@ -83,6 +83,14 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual([worker.worker_id for worker in active_media], ["media-1"])
         self.assertEqual(len(registry.active(workspace_id="workspace-2", now=now)), 1)
 
+    def test_worker_instance_rejects_invalid_presence_data(self) -> None:
+        with self.assertRaisesRegex(ValueError, "worker_id"):
+            WorkerInstance("", "stt_worker", "voicebot.stt")
+        with self.assertRaisesRegex(ValueError, "queue"):
+            WorkerInstance("stt-1", "stt_worker", "")
+        with self.assertRaisesRegex(ValueError, "capacity"):
+            WorkerInstance("stt-1", "stt_worker", "voicebot.stt", capacity=0)
+
     def test_worker_registry_expires_stale_workers_and_marks_draining(self) -> None:
         registry = WorkerRegistry(heartbeat_ttl_seconds=10)
         now = datetime(2026, 5, 28, tzinfo=UTC)

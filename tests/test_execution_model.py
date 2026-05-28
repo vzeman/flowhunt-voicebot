@@ -53,6 +53,13 @@ class ExecutionModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "session_id"):
             ExecutionScope(workspace_id="workspace-1", voicebot_id="voicebot-1").require_workspace()
 
+    def test_scope_matches_same_workspace_voicebot_and_session(self) -> None:
+        scope = ExecutionScope("workspace-1", "voicebot-1", "session-1", "call-1")
+
+        self.assertTrue(scope.same_session(ExecutionScope("workspace-1", "voicebot-1", "session-1", "call-2")))
+        self.assertFalse(scope.same_session(ExecutionScope("workspace-1", "voicebot-2", "session-1", "call-1")))
+        self.assertFalse(ExecutionScope(session_id="session-1").same_session(scope))
+
     def test_event_store_append_scoped_adds_scope_and_execution_ids(self) -> None:
         events = EventStore(max_context_events=20)
 

@@ -1202,6 +1202,39 @@ Request:
 }
 ```
 
+### POST `/scaling/workers/heartbeat`
+
+Records or refreshes a worker presence record.
+
+```json
+{
+  "worker_id": "agent-1",
+  "role": "agent_worker",
+  "queue": "voicebot.agent",
+  "workspace_id": "workspace-1",
+  "voicebot_id": "voicebot-1",
+  "capacity": 3,
+  "status": "active"
+}
+```
+
+### GET `/scaling/workers`
+
+Lists active workers. Optional query filters: `role`, `workspace_id`.
+
+### GET `/scaling/capacity`
+
+Summarizes active worker capacity by role. Optional query filter:
+`workspace_id`.
+
+### POST `/scaling/workers/{worker_id}/drain`
+
+Marks a worker as draining so it no longer appears in active worker listings.
+
+### DELETE `/scaling/workers/{worker_id}`
+
+Removes a worker presence record.
+
 ## Multimodal Context
 
 ### GET `/calls/{call_id}/multimodal`

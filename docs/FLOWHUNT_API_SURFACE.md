@@ -22,6 +22,7 @@ Each endpoint declares `scope_source`:
 
 - `path`: workspace is in `/workspaces/{workspace_id}/...`
 - `payload`: workspace/voicebot route is resolved from request data
+- `query`: workspace/voicebot route is resolved from query parameters
 - `route_binding`: workspace is resolved from an existing channel/trunk binding
 - `none`: prototype or internal endpoint without workspace permission scope
 

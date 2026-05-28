@@ -37,6 +37,16 @@ class ScalingWorkloadPlanRequest(BaseModel):
     agent_provider: str | None = None
 
 
+class WorkerHeartbeatRequest(BaseModel):
+    worker_id: str
+    role: str
+    queue: str
+    workspace_id: str | None = None
+    voicebot_id: str | None = None
+    capacity: int = 1
+    status: str = "active"
+
+
 class MultimodalContentRequest(BaseModel):
     modality: str
     direction: str

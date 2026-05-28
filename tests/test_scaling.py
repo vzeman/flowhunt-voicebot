@@ -168,6 +168,44 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["routing"]["partition_key"], "workspace-1:voicebot-1:session-1")
 
+    def test_scaling_worker_presence_api_tracks_capacity_and_drain(self) -> None:
+        client = self.build_client()
+
+        heartbeat = client.post(
+            "/scaling/workers/heartbeat",
+            json={
+                "worker_id": "agent-1",
+                "role": "agent_worker",
+                "queue": "voicebot.agent",
+                "workspace_id": "workspace-1",
+                "capacity": 3,
+            },
+        )
+        list_response = client.get("/scaling/workers?role=agent_worker&workspace_id=workspace-1")
+        capacity = client.get("/scaling/capacity?workspace_id=workspace-1")
+        drain = client.post("/scaling/workers/agent-1/drain")
+        after_drain = client.get("/scaling/workers?role=agent_worker&workspace_id=workspace-1")
+        removed = client.delete("/scaling/workers/agent-1")
+
+        self.assertEqual(heartbeat.status_code, 200)
+        self.assertEqual(heartbeat.json()["worker"]["worker_id"], "agent-1")
+        self.assertEqual([worker["worker_id"] for worker in list_response.json()["workers"]], ["agent-1"])
+        self.assertEqual(capacity.json()["roles"]["agent_worker"], {"workers": 1, "capacity": 3})
+        self.assertEqual(drain.json()["worker"]["status"], "draining")
+        self.assertEqual(after_drain.json()["workers"], [])
+        self.assertTrue(removed.json()["removed"])
+
+    def test_scaling_worker_presence_api_rejects_invalid_role(self) -> None:
+        client = self.build_client()
+
+        response = client.post(
+            "/scaling/workers/heartbeat",
+            json={"worker_id": "bad-1", "role": "unknown", "queue": "voicebot.unknown"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("unsupported worker role", response.json()["detail"])
+
     def build_client(self) -> TestClient:
         app = create_app(
             EventStore(max_context_events=20),

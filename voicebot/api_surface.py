@@ -13,12 +13,13 @@ ApiArea = Literal[
     "task",
     "provider",
     "transport",
+    "scaling",
     "testing",
     "internal",
 ]
 
 ApiVisibility = Literal["public", "internal", "prototype"]
-ApiScopeSource = Literal["path", "payload", "route_binding", "none"]
+ApiScopeSource = Literal["path", "payload", "query", "route_binding", "none"]
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,13 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/timeline", "session", "public", description="Event timeline."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/transcript", "transcript", "public", description="Transcript."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/tasks", "task", "public", description="External task status."),
+    ApiEndpointSpec("GET", "/scaling/topology", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Inspect worker topology."),
+    ApiEndpointSpec("POST", "/scaling/workload-plan", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Plan workspace voicebot workload routing."),
+    ApiEndpointSpec("POST", "/scaling/workers/heartbeat", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Record worker presence heartbeat."),
+    ApiEndpointSpec("GET", "/scaling/workers", "scaling", "internal", workspace_scoped=True, scope_source="query", description="List active workers by role or workspace."),
+    ApiEndpointSpec("POST", "/scaling/workers/{worker_id}/drain", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Mark a worker as draining."),
+    ApiEndpointSpec("DELETE", "/scaling/workers/{worker_id}", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Remove worker presence."),
+    ApiEndpointSpec("GET", "/scaling/capacity", "scaling", "internal", workspace_scoped=True, scope_source="query", description="Summarize active worker capacity."),
     ApiEndpointSpec("POST", "/runtime/webrtc/sessions", "runtime", "public", scope_source="payload", description="Create WebRTC runtime session."),
     ApiEndpointSpec("POST", "/runtime/sip-trunks/{trunk_id}/register", "runtime", "internal", scope_source="route_binding", description="Register SIP trunk runtime binding."),
     ApiEndpointSpec("GET", "/webrtc/test", "testing", "prototype", workspace_scoped=False, scope_source="none", description="Local browser test app."),

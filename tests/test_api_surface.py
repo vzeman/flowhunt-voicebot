@@ -38,7 +38,18 @@ class ApiSurfaceTests(unittest.TestCase):
     def test_api_surface_covers_required_areas(self) -> None:
         grouped = api_surface_by_area()
 
-        for area in ("admin", "channel", "runtime", "session", "transcript", "task", "provider", "transport", "testing"):
+        for area in (
+            "admin",
+            "channel",
+            "runtime",
+            "session",
+            "transcript",
+            "task",
+            "provider",
+            "transport",
+            "scaling",
+            "testing",
+        ):
             self.assertIn(area, grouped)
 
     def test_prototype_endpoints_are_identified(self) -> None:

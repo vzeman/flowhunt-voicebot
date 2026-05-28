@@ -29,6 +29,11 @@ Each endpoint declares `scope_source`:
 `GET /api/surface/prototypes` returns prototype-only endpoints that must not be
 exposed as public product APIs.
 
+Endpoint catalog entries are validated at construction time. Supported HTTP
+methods, areas, visibility values, and scope sources must be explicit; paths
+must start with `/`; and endpoints marked as not workspace-scoped must use
+`scope_source=none`.
+
 ## Admin APIs
 
 - `GET /workspaces/{workspace_id}/voicebots`

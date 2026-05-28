@@ -197,6 +197,22 @@ class WorkspaceModelTests(unittest.TestCase):
         self.assertEqual(session.scope(), WorkspaceScope("workspace-1", "voicebot-1", "session-1"))
         self.assertEqual(session.as_dict()["channel_id"], "channel-1")
 
+    def test_session_record_rejects_invalid_status_and_timestamps(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported voicebot session status"):
+            VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1", status="paused")
+        with self.assertRaisesRegex(ValueError, "started_at"):
+            VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1", started_at="2026-05-28T12:00:00")
+        with self.assertRaisesRegex(ValueError, "ended_at is required"):
+            VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1", status="ended")
+        with self.assertRaisesRegex(ValueError, "ended_at"):
+            VoicebotSessionRecord(
+                "session-1",
+                "workspace-1",
+                "voicebot-1",
+                status="ended",
+                ended_at="2026-05-28T12:00:00",
+            )
+
     def test_session_store_lists_active_sessions_by_workspace_and_voicebot(self) -> None:
         store = VoicebotSessionStore()
         first = store.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1"))

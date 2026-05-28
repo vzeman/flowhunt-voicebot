@@ -6,6 +6,7 @@ from typing import Any, Literal, get_args
 
 
 ChannelKind = Literal["sip_trunk", "phone_number", "webrtc_widget"]
+VoicebotSessionStatus = Literal["active", "ended"]
 
 
 @dataclass(frozen=True)
@@ -109,7 +110,7 @@ class VoicebotSessionRecord:
     voicebot_id: str
     channel_id: str | None = None
     external_session_id: str | None = None
-    status: Literal["active", "ended"] = "active"
+    status: VoicebotSessionStatus = "active"
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     ended_at: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -118,6 +119,13 @@ class VoicebotSessionRecord:
         if not self.session_id:
             raise ValueError("session_id is required")
         WorkspaceScope(self.workspace_id, self.voicebot_id, self.session_id)
+        if self.status not in get_args(VoicebotSessionStatus):
+            raise ValueError(f"unsupported voicebot session status: {self.status}")
+        _parse_aware_timestamp(self.started_at, "started_at")
+        if self.status == "ended" and not self.ended_at:
+            raise ValueError("ended_at is required for ended voicebot sessions")
+        if self.ended_at is not None:
+            _parse_aware_timestamp(self.ended_at, "ended_at")
 
     def scope(self) -> WorkspaceScope:
         return WorkspaceScope(self.workspace_id, self.voicebot_id, self.session_id)
@@ -194,3 +202,13 @@ class VoicebotSessionStore:
 def require_same_workspace(source: WorkspaceScope, target_workspace_id: str) -> None:
     if source.workspace_id != target_workspace_id:
         raise ValueError("cross-workspace voicebot operation is not allowed")
+
+
+def _parse_aware_timestamp(value: str, field: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"{field} must be an ISO timestamp") from None
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field} must include timezone")
+    return parsed.astimezone(UTC)

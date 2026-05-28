@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 
 ChannelKind = Literal["sip_trunk", "phone_number", "webrtc_widget"]
@@ -41,6 +41,18 @@ class VoicebotChannelBinding:
     external_id: str
     enabled: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.channel_id.strip():
+            raise ValueError("channel_id is required")
+        if self.kind not in get_args(ChannelKind):
+            raise ValueError(f"unsupported channel kind: {self.kind}")
+        if not self.workspace_id.strip():
+            raise ValueError("workspace_id is required")
+        if not self.voicebot_id.strip():
+            raise ValueError("voicebot_id is required")
+        if not self.external_id.strip():
+            raise ValueError("external_id is required")
 
     def scope(self) -> WorkspaceScope:
         return WorkspaceScope(self.workspace_id, self.voicebot_id)

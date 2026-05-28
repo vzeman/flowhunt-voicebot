@@ -66,7 +66,9 @@ numbers, and WebRTC widgets without restarting runtime workers.
 Channel bindings are identity-guarded. A route cannot be reassigned to another
 channel id, and an existing channel id cannot silently move across route,
 workspace, or voicebot. Dynamic disconnect/reconnect should unregister the old
-binding before registering a different route.
+binding before registering a different route. Bindings also reject blank channel,
+workspace, voicebot, and external route ids, plus unsupported channel kinds,
+before they enter the resolver.
 
 ## Subagents
 

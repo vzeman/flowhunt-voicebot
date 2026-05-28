@@ -95,6 +95,13 @@ class WorkspaceModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "across workspaces"):
             store.save(VoicebotSessionRecord("session-1", "workspace-2", "voicebot-1"))
 
+    def test_session_store_rejects_cross_voicebot_move(self) -> None:
+        store = VoicebotSessionStore()
+        store.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1"))
+
+        with self.assertRaisesRegex(ValueError, "across voicebots"):
+            store.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-2"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@ from voicebot.transports import (
     WEBRTC_CAPABILITIES,
     CallControlRequest,
     CallRoute,
+    MediaSessionDescriptor,
     StaticMediaTransport,
     transport_catalog,
 )
@@ -44,6 +45,14 @@ class TransportContractTests(unittest.TestCase):
         self.assertEqual(descriptor.route.workspace_id, "workspace-1")
         self.assertTrue(descriptor.capabilities.supports("hangup"))
         self.assertFalse(descriptor.capabilities.supports("transfer"))
+
+    def test_session_descriptor_rejects_invalid_identity_and_sample_rate(self) -> None:
+        with self.assertRaisesRegex(ValueError, "call_id"):
+            MediaSessionDescriptor("", "webrtc")
+        with self.assertRaisesRegex(ValueError, "sample_rate"):
+            MediaSessionDescriptor("call-1", "webrtc", sample_rate=0)
+        with self.assertRaisesRegex(ValueError, "sample_rate"):
+            StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES, sample_rate=0)
 
     def test_lifecycle_event_data_is_flat_and_event_friendly(self) -> None:
         transport = StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES, sample_rate=16000)

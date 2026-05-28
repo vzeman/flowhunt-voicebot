@@ -72,7 +72,12 @@ class ProviderCatalogTests(unittest.TestCase):
             capabilities=ProviderCapabilities(
                 modalities=frozenset({"tts"}),
                 required_credentials=("",),
+                latency_profile="slow",
+                languages=("",),
+                usage_metadata=("",),
+                output_audio_format=" ",
             ),
+            models=("",),
         )
 
         self.assertEqual(
@@ -81,6 +86,11 @@ class ProviderCatalogTests(unittest.TestCase):
                 "provider must be normalized",
                 "capabilities modalities must match descriptor family",
                 "required credentials must not be blank",
+                "latency profile must be supported",
+                "languages must not be blank",
+                "usage metadata keys must not be blank",
+                "output audio format must not be blank",
+                "models must not be blank",
             ),
         )
 

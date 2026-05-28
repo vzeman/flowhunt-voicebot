@@ -64,7 +64,9 @@ tool support consistently.
 
 `ProviderDescriptor.validation_issues()` checks descriptor metadata before a new
 provider enters the catalog. It catches unnormalized provider ids, missing
-modalities, family/modality mismatches, and blank credential names.
+modalities, family/modality mismatches, blank credential names, unsupported
+latency profiles, blank language or usage metadata keys, blank output audio
+formats, and blank model names.
 The runtime registry enforces these checks when registering STT/TTS adapters and
 also requires the descriptor provider id to match the registered provider id.
 

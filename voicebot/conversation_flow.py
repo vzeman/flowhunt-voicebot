@@ -76,9 +76,15 @@ class ConversationFlowDefinition:
     def validate(self) -> None:
         self.state(self.initial_state)
         for state in self.states.values():
+            for action in state.entry_actions:
+                _validate_action(action)
+            if state.fallback_action is not None:
+                _validate_action(state.fallback_action)
             for transition in state.transitions:
                 if transition.to is not None:
                     self.state(transition.to)
+                if transition.action is not None:
+                    _validate_action(transition.action)
 
 
 @dataclass(frozen=True)
@@ -305,3 +311,15 @@ def render_template(template: str, session: ConversationSessionState, event_data
 class _SafeFormat(dict):
     def __missing__(self, key: str) -> str:
         return "{" + key + "}"
+
+
+def _validate_action(action: ConversationAction) -> None:
+    if action.type in {"speak", "agent_request"} and not action.text.strip():
+        raise ValueError(f"conversation action {action.type} requires text")
+    if action.type == "subagent_task":
+        if not action.text.strip():
+            raise ValueError("conversation action subagent_task requires text")
+        if not action.data.get("provider"):
+            raise ValueError("conversation action subagent_task requires provider")
+    if action.type == "transfer" and not action.data.get("target"):
+        raise ValueError("conversation action transfer requires target")

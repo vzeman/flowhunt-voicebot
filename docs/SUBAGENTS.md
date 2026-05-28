@@ -68,6 +68,10 @@ Providers also expose `SubagentProviderDescriptor` metadata through
 - required metadata such as `flow_id` or `project_id`
 - whether the provider returns clean result context or raw payloads
 
+The coordinator validates required metadata before creating or submitting a task.
+This catches malformed FlowHunt flow/project requests before a provider call is
+made and keeps failure behavior consistent across future providers.
+
 The first adapter is `FlowHuntSubagentProvider`, with provider kinds:
 
 - `flowhunt_flow`

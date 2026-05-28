@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 import unittest
 
 from fastapi.testclient import TestClient
@@ -8,7 +9,15 @@ from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
-from voicebot.scaling import RoutingKey, WorkloadProfile, WorkspaceBackpressure, build_workload_plan, default_deployment_topology
+from voicebot.scaling import (
+    RoutingKey,
+    WorkerInstance,
+    WorkerRegistry,
+    WorkloadProfile,
+    WorkspaceBackpressure,
+    build_workload_plan,
+    default_deployment_topology,
+)
 from voicebot.transcripts import TranscriptStore
 
 
@@ -62,6 +71,30 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(stt_queue["provider_key"], "workspace-1:voicebot-1:openai")
         self.assertFalse(stt_queue["workspace_capacity_ok"])
         self.assertEqual(agent_queue["provider_key"], "workspace-1:voicebot-1:anthropic")
+
+    def test_worker_registry_tracks_active_workers_by_role_and_workspace(self) -> None:
+        registry = WorkerRegistry(heartbeat_ttl_seconds=30)
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        registry.heartbeat(WorkerInstance("media-1", "media_ingress", "voicebot.media", workspace_id="workspace-1"), now)
+        registry.heartbeat(WorkerInstance("stt-1", "stt_worker", "voicebot.stt"), now)
+
+        active_media = registry.active(role="media_ingress", workspace_id="workspace-1", now=now)
+
+        self.assertEqual([worker.worker_id for worker in active_media], ["media-1"])
+        self.assertEqual(len(registry.active(workspace_id="workspace-2", now=now)), 1)
+
+    def test_worker_registry_expires_stale_workers_and_marks_draining(self) -> None:
+        registry = WorkerRegistry(heartbeat_ttl_seconds=10)
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        registry.heartbeat(WorkerInstance("agent-1", "agent_worker", "voicebot.agent"), now)
+        draining = registry.mark_draining("agent-1", now + timedelta(seconds=1))
+
+        self.assertEqual(draining.status, "draining")
+        self.assertEqual(registry.active(now=now + timedelta(seconds=2)), ())
+        expired = registry.expire(now + timedelta(seconds=12))
+
+        self.assertEqual([worker.worker_id for worker in expired], ["agent-1"])
+        self.assertEqual(registry.snapshot(now + timedelta(seconds=12))["workers"], [])
 
     def test_scaling_topology_endpoint_returns_runtime_topology(self) -> None:
         client = self.build_client()

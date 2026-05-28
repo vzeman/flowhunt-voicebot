@@ -8,6 +8,8 @@ import json
 from voicebot.providers import (
     AGENT_CHAT_COMPATIBLE_PROVIDERS,
     SUPPORTED_AGENT_PROVIDERS,
+    ProviderCapabilities,
+    ProviderDescriptor,
     normalize_provider,
     unsupported_provider_message,
 )
@@ -19,9 +21,28 @@ AgentRunFactory = Callable[[Any, str, str, float, int, list[dict] | None], tuple
 @dataclass
 class AgentProviderRegistry:
     factories: dict[str, AgentRunFactory] = field(default_factory=dict)
+    descriptors: dict[str, ProviderDescriptor] = field(default_factory=dict)
 
-    def register(self, provider: str, factory: AgentRunFactory) -> None:
-        self.factories[normalize_provider(provider)] = factory
+    def register(
+        self,
+        provider: str,
+        factory: AgentRunFactory,
+        descriptor: ProviderDescriptor | None = None,
+    ) -> None:
+        normalized = normalize_provider(provider)
+        self.factories[normalized] = factory
+        self.descriptors[normalized] = descriptor or default_agent_descriptor(normalized)
+
+    def describe(self, provider: str) -> ProviderDescriptor | None:
+        return self.descriptors.get(normalize_provider(provider))
+
+    def catalog(self) -> dict[str, dict]:
+        return {
+            "providers": {
+                provider: descriptor.to_dict()
+                for provider, descriptor in sorted(self.descriptors.items())
+            }
+        }
 
     def run(
         self,
@@ -57,6 +78,26 @@ def default_agent_provider_registry() -> AgentProviderRegistry:
     for provider in AGENT_CHAT_COMPATIBLE_PROVIDERS:
         registry.register(provider, run_chat_agent)
     return registry
+
+
+def default_agent_descriptor(provider: str) -> ProviderDescriptor:
+    adapter = "chat_compatible"
+    native_tools = False
+    if provider in {"anthropic", "openai-responses"}:
+        adapter = "native"
+        native_tools = True
+    return ProviderDescriptor(
+        provider=provider,
+        family="agent",
+        adapter=adapter,
+        capabilities=ProviderCapabilities(
+            modalities=frozenset({"agent"}),
+            required_credentials=("api_key",),
+            latency_profile="interactive",
+            usage_metadata=("input_tokens", "output_tokens", "tool_calls") if native_tools else ("input_tokens", "output_tokens"),
+            native_tools=native_tools,
+        ),
+    )
 
 
 def run_responses_agent(

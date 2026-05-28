@@ -172,10 +172,76 @@ class ConversationFlowTests(unittest.TestCase):
                 ),
                 "state key",
             ),
+            (
+                ConversationFlowDefinition(
+                    flow_id="flow-1",
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-1",
+                    mode="guided",
+                    states={"default": ConversationStateDefinition("default")},
+                ),
+                "unsupported conversation mode",
+            ),
         ]
 
         for definition, message in invalid_definitions:
             with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    ConversationFlowStore().save(definition)
+
+    def test_flow_transition_validation_fails_early(self) -> None:
+        invalid_definitions = [
+            (
+                ConversationFlowDefinition(
+                    flow_id="bad-event",
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-1",
+                    mode="structured",
+                    states={
+                        "default": ConversationStateDefinition(
+                            "default",
+                            transitions=(ConversationTransition(on="unknown"),),
+                        )
+                    },
+                ),
+                "unsupported conversation event type",
+            ),
+            (
+                ConversationFlowDefinition(
+                    flow_id="blank-predicate",
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-1",
+                    mode="structured",
+                    states={
+                        "default": ConversationStateDefinition(
+                            "default",
+                            transitions=(
+                                ConversationTransition(on="user_transcript", when_text_contains=("",)),
+                            ),
+                        )
+                    },
+                ),
+                "text predicates",
+            ),
+            (
+                ConversationFlowDefinition(
+                    flow_id="bad-action",
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-1",
+                    mode="structured",
+                    states={
+                        "default": ConversationStateDefinition(
+                            "default",
+                            entry_actions=(ConversationAction("dance", text="hello"),),
+                        )
+                    },
+                ),
+                "unsupported conversation action type",
+            ),
+        ]
+
+        for definition, message in invalid_definitions:
+            with self.subTest(flow_id=definition.flow_id):
                 with self.assertRaisesRegex(ValueError, message):
                     ConversationFlowStore().save(definition)
 

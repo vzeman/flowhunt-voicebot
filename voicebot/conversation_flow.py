@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 
 ConversationMode = Literal["freeform", "structured"]
@@ -76,6 +76,8 @@ class ConversationFlowDefinition:
     def validate(self) -> None:
         if not self.flow_id.strip():
             raise ValueError("conversation flow_id is required")
+        if self.mode not in get_args(ConversationMode):
+            raise ValueError(f"unsupported conversation mode: {self.mode}")
         if not self.initial_state.strip():
             raise ValueError("conversation initial_state is required")
         for key, state in self.states.items():
@@ -92,6 +94,7 @@ class ConversationFlowDefinition:
             if state.fallback_action is not None:
                 _validate_action(state.fallback_action)
             for transition in state.transitions:
+                _validate_transition(transition)
                 if transition.to is not None:
                     self.state(transition.to)
                 if transition.action is not None:
@@ -332,6 +335,8 @@ class _SafeFormat(dict):
 
 
 def _validate_action(action: ConversationAction) -> None:
+    if action.type not in get_args(ConversationActionType):
+        raise ValueError(f"unsupported conversation action type: {action.type}")
     if action.type in {"speak", "agent_request"} and not action.text.strip():
         raise ValueError(f"conversation action {action.type} requires text")
     if action.type == "subagent_task":
@@ -341,3 +346,10 @@ def _validate_action(action: ConversationAction) -> None:
             raise ValueError("conversation action subagent_task requires provider")
     if action.type == "transfer" and not action.data.get("target"):
         raise ValueError("conversation action transfer requires target")
+
+
+def _validate_transition(transition: ConversationTransition) -> None:
+    if transition.on not in get_args(ConversationEventType):
+        raise ValueError(f"unsupported conversation event type: {transition.on}")
+    if any(not candidate.strip() for candidate in transition.when_text_contains):
+        raise ValueError("conversation transition text predicates must not be blank")

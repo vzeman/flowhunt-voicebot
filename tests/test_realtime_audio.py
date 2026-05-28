@@ -6,7 +6,13 @@ from dataclasses import replace
 import numpy as np
 
 from voicebot.config import Settings
-from voicebot.realtime_audio import AudioChunkNormalizer, TurnDetectionConfig, TurnDetector, turn_detection_config_from_settings
+from voicebot.realtime_audio import (
+    AudioChunkNormalizer,
+    DebugAudioCapture,
+    TurnDetectionConfig,
+    TurnDetector,
+    turn_detection_config_from_settings,
+)
 
 
 def config() -> TurnDetectionConfig:
@@ -126,6 +132,20 @@ class RealtimeAudioTests(unittest.TestCase):
         self.assertEqual(resolved.min_seconds, 0.3)
         self.assertEqual(resolved.max_seconds, 12.0)
         self.assertEqual(resolved.barge_in_threshold, 0.7)
+
+    def test_debug_audio_capture_is_gated_and_bounded(self) -> None:
+        disabled = DebugAudioCapture(enabled=False, sample_rate=1000, max_seconds=1.0)
+        disabled.append(np.ones(100, dtype=np.float32))
+
+        enabled = DebugAudioCapture(enabled=True, sample_rate=1000, max_seconds=0.15)
+        enabled.append(np.ones(100, dtype=np.float32))
+        enabled.append(np.ones(100, dtype=np.float32) * 0.5)
+
+        self.assertEqual(disabled.summary()["samples"], 0)
+        self.assertEqual(enabled.summary()["samples"], 100)
+        self.assertAlmostEqual(float(enabled.audio().mean()), 0.5)
+        enabled.clear()
+        self.assertEqual(enabled.summary()["duration_seconds"], 0.0)
 
 
 if __name__ == "__main__":

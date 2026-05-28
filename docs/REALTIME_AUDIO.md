@@ -88,10 +88,19 @@ ingress paths do not duplicate threshold and timing mapping.
 Transport code should normalize audio before feeding it into the turn detector
 so SIP, WebRTC, and future providers share the same VAD behavior.
 
+## Debug Capture
+
+`DebugAudioCapture` is a gated in-memory ring buffer for recent normalized audio
+blocks. When disabled, `append()` is a no-op. When enabled, it keeps only the
+configured number of seconds and exposes a small summary with sample count and
+duration. This gives runtime diagnostics a shared primitive for debug audio
+capture without retaining caller audio by default.
+
 ## Next Integration Steps
 
 1. Replace duplicated SIP and WebRTC VAD loops with `TurnDetector`.
 2. Emit metrics for every turn decision from `TurnDetectionResult.metric_data()`.
 3. Add a pluggable VAD provider interface.
 4. Add jitter buffer and audio normalization stages before turn detection.
-5. Add stronger echo suppression strategy for real deployments.
+5. Wire debug capture behind runtime/workspace configuration.
+6. Add stronger echo suppression strategy for real deployments.

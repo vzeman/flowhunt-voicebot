@@ -29,6 +29,7 @@ from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, AudioOutputFrame, PlaybackFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
+from .transports import ASTERISK_AUDIOSOCKET_CAPABILITIES, StaticMediaTransport
 
 if TYPE_CHECKING:
     from .stt import STTProvider
@@ -123,6 +124,11 @@ class CallSession:
         self.events = event_store
         self.stt = stt
         self.tts = tts
+        self.descriptor = StaticMediaTransport(
+            "asterisk_audiosocket",
+            ASTERISK_AUDIOSOCKET_CAPABILITIES,
+            sample_rate=CALL_SAMPLE_RATE,
+        ).describe_session(call_id)
         self.processor_registry = processor_registry or default_processor_registry()
         processor_dependencies = ProcessorDependencies(events=event_store, stt=stt, tts=tts)
         self.stt_pipeline = PipelineRunner(
@@ -307,6 +313,12 @@ class CallSession:
             "playback_active": self.playback.is_active(),
             "stopped": self.stop_event.is_set(),
             "active_turn": self._current_turn(),
+            "transport": self.descriptor.transport,
+            "route": self.descriptor.route.as_event_data(),
+            "capabilities": {
+                "call_control": sorted(self.descriptor.capabilities.call_control),
+                "modalities": self.descriptor.capabilities.modalities.to_dict(),
+            },
         }
 
     def _receive_loop(self) -> None:
@@ -329,13 +341,19 @@ class CallSession:
                 audiosocket_uuid = str(uuid.UUID(bytes=payload)) if len(payload) == 16 else payload.hex()
                 old_call_id = self.call_id
                 self.call_id = audiosocket_uuid
+                self.descriptor = StaticMediaTransport(
+                    "asterisk_audiosocket",
+                    ASTERISK_AUDIOSOCKET_CAPABILITIES,
+                    sample_rate=CALL_SAMPLE_RATE,
+                ).describe_session(self.call_id, {"external_call_id": audiosocket_uuid, "audiosocket_uuid": audiosocket_uuid})
                 if self._call_id_change_callback is not None:
                     self._call_id_change_callback(old_call_id, self)
-                self.events.append(self.call_id, "call_started", {"audiosocket_uuid": audiosocket_uuid})
+                lifecycle_data = self.descriptor.lifecycle_event_data()
+                self.events.append(self.call_id, "call_started", lifecycle_data)
                 connected = self.events.append(
                     self.call_id,
                     "call_connected",
-                    {"audiosocket_uuid": audiosocket_uuid, "transport": "asterisk_audiosocket"},
+                    lifecycle_data,
                 )
                 if self.settings.greet_on_connect:
                     request = self.events.append(

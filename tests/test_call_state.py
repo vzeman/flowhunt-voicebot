@@ -55,6 +55,8 @@ class CallStateTests(unittest.TestCase):
             self.assertFalse(snapshot["playback_active"])
             self.assertFalse(snapshot["stopped"])
             self.assertEqual(snapshot["active_turn"], 0)
+            self.assertEqual(snapshot["transport"], "asterisk_audiosocket")
+            self.assertIn("transfer", snapshot["capabilities"]["call_control"])
         finally:
             left.close()
             right.close()

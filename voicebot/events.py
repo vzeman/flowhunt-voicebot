@@ -268,10 +268,12 @@ class JsonEventStore(EventStore):
 def event_from_dict(data: dict[str, Any]) -> VoicebotEvent | None:
     try:
         event_id = int(data["id"])
-        call_id = str(data["call_id"])
-        event_type = data["type"]
-        timestamp = str(data["timestamp"])
+        call_id = str(data["call_id"]).strip()
+        event_type = str(data["type"]).strip()
+        timestamp = str(data["timestamp"]).strip()
     except (KeyError, TypeError, ValueError):
+        return None
+    if event_id < 1 or not call_id or not event_type or not timestamp:
         return None
     payload = data.get("data") if isinstance(data.get("data"), dict) else {}
     return VoicebotEvent(event_id, call_id, event_type, timestamp, payload)

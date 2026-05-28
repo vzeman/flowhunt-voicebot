@@ -11,7 +11,8 @@ preserves the next event id, so restart does not create duplicate event ids.
 Reload diagnostics are available on the store as `load_diagnostics`, including
 loaded events and skipped blank, malformed JSON, or invalid event rows. Corrupt
 rows are skipped so restart recovery can continue, but operators can still see
-that the local log needs attention.
+that the local log needs attention. Invalid event rows include non-positive
+event ids and blank call id, event type, or timestamp fields.
 
 The runtime selects the event store with:
 

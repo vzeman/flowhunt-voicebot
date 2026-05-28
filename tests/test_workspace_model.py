@@ -99,6 +99,72 @@ class WorkspaceModelTests(unittest.TestCase):
         self.assertEqual(removed.external_id if removed else None, "widget-1")
         self.assertIsNone(resolver.resolve("webrtc_widget", "widget-1"))
 
+    def test_channel_resolver_rejects_route_reassignment(self) -> None:
+        resolver = ChannelResolver()
+        resolver.register(
+            VoicebotChannelBinding(
+                channel_id="channel-1",
+                kind="sip_trunk",
+                workspace_id="workspace-1",
+                voicebot_id="voicebot-1",
+                external_id="trunk-1",
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "another channel"):
+            resolver.register(
+                VoicebotChannelBinding(
+                    channel_id="channel-2",
+                    kind="sip_trunk",
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-1",
+                    external_id="trunk-1",
+                )
+            )
+
+    def test_channel_resolver_rejects_channel_moves(self) -> None:
+        resolver = ChannelResolver()
+        resolver.register(
+            VoicebotChannelBinding(
+                channel_id="channel-1",
+                kind="sip_trunk",
+                workspace_id="workspace-1",
+                voicebot_id="voicebot-1",
+                external_id="trunk-1",
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "across routes"):
+            resolver.register(
+                VoicebotChannelBinding(
+                    channel_id="channel-1",
+                    kind="sip_trunk",
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-1",
+                    external_id="trunk-2",
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "across workspaces"):
+            resolver.register(
+                VoicebotChannelBinding(
+                    channel_id="channel-1",
+                    kind="sip_trunk",
+                    workspace_id="workspace-2",
+                    voicebot_id="voicebot-1",
+                    external_id="trunk-1",
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "across voicebots"):
+            resolver.register(
+                VoicebotChannelBinding(
+                    channel_id="channel-1",
+                    kind="sip_trunk",
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-2",
+                    external_id="trunk-1",
+                )
+            )
+
     def test_cross_workspace_operation_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "cross-workspace"):
             require_same_workspace(WorkspaceScope("workspace-1", "voicebot-1"), "workspace-2")

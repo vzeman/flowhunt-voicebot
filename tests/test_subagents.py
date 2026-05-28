@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclasses_replace
 import unittest
 
 from voicebot.subagents import (
@@ -111,6 +111,21 @@ class SubagentTests(unittest.TestCase):
 
         with self.assertRaisesRegex(KeyError, "unknown subagent task"):
             coordinator.poll(task.task_id, "workspace-2")
+
+    def test_store_rejects_task_identity_moves(self) -> None:
+        store = SubagentTaskStore()
+        task, _created = store.get_or_create_requested(self.request())
+        invalid_tasks = [
+            (dataclasses_replace(task, session_id="call-2"), "sessions"),
+            (dataclasses_replace(task, voicebot_id="voicebot-2"), "voicebots"),
+            (dataclasses_replace(task, provider="flowhunt_flow"), "providers"),
+            (dataclasses_replace(task, request_event_id=11), "request events"),
+        ]
+
+        for invalid, message in invalid_tasks:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    store.update(invalid)
 
     def test_duplicate_request_does_not_submit_provider_twice(self) -> None:
         provider = FakeProvider()

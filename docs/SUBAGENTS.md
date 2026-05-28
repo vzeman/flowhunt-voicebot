@@ -34,6 +34,9 @@ Task statuses:
 The first in-memory store deduplicates tasks by
 `workspace_id + session_id + request_event_id`. This prevents repeated caller
 turn processing from scheduling the same colleague task multiple times.
+Stored task identity is immutable across updates: providers may change status,
+progress, external ids, result, and error details, but cannot move a task to
+another workspace, session, voicebot, provider, or request event.
 
 ## Clean Result Context
 

@@ -204,6 +204,26 @@ class TaskLifecycleTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     PollingPolicy(**kwargs)
 
+    def test_lifecycle_snapshot_reports_due_and_overdue_work(self) -> None:
+        coordinator = self.build_coordinator(SequencedProvider(["running"]))
+        runner = SubagentTaskLifecycleRunner(
+            coordinator,
+            policy=PollingPolicy(initial_interval_seconds=3, timeout_seconds=10),
+        )
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        runner.schedule(coordinator.request(self.request()), now)
+
+        waiting = runner.snapshot(now=now + timedelta(seconds=2), workspace_id="workspace-1")
+        due = runner.snapshot(now=now + timedelta(seconds=3), workspace_id="workspace-1")
+        overdue = runner.snapshot(now=now + timedelta(seconds=11), workspace_id="workspace-1")
+
+        self.assertEqual(waiting["total"], 1)
+        self.assertEqual(waiting["pending"], 1)
+        self.assertEqual(waiting["due"], 0)
+        self.assertEqual(due["due"], 1)
+        self.assertEqual(overdue["overdue"], 1)
+        self.assertEqual(overdue["status_counts"], {"running": 1})
+
 
 if __name__ == "__main__":
     unittest.main()

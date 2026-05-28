@@ -672,6 +672,12 @@ def create_app(
         tasks = subagent_coordinator.store.list(workspace_id=workspace_id, session_id=session_id)
         return {"tasks": [subagent_task_to_dict(task) for task in tasks]}
 
+    @app.get("/subagent/tasks/lifecycle")
+    def subagent_task_lifecycle(workspace_id: str | None = None, session_id: str | None = None) -> dict[str, Any]:
+        if subagent_lifecycle is None:
+            raise HTTPException(status_code=503, detail="Subagent lifecycle runner is not configured")
+        return {"lifecycle": subagent_lifecycle.snapshot(workspace_id=workspace_id, session_id=session_id)}
+
     @app.get("/agent/tools")
     def agent_tools() -> dict[str, Any]:
         return {"tools": tool_definitions_legacy()}

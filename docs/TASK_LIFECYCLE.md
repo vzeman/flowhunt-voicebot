@@ -19,6 +19,12 @@ communication agent can present the colleague result naturally to the caller.
 `GET /subagent/tasks` exposes stored delegated work for debugging and operations,
 with optional `workspace_id` and `session_id` filters.
 
+`GET /subagent/tasks/lifecycle` exposes an operational snapshot for the same
+filters. It reports total, pending, terminal, due, and overdue task counts,
+status counts, the next poll time, and the nearest deadline. Use this endpoint
+when a delegated task appears finished in the provider UI but has not yet been
+converted into a caller-facing result.
+
 ## Durable Task References
 
 `JsonSubagentTaskStore` persists:

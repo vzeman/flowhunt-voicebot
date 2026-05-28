@@ -117,6 +117,10 @@ Expected behavior:
 ## Mapping From Current Prototype
 
 Current persisted events map to frame categories through `voicebot.frame_events`.
+`frame_event_mapping_issues()` validates that every persistable frame kind has a
+declared event mapping and that mappings only point to declared frame/event
+types. Raw audio frames and local cancellation/control frames are explicitly
+marked as non-event frames.
 
 Examples:
 

@@ -10,6 +10,7 @@ from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
 from voicebot.config import Settings
 from voicebot.events import EventStore
+from voicebot.subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, SubagentTaskResult, SubagentTaskStore
 from voicebot.transcripts import TranscriptStore
 
 
@@ -77,6 +78,24 @@ class FakeFlowHuntClient:
         return FakeFlowHuntResult()
 
 
+class FakeSubagentProvider:
+    kind = "flowhunt_flow"
+
+    def __init__(self) -> None:
+        self.requests = []
+
+    def submit(self, request: SubagentTaskRequest) -> SubagentTask:
+        self.requests.append(request)
+        task, _created = SubagentTaskStore().get_or_create_requested(request)
+        return task.with_status("running", external_task_id="task-1")
+
+    def poll(self, task: SubagentTask) -> SubagentTask:
+        return task.with_status("completed", result=SubagentTaskResult(summary="The answer is 42."))
+
+    def cancel(self, task: SubagentTask) -> SubagentTask:
+        return task.with_status("cancelled")
+
+
 class ApiCallControlTests(unittest.TestCase):
     def build_client(
         self,
@@ -84,8 +103,11 @@ class ApiCallControlTests(unittest.TestCase):
         registry: CallRegistry | None = None,
         webrtc=None,
         settings: Settings | None = None,
+        subagent_coordinator: SubagentCoordinator | None = None,
     ) -> tuple[TestClient, EventStore, AgentTaskTracker]:
         events = EventStore(max_context_events=20)
+        if subagent_coordinator is not None and subagent_coordinator.events is None:
+            subagent_coordinator.events = events
         tracker = AgentTaskTracker()
         app = create_app(
             events,
@@ -96,6 +118,7 @@ class ApiCallControlTests(unittest.TestCase):
             asterisk,
             settings=settings,
             webrtc=webrtc,
+            subagent_coordinator=subagent_coordinator,
         )
         return TestClient(app), events, tracker
 
@@ -406,6 +429,40 @@ class ApiCallControlTests(unittest.TestCase):
             ["flowhunt_flow_invoked", "flowhunt_flow_completed"],
         )
         self.assertEqual(FakeFlowHuntClient.calls[0][1][0], "flow-1")
+
+    def test_flowhunt_flow_tool_can_submit_generic_subagent_task(self) -> None:
+        provider = FakeSubagentProvider()
+        coordinator = SubagentCoordinator()
+        coordinator.register(provider)
+        settings = Settings(
+            flowhunt_api_key="key",
+            flowhunt_workspace_id="workspace-1",
+            flowhunt_flow_id="flow-1",
+            subagent_task_initial_poll_seconds=0.1,
+        )
+        client, events, tracker = self.build_client(settings=settings, subagent_coordinator=coordinator)
+
+        response = client.post(
+            "/agent/tools/invoke_flowhunt_flow",
+            json={
+                "arguments": {
+                    "call_id": "call-1",
+                    "message": "Review the caller website.",
+                    "response_to_event_id": 53,
+                }
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["task"]["status"], "running")
+        self.assertEqual(provider.requests[0].metadata["flow_id"], "flow-1")
+        self.assertEqual(
+            [event.type for event in events.list_events(call_id="call-1")],
+            ["flowhunt_flow_invoked", "subagent_task_requested", "subagent_task_updated"],
+        )
+        self.assertIn(53, tracker.snapshot()["responded_event_ids"])
+        tasks = client.get("/subagent/tasks?workspace_id=workspace-1").json()["tasks"]
+        self.assertEqual(tasks[0]["external_task_id"], "task-1")
 
 
 if __name__ == "__main__":

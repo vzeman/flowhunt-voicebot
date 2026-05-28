@@ -9,6 +9,14 @@ from uuid import uuid4
 
 from .events import EventStore, VoicebotEvent
 from .execution_model import ExecutionScope
+from .flowhunt import (
+    extract_flow_task_error,
+    extract_flow_task_result,
+    extract_issue_result,
+    extract_issue_state,
+    is_flow_task_terminal,
+    is_terminal_issue_state,
+)
 
 
 SubagentProviderKind = Literal[
@@ -356,11 +364,12 @@ class FlowHuntSubagentProvider:
         self.target_id = target_id
 
     def submit(self, request: SubagentTaskRequest) -> SubagentTask:
+        target_id = str(request.metadata.get("flow_id") or request.metadata.get("project_id") or self.target_id)
         if self.kind == "flowhunt_flow":
-            result = self.client.invoke_flow_and_wait(self.target_id, request.input_text, 0, 3)
+            result = self.client.invoke_flow_and_wait(target_id, request.input_text, 0, 3)
         else:
             result = self.client.create_project_issue(
-                self.target_id,
+                target_id,
                 request.input_text[:120] or "Voicebot delegated task",
                 request.input_text,
                 request.metadata,
@@ -379,36 +388,72 @@ class FlowHuntSubagentProvider:
             external_task_id=external_task_id,
             dedupe_key=request.effective_dedupe_key,
             metadata=request.metadata,
-            provider_references={"target_id": self.target_id, "external_task_id": external_task_id},
+            provider_references={"target_id": target_id, "external_task_id": external_task_id},
         )
         if status == "failed":
             return task.with_status("failed", error=getattr(result, "message", "FlowHunt request failed"))
+        if not (getattr(result, "data", {}) or {}).get("pending"):
+            completed = self._completed_task_from_result(task, result)
+            if completed is not None:
+                return completed
         return task.with_status("running", progress_message="A FlowHunt colleague is working on the request.")
 
     def poll(self, task: SubagentTask) -> SubagentTask:
+        target_id = str(task.provider_references.get("target_id") or self.target_id)
         if self.kind == "flowhunt_flow":
             if not task.external_task_id:
                 return task.with_status("failed", error="FlowHunt flow task id is missing")
-            result = self.client.get_flow_task(self.target_id, task.external_task_id)
+            result = self.client.get_flow_task(target_id, task.external_task_id)
         else:
-            result = self.client.get_project_issue(self.target_id, task.external_task_id)
+            result = self.client.get_project_issue(target_id, task.external_task_id)
         if not getattr(result, "ok", False):
             return task.with_status("failed", error=getattr(result, "message", "FlowHunt task failed"))
         data = getattr(result, "data", {}) or {}
         if data.get("pending"):
             return task.with_status("running", progress_message=getattr(result, "message", "Still working."))
-        return task.with_status(
-            "completed",
-            result=SubagentTaskResult(
-                summary=getattr(result, "message", "") or "FlowHunt task completed.",
-                content=str(getattr(result, "message", "") or ""),
-                context={"external_task_id": task.external_task_id},
-                provider_payload=data,
-            ),
-        )
+        completed = self._completed_task_from_result(task, result)
+        if completed is not None:
+            return completed
+        return task.with_status("running", progress_message=getattr(result, "message", "Still working."))
+
+    def _completed_task_from_result(self, task: SubagentTask, result: Any) -> SubagentTask | None:
+        data = getattr(result, "data", {}) or {}
+        response = data.get("response") if isinstance(data, dict) else None
+        if self.kind == "flowhunt_flow":
+            message = extract_flow_task_result(response) or extract_flow_task_result(data)
+            if message:
+                return _completed_task(task, message, data)
+            if is_flow_task_terminal(response) or is_flow_task_terminal(data):
+                return task.with_status(
+                    "failed",
+                    error=extract_flow_task_error(response) or extract_flow_task_error(data) or "FlowHunt flow finished without a result.",
+                )
+            return None
+
+        message = extract_issue_result(response) or extract_issue_result(data)
+        state = extract_issue_state(response).lower()
+        if message:
+            return _completed_task(task, message, data)
+        if state and is_terminal_issue_state(state):
+            if state in {"failed", "error", "cancelled", "canceled", "human_input_needed"}:
+                return task.with_status("failed", error=getattr(result, "message", "") or f"FlowHunt project issue finished with status {state}.")
+            return _completed_task(task, getattr(result, "message", "") or f"FlowHunt project issue finished with status {state}.", data)
+        return None
 
     def cancel(self, task: SubagentTask) -> SubagentTask:
         return task.with_status("cancelled", progress_message="The delegated task was cancelled.")
+
+
+def _completed_task(task: SubagentTask, message: str, data: dict[str, Any]) -> SubagentTask:
+    return task.with_status(
+        "completed",
+        result=SubagentTaskResult(
+            summary=message or "FlowHunt task completed.",
+            content=str(message or ""),
+            context={"external_task_id": task.external_task_id},
+            provider_payload=data,
+        ),
+    )
 
 
 def _extract_external_task_id(data: dict[str, Any]) -> str | None:

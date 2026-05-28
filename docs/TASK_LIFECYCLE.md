@@ -4,6 +4,21 @@ Subagent work must survive longer than one model turn and often longer than one
 process. The lifecycle layer hardens delegated tasks before they are wired into
 the active voice runtime.
 
+## Runtime Integration
+
+The voicebot service now creates a subagent coordinator at startup, registers
+FlowHunt providers from runtime configuration, and runs a lifespan-managed task
+poller. Agent tool calls can submit FlowHunt flow work through the generic
+subagent task store instead of relying on per-request background watchers.
+
+Completed, failed, timed-out, cancelled, and late-completed tasks produce
+workspace-scoped subagent events. If the call is still active, completed and
+failed tasks also enqueue an `agent_response_requested` event so the
+communication agent can present the colleague result naturally to the caller.
+
+`GET /subagent/tasks` exposes stored delegated work for debugging and operations,
+with optional `workspace_id` and `session_id` filters.
+
 ## Durable Task References
 
 `JsonSubagentTaskStore` persists:

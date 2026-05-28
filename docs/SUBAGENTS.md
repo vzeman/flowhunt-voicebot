@@ -68,6 +68,10 @@ Providers also expose `SubagentProviderDescriptor` metadata through
 - required metadata such as `flow_id` or `project_id`
 - whether the provider returns clean result context or raw payloads
 
+Descriptors are validated when a provider is registered. Invalid descriptors,
+such as a blank label, blank required metadata keys, or cancellation support on
+a non-polling provider, fail before the provider enters the catalog.
+
 The coordinator validates required metadata before creating or submitting a task.
 This catches malformed FlowHunt flow/project requests before a provider call is
 made and keeps failure behavior consistent across future providers.

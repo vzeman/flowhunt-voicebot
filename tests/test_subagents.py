@@ -208,6 +208,30 @@ class SubagentTests(unittest.TestCase):
         self.assertEqual(provider["label"], "Custom internal worker")
         self.assertEqual(provider["required_metadata"], ["skill"])
 
+    def test_coordinator_rejects_invalid_subagent_provider_descriptor(self) -> None:
+        coordinator = SubagentCoordinator()
+
+        with self.assertRaisesRegex(ValueError, "invalid subagent provider descriptor"):
+            coordinator.register(
+                FakeProvider(),
+                SubagentProviderDescriptor(
+                    kind="internal_worker",
+                    label="",
+                    required_metadata=("",),
+                ),
+            )
+
+    def test_default_subagent_provider_descriptors_are_valid(self) -> None:
+        coordinator = SubagentCoordinator()
+
+        issues = [
+            (kind, issue)
+            for kind, descriptor in coordinator.provider_descriptors.items()
+            for issue in descriptor.validation_issues()
+        ]
+
+        self.assertEqual(issues, [])
+
     def test_coordinator_validates_required_provider_metadata_before_submit(self) -> None:
         provider = FakeProvider()
         coordinator = SubagentCoordinator()

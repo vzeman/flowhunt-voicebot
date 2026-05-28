@@ -33,6 +33,10 @@ Outputs:
 - playback interruption flag
 - completed turn audio
 
+`TurnDetectionResult.metric_data()` returns JSON-ready VAD telemetry for metrics
+events. It includes decision, level, block duration, started/finished flags,
+barge-in interruption, turn duration, and optional session/turn identifiers.
+
 Decision values:
 
 - `ignored`: input was suppressed, usually bot playback echo.
@@ -67,10 +71,22 @@ This rule is intentionally simple for the first shared primitive. Future impleme
 
 These values should be resolved per voicebot/session once workspace-based configuration is implemented.
 
+## Chunk Normalization
+
+`AudioChunkNormalizer` handles transport-boundary normalization:
+
+- integer PCM to float32 in `[-1.0, 1.0]`
+- oversized float values scaled down from PCM-like ranges
+- mono/stereo downmixing
+- sample-rate conversion
+
+Transport code should normalize audio before feeding it into the turn detector
+so SIP, WebRTC, and future providers share the same VAD behavior.
+
 ## Next Integration Steps
 
 1. Replace duplicated SIP and WebRTC VAD loops with `TurnDetector`.
-2. Emit metrics for every turn decision.
+2. Emit metrics for every turn decision from `TurnDetectionResult.metric_data()`.
 3. Add a pluggable VAD provider interface.
 4. Add jitter buffer and audio normalization stages before turn detection.
 5. Add stronger echo suppression strategy for real deployments.

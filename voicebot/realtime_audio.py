@@ -7,6 +7,7 @@ from typing import Literal
 import numpy as np
 
 from .audio import rms
+from .audio import resample_audio
 
 
 TurnDecision = Literal[
@@ -42,6 +43,41 @@ class TurnDetectionResult:
     interrupt_playback: bool = False
     duration: float = 0.0
     audio: np.ndarray | None = None
+
+    def metric_data(self, *, session_id: str = "", turn_id: int | None = None) -> dict:
+        data = {
+            "decision": self.decision,
+            "level": self.level,
+            "block_ms": self.block_ms,
+            "started": self.started,
+            "finished": self.finished,
+            "interrupt_playback": self.interrupt_playback,
+            "duration": self.duration,
+        }
+        if session_id:
+            data["session_id"] = session_id
+        if turn_id is not None:
+            data["turn_id"] = turn_id
+        return data
+
+
+@dataclass(frozen=True)
+class AudioChunkNormalizer:
+    source_rate: int
+    target_rate: int
+    channels: int = 1
+
+    def normalize(self, block: np.ndarray) -> np.ndarray:
+        samples = np.asarray(block)
+        if samples.ndim > 1:
+            samples = samples.mean(axis=0 if samples.shape[0] == self.channels else -1)
+        if samples.dtype.kind in {"i", "u"}:
+            samples = samples.astype(np.float32) / float(np.iinfo(samples.dtype).max)
+        else:
+            samples = samples.astype(np.float32, copy=False)
+            if np.max(np.abs(samples), initial=0.0) > 1.0:
+                samples = samples / 32768.0
+        return resample_audio(samples.reshape(-1), self.source_rate, self.target_rate)
 
 
 @dataclass

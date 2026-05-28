@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from .multimodal import ModalityCapabilities
+from .workspace_model import WorkspaceScope
 
 
 TransportKind = Literal[
@@ -54,6 +55,15 @@ class CallRoute:
         if self.metadata:
             data["metadata"] = self.metadata
         return data
+
+    def require_workspace_scope(self, session_id: str) -> WorkspaceScope:
+        if not self.workspace_id:
+            raise ValueError("workspace_id is required for routed media session")
+        if not self.voicebot_id:
+            raise ValueError("voicebot_id is required for routed media session")
+        if not session_id:
+            raise ValueError("session_id is required for routed media session")
+        return WorkspaceScope(self.workspace_id, self.voicebot_id, session_id)
 
 
 @dataclass(frozen=True)
@@ -106,6 +116,9 @@ class MediaSessionDescriptor:
             **self.route.as_event_data(),
             **self.metadata,
         }
+
+    def require_workspace_scope(self) -> WorkspaceScope:
+        return self.route.require_workspace_scope(self.call_id)
 
 
 @dataclass(frozen=True)

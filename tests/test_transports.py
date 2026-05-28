@@ -63,6 +63,18 @@ class TransportContractTests(unittest.TestCase):
             },
         )
 
+    def test_descriptor_requires_workspace_scope_for_routed_sessions(self) -> None:
+        routed = StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES).describe_session(
+            "call-1",
+            {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"},
+        )
+        unrouted = StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES).describe_session("call-2")
+
+        self.assertEqual(routed.require_workspace_scope().workspace_id, "workspace-1")
+        self.assertEqual(routed.require_workspace_scope().session_id, "call-1")
+        with self.assertRaisesRegex(ValueError, "workspace_id"):
+            unrouted.require_workspace_scope()
+
     def test_supported_call_control_returns_successful_result(self) -> None:
         transport = StaticMediaTransport("asterisk_audiosocket", ASTERISK_AUDIOSOCKET_CAPABILITIES)
 

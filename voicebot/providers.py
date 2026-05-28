@@ -215,6 +215,12 @@ ProviderModality = Literal[
     "agent",
     "speech_to_speech",
     "embeddings",
+    "image_input",
+    "video_input",
+    "file_input",
+    "chat",
+    "visual_output",
+    "avatar_video_output",
 ]
 
 LatencyProfile = Literal["realtime", "interactive", "batch", "unknown"]

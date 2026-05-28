@@ -66,6 +66,8 @@ Observability, tracing, timeline, and regression evaluation primitives are
 documented in [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
 Horizontal scaling and worker deployment topology are documented in
 [docs/SCALING.md](docs/SCALING.md).
+Multimodal extension points are documented in
+[docs/MULTIMODAL.md](docs/MULTIMODAL.md).
 
 ## Architecture Schema
 

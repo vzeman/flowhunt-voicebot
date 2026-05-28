@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from .multimodal import ModalityCapabilities
+
 
 TransportKind = Literal[
     "asterisk_audiosocket",
@@ -61,6 +63,7 @@ class TransportCapabilities:
     outbound_audio: bool = True
     interruptible_playback: bool = True
     concurrent_sessions: bool = True
+    modalities: ModalityCapabilities = field(default_factory=ModalityCapabilities)
 
     def supports(self, action: CallControlAction) -> bool:
         return action in self.call_control

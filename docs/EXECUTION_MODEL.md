@@ -19,6 +19,11 @@ Definitions:
 - `session_id`: one customer conversation/call session.
 - `call_id`: transport-specific call identifier. During the prototype, `call_id` often acts as `session_id`.
 
+New runtime code should prefer `EventStore.append_scoped()`. It combines
+`ExecutionScope`, `ExecutionIds`, and event-specific payload data so events
+consistently carry workspace, voicebot, session, trace, turn, request, response,
+and external task identifiers.
+
 ## Correlation Identifiers
 
 Use these identifiers consistently across events, frames, logs, and provider calls:

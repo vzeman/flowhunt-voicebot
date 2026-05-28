@@ -32,6 +32,13 @@ Runtime paths should carry:
 `WorkspaceScope` models these identifiers. Events should include this scope when
 the channel or session route is known.
 
+`VoicebotSessionRecord` is the normalized per-call/per-browser-session entity.
+It carries `workspace_id`, `voicebot_id`, `session_id`, optional channel and
+external session ids, status, timestamps, and metadata. `VoicebotSessionStore`
+is the first in-memory contract for listing active/concurrent sessions by
+workspace and voicebot; production should back the same shape with FlowHunt DB
+or another shared store.
+
 ## Channel Resolution
 
 Inbound traffic resolves through channel bindings:

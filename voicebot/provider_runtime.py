@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from .events import EventStore, VoicebotEvent
 from .execution_model import ExecutionIds, ExecutionScope
@@ -17,6 +17,14 @@ class ProviderCallContext:
     scope: ExecutionScope
     ids: ExecutionIds = field(default_factory=ExecutionIds)
     model: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.provider.strip():
+            raise ValueError("provider is required")
+        if self.kind not in get_args(ProviderCallKind):
+            raise ValueError(f"unsupported provider call kind: {self.kind}")
+        if self.model is not None and not self.model.strip():
+            raise ValueError("model must not be blank")
 
     def event_data(self) -> dict[str, Any]:
         data = {
@@ -37,6 +45,12 @@ class ProviderFailure:
     retryable: bool = False
     details: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if not self.code.strip():
+            raise ValueError("provider failure code is required")
+        if not self.message.strip():
+            raise ValueError("provider failure message is required")
+
     def event_data(self) -> dict[str, Any]:
         return {
             "error_code": self.code,
@@ -51,6 +65,8 @@ def record_provider_latency(
     context: ProviderCallContext,
     latency_seconds: float,
 ) -> VoicebotEvent:
+    if latency_seconds < 0:
+        raise ValueError("latency_seconds must be greater than or equal to 0")
     return events.append_scoped(
         context.scope,
         "metrics",

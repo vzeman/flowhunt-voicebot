@@ -20,6 +20,10 @@ The descriptor has `lifecycle_event_data()` so `call_started` and
 `call_connected` events can carry the same route and transport fields for every
 transport.
 
+Descriptors require a non-empty `call_id` and positive `sample_rate`. Transport
+factories should fail fast on invalid media rates before creating runtime
+sessions or emitting lifecycle events.
+
 `MediaSessionDescriptor.require_workspace_scope()` converts routed transport
 metadata into a `WorkspaceScope` and fails if `workspace_id`, `voicebot_id`, or
 session id are missing. Use it when a transport path is about to create

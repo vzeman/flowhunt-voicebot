@@ -109,6 +109,12 @@ class MediaSessionDescriptor:
     sample_rate: int = 8_000
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if not self.call_id:
+            raise ValueError("call_id is required for media session descriptor")
+        if self.sample_rate <= 0:
+            raise ValueError("sample_rate must be greater than 0")
+
     def lifecycle_event_data(self) -> dict[str, Any]:
         return {
             "transport": self.transport,
@@ -181,6 +187,8 @@ class StaticMediaTransport:
         *,
         sample_rate: int = 8_000,
     ) -> None:
+        if sample_rate <= 0:
+            raise ValueError("sample_rate must be greater than 0")
         self.kind = kind
         self.capabilities = capabilities
         self.sample_rate = sample_rate

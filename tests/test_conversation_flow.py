@@ -6,6 +6,8 @@ from voicebot.conversation_flow import (
     ConversationAction,
     ConversationFlowDefinition,
     ConversationFlowEngine,
+    ConversationFlowStore,
+    ConversationSessionStateStore,
     ConversationStateDefinition,
     ConversationTransition,
     freeform_flow,
@@ -127,6 +129,37 @@ class ConversationFlowTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "unknown state 'missing'"):
             ConversationFlowEngine(definition)
+
+    def test_flow_store_requires_workspace_scoped_definitions(self) -> None:
+        store = ConversationFlowStore()
+
+        with self.assertRaisesRegex(ValueError, "workspace-scoped"):
+            store.save(freeform_flow(workspace_id=None, voicebot_id="voicebot-1"))
+
+    def test_flow_store_lists_and_resolves_voicebot_default(self) -> None:
+        store = ConversationFlowStore()
+        workspace_default = store.save(freeform_flow(flow_id="workspace", workspace_id="workspace-1"))
+        voicebot_flow = store.save(
+            freeform_flow(flow_id="voicebot", workspace_id="workspace-1", voicebot_id="voicebot-1")
+        )
+
+        self.assertEqual(store.get("workspace-1", "voicebot-1", "voicebot"), voicebot_flow)
+        self.assertEqual(store.default_for_voicebot("workspace-1", "voicebot-1"), voicebot_flow)
+        self.assertEqual(store.default_for_voicebot("workspace-1", "voicebot-2"), workspace_default)
+        self.assertEqual([flow.flow_id for flow in store.list("workspace-1", "voicebot-1")], ["voicebot"])
+
+    def test_session_state_store_keeps_conversation_state_per_call(self) -> None:
+        engine = ConversationFlowEngine(freeform_flow(workspace_id="workspace-1", voicebot_id="voicebot-1"))
+        store = ConversationSessionStateStore()
+        started = engine.start("call-1")
+        handled = engine.handle_event(started.session, "user_transcript", {"text": "hello"})
+
+        store.save(handled.session)
+
+        self.assertEqual(store.get("call-1"), handled.session)
+        self.assertEqual(store.list("workspace-1", "voicebot-1"), (handled.session,))
+        self.assertTrue(store.delete("call-1"))
+        self.assertIsNone(store.get("call-1"))
 
 
 if __name__ == "__main__":

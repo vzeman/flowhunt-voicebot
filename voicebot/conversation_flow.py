@@ -192,6 +192,81 @@ class ConversationFlowEngine:
         return replace(action, text=render_template(action.text, session, event_data))
 
 
+class ConversationFlowStore:
+    def __init__(self) -> None:
+        self._definitions: dict[tuple[str, str | None, str], ConversationFlowDefinition] = {}
+
+    def save(self, definition: ConversationFlowDefinition) -> ConversationFlowDefinition:
+        if not definition.workspace_id:
+            raise ValueError("Conversation flow definitions must be workspace-scoped")
+        ConversationFlowEngine(definition)
+        self._definitions[self._key(definition.workspace_id, definition.voicebot_id, definition.flow_id)] = definition
+        return definition
+
+    def get(
+        self,
+        workspace_id: str,
+        voicebot_id: str | None,
+        flow_id: str,
+    ) -> ConversationFlowDefinition | None:
+        return self._definitions.get(self._key(workspace_id, voicebot_id, flow_id))
+
+    def list(
+        self,
+        workspace_id: str,
+        voicebot_id: str | None = None,
+    ) -> tuple[ConversationFlowDefinition, ...]:
+        return tuple(
+            definition
+            for key, definition in sorted(
+                self._definitions.items(),
+                key=lambda item: (item[0][0], item[0][1] or "", item[0][2]),
+            )
+            if key[0] == workspace_id and (voicebot_id is None or key[1] == voicebot_id)
+        )
+
+    def default_for_voicebot(
+        self,
+        workspace_id: str,
+        voicebot_id: str,
+    ) -> ConversationFlowDefinition | None:
+        voicebot_flows = self.list(workspace_id, voicebot_id)
+        if voicebot_flows:
+            return voicebot_flows[0]
+        workspace_flows = self.list(workspace_id, None)
+        return workspace_flows[0] if workspace_flows else None
+
+    def _key(self, workspace_id: str, voicebot_id: str | None, flow_id: str) -> tuple[str, str | None, str]:
+        return (workspace_id, voicebot_id, flow_id)
+
+
+class ConversationSessionStateStore:
+    def __init__(self) -> None:
+        self._sessions: dict[str, ConversationSessionState] = {}
+
+    def save(self, session: ConversationSessionState) -> ConversationSessionState:
+        self._sessions[session.call_id] = session
+        return session
+
+    def get(self, call_id: str) -> ConversationSessionState | None:
+        return self._sessions.get(call_id)
+
+    def delete(self, call_id: str) -> bool:
+        return self._sessions.pop(call_id, None) is not None
+
+    def list(
+        self,
+        workspace_id: str | None = None,
+        voicebot_id: str | None = None,
+    ) -> tuple[ConversationSessionState, ...]:
+        return tuple(
+            session
+            for session in sorted(self._sessions.values(), key=lambda item: item.call_id)
+            if (workspace_id is None or session.workspace_id == workspace_id)
+            and (voicebot_id is None or session.voicebot_id == voicebot_id)
+        )
+
+
 def freeform_flow(
     *,
     flow_id: str = "freeform",

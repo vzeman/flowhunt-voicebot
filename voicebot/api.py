@@ -18,6 +18,7 @@ from .api_models import (
     CompactContextRequest,
     ConversationEvaluationRequest,
     PlaybackInterruptRequest,
+    ScalingWorkloadPlanRequest,
     SipTrunkRequest,
     WebRTCOfferRequest,
 )
@@ -44,6 +45,7 @@ from .health import readiness_report
 from .metrics import summarize_metrics
 from .observability import ConversationExpectation, build_timeline, evaluate_conversation
 from .provider_catalog import provider_catalog
+from .scaling import WorkloadProfile, build_workload_plan, default_deployment_topology
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
@@ -179,6 +181,26 @@ def create_app(
     @app.get("/providers")
     def providers() -> dict[str, Any]:
         return provider_catalog()
+
+    @app.get("/scaling/topology")
+    def scaling_topology() -> dict[str, Any]:
+        return default_deployment_topology().as_dict()
+
+    @app.post("/scaling/workload-plan")
+    def scaling_workload_plan(request: ScalingWorkloadPlanRequest) -> dict[str, Any]:
+        try:
+            profile = WorkloadProfile(
+                workspace_id=request.workspace_id,
+                voicebot_id=request.voicebot_id,
+                concurrent_sessions=request.concurrent_sessions,
+                session_id=request.session_id,
+                stt_provider=request.stt_provider,
+                tts_provider=request.tts_provider,
+                agent_provider=request.agent_provider,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return build_workload_plan(profile)
 
     @app.get("/config")
     def config() -> dict[str, Any]:

@@ -1157,6 +1157,31 @@ Request:
 }
 ```
 
+## Scaling
+
+### GET `/scaling/topology`
+
+Returns worker roles, queue names, concurrency, shared state, and event bus
+settings for the voicebot runtime.
+
+### POST `/scaling/workload-plan`
+
+Builds a routing and capacity plan for a workspace voicebot workload.
+
+Request:
+
+```json
+{
+  "workspace_id": "workspace-1",
+  "voicebot_id": "voicebot-1",
+  "concurrent_sessions": 50,
+  "session_id": "session-1",
+  "stt_provider": "openai",
+  "tts_provider": "openai",
+  "agent_provider": "anthropic"
+}
+```
+
 ## WebSocket
 
 ### WS `/ws/events`

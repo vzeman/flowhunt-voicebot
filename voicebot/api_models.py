@@ -27,6 +27,16 @@ class ConversationEvaluationRequest(BaseModel):
     require_final_agent_response: bool = False
 
 
+class ScalingWorkloadPlanRequest(BaseModel):
+    workspace_id: str
+    voicebot_id: str
+    concurrent_sessions: int = 0
+    session_id: str | None = None
+    stt_provider: str | None = None
+    tts_provider: str | None = None
+    agent_provider: str | None = None
+
+
 class CallControlRequest(BaseModel):
     action: str
     target: str | None = None

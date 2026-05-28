@@ -80,6 +80,33 @@ class ExecutionIds:
         }
 
 
+@dataclass(frozen=True, order=True)
+class FrameOrderingKey:
+    session_id: str
+    turn_id: int
+    timestamp: str
+    frame_id: str
+
+    @classmethod
+    def from_frame(cls, frame: Frame) -> "FrameOrderingKey":
+        scope = scope_from_frame(frame)
+        ids = ids_from_frame(frame)
+        return cls(
+            session_id=scope.session_id,
+            turn_id=ids.turn_id or 0,
+            timestamp=frame.timestamp,
+            frame_id=frame.frame_id,
+        )
+
+    def to_data(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "turn_id": self.turn_id,
+            "timestamp": self.timestamp,
+            "frame_id": self.frame_id,
+        }
+
+
 FRAME_CATEGORIES: dict[FrameKind, FrameCategory] = {
     "audio_input": "audio",
     "audio_output": "audio",
@@ -174,6 +201,10 @@ def ids_from_frame(frame: Frame) -> ExecutionIds:
         external_task_id=str(frame.data.get("external_task_id") or frame.data.get("task_id") or frame.data.get("issue_id") or ""),
         trace_id=frame.trace_id or "",
     )
+
+
+def sort_frames_for_session(frames: list[Frame]) -> list[Frame]:
+    return sorted(frames, key=FrameOrderingKey.from_frame)
 
 
 def optional_int(value: Any) -> int | None:

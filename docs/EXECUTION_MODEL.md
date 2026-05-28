@@ -78,6 +78,17 @@ The pipeline must preserve order for these frames within one `session_id`. Audio
 
 Metrics and system frames may be observed out of band, but must carry enough correlation metadata to be attached back to the session timeline.
 
+`FrameOrderingKey` is the canonical sort key for deterministic tests and
+processor handoff boundaries:
+
+```text
+session_id, turn_id, timestamp, frame_id
+```
+
+`sort_frames_for_session()` applies this key. It is not a replacement for queue
+ordering, but it gives runtime and regression tests one shared way to rebuild a
+session-ordered view from buffered frames.
+
 ## Cancellation And Interruption
 
 Cancellation/control frames are part of the normal execution model, not exceptional behavior.
@@ -119,6 +130,7 @@ It provides:
 - `ExecutionIds`
 - frame category mapping
 - session ordering helpers
+- `FrameOrderingKey` and `sort_frames_for_session()`
 - cancellation helpers
 - extraction helpers for current frame metadata
 

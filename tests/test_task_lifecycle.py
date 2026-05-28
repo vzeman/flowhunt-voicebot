@@ -167,6 +167,22 @@ class TaskLifecycleTests(unittest.TestCase):
         self.assertEqual(failed.status, "failed")
         self.assertEqual(events[0][0], "subagent_task_failed")
 
+    def test_lifecycle_runner_fails_task_with_invalid_schedule_timestamp(self) -> None:
+        coordinator = self.build_coordinator(SequencedProvider(["completed"]))
+        events = []
+        runner = SubagentTaskLifecycleRunner(
+            coordinator,
+            event_sink=lambda event_type, task: events.append((event_type, task.error)),
+        )
+        task = coordinator.request(self.request())
+        coordinator.store.update(task.with_poll_schedule(next_poll_at="not-a-timestamp"))
+
+        failed = runner.tick(datetime(2026, 5, 28, tzinfo=UTC))[0]
+
+        self.assertEqual(failed.status, "failed")
+        self.assertIn("next_poll_at", failed.error)
+        self.assertEqual(events, [("subagent_task_failed", failed.error)])
+
     def test_lifecycle_runner_times_out_due_tasks(self) -> None:
         coordinator = self.build_coordinator(SequencedProvider(["running"]))
         events = []
@@ -302,6 +318,18 @@ class TaskLifecycleTests(unittest.TestCase):
         self.assertEqual(due["due"], 1)
         self.assertEqual(overdue["overdue"], 1)
         self.assertEqual(overdue["status_counts"], {"running": 1})
+
+    def test_lifecycle_snapshot_treats_invalid_schedule_as_overdue(self) -> None:
+        coordinator = self.build_coordinator(SequencedProvider(["running"]))
+        runner = SubagentTaskLifecycleRunner(coordinator)
+        task = coordinator.request(self.request())
+        coordinator.store.update(task.with_poll_schedule(next_poll_at="bad-date"))
+
+        snapshot = runner.snapshot(now=datetime(2026, 5, 28, tzinfo=UTC), workspace_id="workspace-1")
+
+        self.assertEqual(snapshot["pending"], 1)
+        self.assertEqual(snapshot["due"], 0)
+        self.assertEqual(snapshot["overdue"], 1)
 
 
 if __name__ == "__main__":

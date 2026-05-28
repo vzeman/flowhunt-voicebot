@@ -106,6 +106,26 @@ class ProviderConfigTests(unittest.TestCase):
             [(issue.family, issue.provider, issue.message) for issue in issues],
         )
 
+    def test_validation_reports_family_mismatch_and_same_fallback(self) -> None:
+        config = VoicebotProviderConfig(
+            workspace_id="workspace-1",
+            voicebot_id="voicebot-1",
+            stt=ProviderChoice("tts", "whisper", fallback_provider="whisper"),
+            tts=ProviderChoice("tts", "supertonic"),
+            agent=ProviderChoice("agent", "anthropic", secret_ref=SecretReference("anthropic", "workspace-1")),
+        )
+
+        issues = validate_provider_config(config, self.descriptors())
+
+        self.assertIn(
+            ("stt", "whisper", "choice family must be stt"),
+            [(issue.family, issue.provider, issue.message) for issue in issues],
+        )
+        self.assertIn(
+            ("stt", "whisper", "fallback provider must be different from provider"),
+            [(issue.family, issue.provider, issue.message) for issue in issues],
+        )
+
     def test_selection_plan_normalizes_providers_models_and_fallbacks(self) -> None:
         plan = provider_selection_plan(self.config())
 

@@ -136,6 +136,8 @@ def validate_provider_config(
     for family in ("stt", "tts", "agent"):
         choice = config.choice(family)
         provider = choice.normalized_provider()
+        if choice.family != family:
+            issues.append(ProviderValidationIssue(family, provider, f"choice family must be {family}"))
         descriptor = descriptors.get(family, {}).get(provider)
         if descriptor is None:
             issues.append(ProviderValidationIssue(family, provider, "provider is not registered"))
@@ -147,6 +149,9 @@ def validate_provider_config(
             issues.append(ProviderValidationIssue(family, provider, "secret reference belongs to a different workspace"))
         fallback = choice.normalized_fallback()
         if fallback:
+            if fallback == provider:
+                issues.append(ProviderValidationIssue(family, fallback, "fallback provider must be different from provider"))
+                continue
             fallback_descriptor = descriptors.get(family, {}).get(fallback)
             if fallback_descriptor is None:
                 issues.append(ProviderValidationIssue(family, fallback, "fallback provider is not registered"))

@@ -110,4 +110,6 @@ task ids.
 
 If a persisted task has an invalid lifecycle timestamp, such as a corrupt
 `next_poll_at` or `deadline_at`, the runner marks it failed with a diagnostic
-instead of throwing on every lifecycle tick and leaving the task stuck.
+instead of throwing on every lifecycle tick and leaving the task stuck. Schedule
+timestamps must include timezone information; timezone-less timestamps are
+treated as invalid so restart recovery does not depend on the host timezone.

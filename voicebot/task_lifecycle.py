@@ -237,4 +237,7 @@ def _iso(value: datetime) -> str:
 
 
 def _parse_time(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("subagent task schedule timestamp must include timezone")
+    return parsed.astimezone(UTC)

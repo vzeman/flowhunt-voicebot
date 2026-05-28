@@ -363,6 +363,17 @@ class TaskLifecycleTests(unittest.TestCase):
         self.assertEqual(snapshot["due"], 0)
         self.assertEqual(snapshot["overdue"], 1)
 
+    def test_lifecycle_runner_rejects_timezone_less_schedule_timestamps(self) -> None:
+        coordinator = self.build_coordinator(SequencedProvider(["running"]))
+        runner = SubagentTaskLifecycleRunner(coordinator)
+        task = coordinator.request(self.request())
+        coordinator.store.update(task.with_poll_schedule(next_poll_at="2026-05-28T12:00:00"))
+
+        changed = runner.tick(datetime(2026, 5, 28, tzinfo=UTC))
+
+        self.assertEqual(changed[0].status, "failed")
+        self.assertIn("invalid subagent task schedule timestamp", changed[0].error or "")
+
 
 if __name__ == "__main__":
     unittest.main()

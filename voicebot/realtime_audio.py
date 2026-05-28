@@ -33,6 +33,19 @@ class TurnDetectionConfig:
     barge_in_threshold: float
 
 
+def turn_detection_config_from_settings(settings, sample_rate: int) -> TurnDetectionConfig:
+    return TurnDetectionConfig(
+        sample_rate=sample_rate,
+        start_threshold=settings.start_threshold,
+        stop_threshold=settings.stop_threshold,
+        vad_start_ms=settings.vad_start_ms,
+        silence_ms=settings.silence_ms,
+        min_seconds=settings.min_seconds,
+        max_seconds=settings.max_seconds,
+        barge_in_threshold=settings.barge_in_threshold,
+    )
+
+
 @dataclass(frozen=True)
 class TurnDetectionResult:
     decision: TurnDecision

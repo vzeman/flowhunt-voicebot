@@ -5,7 +5,8 @@ from dataclasses import replace
 
 import numpy as np
 
-from voicebot.realtime_audio import AudioChunkNormalizer, TurnDetectionConfig, TurnDetector
+from voicebot.config import Settings
+from voicebot.realtime_audio import AudioChunkNormalizer, TurnDetectionConfig, TurnDetector, turn_detection_config_from_settings
 
 
 def config() -> TurnDetectionConfig:
@@ -103,6 +104,28 @@ class RealtimeAudioTests(unittest.TestCase):
         audio = normalizer.normalize(samples)
 
         self.assertAlmostEqual(float(audio.mean()), 0.25, delta=0.02)
+
+    def test_turn_detection_config_can_be_built_from_runtime_settings(self) -> None:
+        settings = Settings(
+            start_threshold=0.12,
+            stop_threshold=0.04,
+            vad_start_ms=80,
+            silence_ms=500,
+            min_seconds=0.3,
+            max_seconds=12.0,
+            barge_in_threshold=0.7,
+        )
+
+        resolved = turn_detection_config_from_settings(settings, sample_rate=16000)
+
+        self.assertEqual(resolved.sample_rate, 16000)
+        self.assertEqual(resolved.start_threshold, 0.12)
+        self.assertEqual(resolved.stop_threshold, 0.04)
+        self.assertEqual(resolved.vad_start_ms, 80)
+        self.assertEqual(resolved.silence_ms, 500)
+        self.assertEqual(resolved.min_seconds, 0.3)
+        self.assertEqual(resolved.max_seconds, 12.0)
+        self.assertEqual(resolved.barge_in_threshold, 0.7)
 
 
 if __name__ == "__main__":

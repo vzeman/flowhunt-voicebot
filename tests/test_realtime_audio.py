@@ -60,10 +60,17 @@ class RealtimeAudioTests(unittest.TestCase):
 
         self.assertEqual(result.decision, "ignored")
 
-    def test_turn_detector_allows_barge_in_above_start_threshold(self) -> None:
+    def test_turn_detector_ignores_playback_echo_below_barge_in_threshold(self) -> None:
         detector = TurnDetector(config())
 
         result = detector.process_block(np.full(100, 0.3, dtype=np.float32), playback_active=True)
+
+        self.assertEqual(result.decision, "ignored")
+
+    def test_turn_detector_allows_barge_in_above_barge_in_threshold(self) -> None:
+        detector = TurnDetector(config())
+
+        result = detector.process_block(np.full(100, 0.6, dtype=np.float32), playback_active=True)
 
         self.assertEqual(result.decision, "speech_started")
         self.assertTrue(result.interrupt_playback)

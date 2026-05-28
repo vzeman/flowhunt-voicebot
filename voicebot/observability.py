@@ -331,7 +331,9 @@ def _turn_latency_breakdowns(events: list[VoicebotEvent]) -> list[dict[str, Any]
         response = _first_response_for_request(events, request.id if request else None)
         tts_started = _first_response_event(events, "tts_started", request.id if request else None)
         queued = _first_response_event(events, "agent_response_queued", request.id if request else None)
-        playback_started = _first_event_after(events, "bot_playback_started", queued)
+        playback_started = _first_response_event(events, "bot_playback_started", request.id if request else None)
+        if playback_started is None:
+            playback_started = _first_event_after(events, "bot_playback_started", queued)
         turns.append(
             {
                 "turn_id": turn_id,

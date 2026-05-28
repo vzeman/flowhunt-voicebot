@@ -114,7 +114,7 @@ class PlaybackControlTests(unittest.TestCase):
             session.submit_agent_response(
                 AgentResponse("call-1", "Hello, how can I help?", response_to_event_id=request.id)
             )
-            silent_packet, started, finished = session.next_playback_packet(80)
+            silent_packet, started, finished, _playback_data = session.next_playback_packet(80)
 
             self.assertFalse(started)
             self.assertFalse(finished)
@@ -126,10 +126,11 @@ class PlaybackControlTests(unittest.TestCase):
             )
 
             session.recording_event.clear()
-            packet, started, _finished = session.next_playback_packet(80)
+            packet, started, _finished, playback_data = session.next_playback_packet(80)
 
             self.assertTrue(started)
             self.assertEqual(len(packet), 80)
+            self.assertEqual(playback_data["response_to_event_id"], request.id)
         finally:
             session.stop()
 
@@ -251,6 +252,28 @@ class PlaybackControlTests(unittest.TestCase):
             ]
             self.assertIn("tts_synthesis_latency_seconds", metric_names)
             self.assertIn("tts_duration_seconds", metric_names)
+        finally:
+            session.stop()
+
+    def test_playback_events_include_response_event_id(self) -> None:
+        events = EventStore(max_context_events=30)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"text": "question"})
+            session.submit_agent_response(AgentResponse("call-1", "Short answer.", response_to_event_id=request.id))
+
+            _packet, started, finished, data = session.next_playback_packet(80)
+
+            self.assertTrue(started)
+            self.assertTrue(finished)
+            self.assertEqual(data["response_to_event_id"], request.id)
         finally:
             session.stop()
 

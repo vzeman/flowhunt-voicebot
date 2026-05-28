@@ -67,8 +67,9 @@ def limit_spoken_response_text(text: str, max_chars: int) -> str:
 class PlaybackBuffer:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._queue: deque[np.ndarray] = deque()
+        self._queue: deque[tuple[np.ndarray, dict[str, object]]] = deque()
         self._current: np.ndarray | None = None
+        self._current_data: dict[str, object] = {}
         self._position = 0
         self._generation = 0
         self._playing = False
@@ -78,14 +79,15 @@ class PlaybackBuffer:
             was_playing = self._playing or self._current is not None or bool(self._queue)
             self._queue.clear()
             self._current = None
+            self._current_data = {}
             self._position = 0
             self._generation += 1
             self._playing = False
             return was_playing
 
-    def enqueue(self, audio: np.ndarray) -> int:
+    def enqueue(self, audio: np.ndarray, data: dict[str, object] | None = None) -> int:
         with self._lock:
-            self._queue.append(audio.astype(np.float32, copy=False).reshape(-1))
+            self._queue.append((audio.astype(np.float32, copy=False).reshape(-1), dict(data or {})))
             self._generation += 1
             return self._generation
 
@@ -94,32 +96,39 @@ class PlaybackBuffer:
             return self._playing or self._current is not None or bool(self._queue)
 
     def next_packet(self, packet_samples: int) -> tuple[np.ndarray, bool, bool]:
+        packet, started, finished, _data = self.next_packet_with_metadata(packet_samples)
+        return packet, started, finished
+
+    def next_packet_with_metadata(self, packet_samples: int) -> tuple[np.ndarray, bool, bool, dict[str, object]]:
         with self._lock:
             started = False
             finished = False
             if self._current is None and self._queue:
-                self._current = self._queue.popleft()
+                self._current, self._current_data = self._queue.popleft()
                 self._position = 0
                 self._playing = True
                 started = True
 
             if self._current is None:
-                return np.zeros(packet_samples, dtype=np.float32), started, finished
+                return np.zeros(packet_samples, dtype=np.float32), started, finished, {}
 
+            data = dict(self._current_data)
             packet = self._current[self._position : self._position + packet_samples]
             self._position += len(packet)
             if len(packet) < packet_samples:
                 packet = np.pad(packet, (0, packet_samples - len(packet)))
                 self._current = None
+                self._current_data = {}
                 self._position = 0
                 self._playing = False
                 finished = True
             elif self._position >= len(self._current):
                 self._current = None
+                self._current_data = {}
                 self._position = 0
                 self._playing = False
                 finished = True
-            return packet, started, finished
+            return packet, started, finished, data
 
 
 class CallSession:
@@ -302,7 +311,7 @@ class CallSession:
                 )
             ):
                 for chunk in audio_chunks:
-                    self.playback.enqueue(chunk)
+                    self.playback.enqueue(chunk, {"response_to_event_id": response.response_to_event_id})
                 self.events.append(
                     self.call_id,
                     "agent_response_queued",
@@ -319,7 +328,7 @@ class CallSession:
             )
             return event
         for chunk in audio_chunks:
-            self.playback.enqueue(chunk)
+            self.playback.enqueue(chunk, {"response_to_event_id": response.response_to_event_id})
         if startup_response and self.recording_event.is_set():
             self._startup_playback_guard = True
         self.events.append(
@@ -591,11 +600,11 @@ class CallSession:
                 time.sleep(packet_seconds)
                 continue
 
-            packet, started, finished = self.playback.next_packet(packet_samples)
+            packet, started, finished, playback_data = self.playback.next_packet_with_metadata(packet_samples)
             if started:
                 self._startup_playback_guard = False
                 self._set_echo_tail(self.settings.echo_tail_ms)
-                self.events.append(self.call_id, "bot_playback_started", {})
+                self.events.append(self.call_id, "bot_playback_started", playback_data)
             try:
                 write_audiosocket_message(self.sock, MSG_SLIN8, float32_to_pcm16_bytes(packet))
             except OSError:
@@ -603,7 +612,7 @@ class CallSession:
                 return
             if finished:
                 self._set_echo_tail(self.settings.echo_tail_ms)
-                self.events.append(self.call_id, "bot_playback_finished", {})
+                self.events.append(self.call_id, "bot_playback_finished", playback_data)
             time.sleep(packet_seconds)
 
     def _new_turn(self) -> int:

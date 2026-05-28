@@ -31,6 +31,9 @@ flow can be used by a live session. Validation checks the initial state and all
 transition target states so broken guided flows fail before callers enter them.
 It also validates action shape: speak/agent requests need text, subagent tasks
 need text and a provider, and transfer actions need a target.
+Flow and state identities are validated as well: flow ids, initial states, and
+state ids must be non-empty, and each state dictionary key must match the
+state's `state_id`.
 
 ## States
 

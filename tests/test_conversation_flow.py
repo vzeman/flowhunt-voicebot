@@ -131,6 +131,54 @@ class ConversationFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown state 'missing'"):
             ConversationFlowEngine(definition)
 
+    def test_flow_identity_validation_fails_early(self) -> None:
+        invalid_definitions = [
+            (
+                ConversationFlowDefinition(
+                    flow_id="",
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-1",
+                    states={"default": ConversationStateDefinition("default")},
+                ),
+                "flow_id",
+            ),
+            (
+                ConversationFlowDefinition(
+                    flow_id="flow-1",
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-1",
+                    initial_state="",
+                    states={"default": ConversationStateDefinition("default")},
+                ),
+                "initial_state",
+            ),
+            (
+                ConversationFlowDefinition(
+                    flow_id="flow-1",
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-1",
+                    initial_state="default",
+                    states={"": ConversationStateDefinition("")},
+                ),
+                "state id",
+            ),
+            (
+                ConversationFlowDefinition(
+                    flow_id="flow-1",
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-1",
+                    initial_state="default",
+                    states={"default": ConversationStateDefinition("other")},
+                ),
+                "state key",
+            ),
+        ]
+
+        for definition, message in invalid_definitions:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    ConversationFlowStore().save(definition)
+
     def test_unknown_transition_target_fails_early(self) -> None:
         definition = ConversationFlowDefinition(
             flow_id="broken-transition",

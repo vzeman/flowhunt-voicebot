@@ -165,6 +165,70 @@ class PlaybackControlTests(unittest.TestCase):
         finally:
             session.stop()
 
+    def test_response_waits_for_silence_when_speech_produces_no_new_transcript(self) -> None:
+        events = EventStore(max_context_events=30)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(deferred_response_wait_seconds=1.0),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"text": "question"})
+            session._remember_response_generation(request.id)
+            session.recording_event.set()
+            session._mark_interrupted("user_speech_started")
+
+            def clear_recording() -> None:
+                time.sleep(0.05)
+                session.recording_event.clear()
+
+            threading.Thread(target=clear_recording, daemon=True).start()
+
+            session.submit_agent_response(AgentResponse("call-1", "Here is the answer.", response_to_event_id=request.id))
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertIn("agent_response_deferred", event_types)
+            self.assertIn("agent_response_queued", event_types)
+            self.assertNotIn("agent_response_dropped", event_types)
+            self.assertTrue(session.playback.is_active())
+        finally:
+            session.stop()
+
+    def test_response_is_dropped_after_newer_transcript(self) -> None:
+        events = EventStore(max_context_events=30)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(deferred_response_wait_seconds=1.0),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"text": "old question"})
+            session._remember_response_generation(request.id)
+            session.recording_event.set()
+            events.append("call-1", "user_transcript", {"text": "newer question"})
+
+            def clear_recording() -> None:
+                time.sleep(0.05)
+                session.recording_event.clear()
+
+            threading.Thread(target=clear_recording, daemon=True).start()
+
+            session.submit_agent_response(AgentResponse("call-1", "Old answer.", response_to_event_id=request.id))
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertIn("agent_response_deferred", event_types)
+            self.assertIn("agent_response_dropped", event_types)
+            self.assertNotIn("agent_response_queued", event_types)
+            self.assertFalse(session.playback.is_active())
+        finally:
+            session.stop()
+
     def test_webrtc_barge_in_uses_start_threshold_not_high_echo_threshold(self) -> None:
         events = EventStore(max_context_events=30)
         session = WebRTCCallSession(

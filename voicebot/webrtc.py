@@ -245,9 +245,8 @@ class WebRTCCallSession:
         )
         startup_response = self._is_startup_response(response.response_to_event_id)
         if self.recording_event.is_set() and not startup_response:
-            if self._should_defer_response(response.response_to_event_id):
-                self._defer_until_caller_silence(response.response_to_event_id, "caller_is_speaking")
-            if not self.recording_event.is_set():
+            self._defer_until_caller_silence(response.response_to_event_id, "caller_is_speaking")
+            if not self.recording_event.is_set() and not self._has_newer_user_transcript(response.response_to_event_id):
                 return self.submit_agent_response(response)
             self.events.append(
                 self.call_id,
@@ -257,7 +256,11 @@ class WebRTCCallSession:
             return event
 
         request_generation = self._response_generation(response.response_to_event_id)
-        if request_generation != self._current_interrupt_generation() and not startup_response:
+        if (
+            request_generation != self._current_interrupt_generation()
+            and self._has_newer_user_transcript(response.response_to_event_id)
+            and not startup_response
+        ):
             self.events.append(
                 self.call_id,
                 "agent_response_dropped",
@@ -327,9 +330,15 @@ class WebRTCCallSession:
             raise RuntimeError("TTS produced no audio")
 
         if (self.recording_event.is_set() or request_generation != self._current_interrupt_generation()) and not startup_response:
-            if self.recording_event.is_set() and self._should_defer_response(response.response_to_event_id):
+            if self.recording_event.is_set():
                 self._defer_until_caller_silence(response.response_to_event_id, "caller_started_speaking_during_tts")
-            if not self.recording_event.is_set() and request_generation == self._current_interrupt_generation():
+            if (
+                not self.recording_event.is_set()
+                and (
+                    request_generation == self._current_interrupt_generation()
+                    or not self._has_newer_user_transcript(response.response_to_event_id)
+                )
+            ):
                 for chunk in audio_chunks:
                     self.playback.enqueue(chunk)
                 self.events.append(
@@ -609,6 +618,14 @@ class WebRTCCallSession:
             return False
         request = self.events.get_event(event_id)
         return request is not None and request.type == "agent_response_requested" and request.data.get("reason") == "colleague_result"
+
+    def _has_newer_user_transcript(self, event_id: int | None) -> bool:
+        if event_id is None:
+            return False
+        return any(
+            event.id > event_id and event.type == "user_transcript"
+            for event in self.events.list_events(call_id=self.call_id, limit=200)
+        )
 
     def _defer_until_caller_silence(self, event_id: int | None, reason: str) -> None:
         wait_seconds = max(0.0, self.settings.deferred_response_wait_seconds)

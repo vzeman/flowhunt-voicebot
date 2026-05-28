@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
 from .agent_tasks import AgentTaskTracker
+from .api_surface import api_surface_by_area, prototype_endpoints, public_endpoints_are_workspace_scoped
 from .api_models import (
     AgentResponseRequest,
     AgentTaskClaimRequest,
@@ -241,6 +242,17 @@ def create_app(
     @app.get("/providers")
     def providers() -> dict[str, Any]:
         return provider_catalog()
+
+    @app.get("/api/surface")
+    def api_surface() -> dict[str, Any]:
+        return {
+            "areas": api_surface_by_area(),
+            "public_endpoints_are_workspace_scoped": public_endpoints_are_workspace_scoped(),
+        }
+
+    @app.get("/api/surface/prototypes")
+    def api_surface_prototypes() -> dict[str, Any]:
+        return {"endpoints": prototype_endpoints()}
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")
     def get_voicebot_provider_config(workspace_id: str, voicebot_id: str) -> dict[str, Any]:

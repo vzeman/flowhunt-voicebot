@@ -12,6 +12,14 @@ APIs and marks prototype-only endpoints.
 - Prototype endpoints must be explicitly marked for removal or internal-only
   use.
 
+## Surface Discovery
+
+`GET /api/surface` returns the grouped API surface catalog and whether all public
+endpoints are workspace-scoped.
+
+`GET /api/surface/prototypes` returns prototype-only endpoints that must not be
+exposed as public product APIs.
+
 ## Admin APIs
 
 - `GET /workspaces/{workspace_id}/voicebots`

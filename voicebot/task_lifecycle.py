@@ -72,6 +72,19 @@ class SubagentTaskLifecycleRunner:
             task.with_poll_schedule(next_poll_at=next_poll_at, deadline_at=deadline_at)
         )
 
+    def schedule_pending(
+        self,
+        *,
+        workspace_id: str | None = None,
+        session_id: str | None = None,
+        now: datetime | None = None,
+    ) -> list[SubagentTask]:
+        return [
+            self.schedule(task, now)
+            for task in self.coordinator.store.list(workspace_id=workspace_id, session_id=session_id)
+            if not task.is_terminal()
+        ]
+
     def tick(self, now: datetime | None = None) -> list[SubagentTask]:
         current = now or _now()
         changed: list[SubagentTask] = []

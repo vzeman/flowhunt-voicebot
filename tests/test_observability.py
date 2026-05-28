@@ -14,6 +14,7 @@ from voicebot.observability import (
     audio_observability_summary,
     build_timeline,
     evaluate_conversation,
+    latency_observability_summary,
     provider_observability_summary,
     structured_log_record,
     timeline_health_summary,
@@ -120,6 +121,41 @@ class ObservabilityTests(unittest.TestCase):
 
         self.assertEqual(timeline["duration_seconds"], 3.5)
         self.assertEqual(timeline_duration_seconds([first]), None)
+
+    def test_latency_summary_correlates_turn_to_playback(self) -> None:
+        events = EventStore(max_context_events=30)
+        speech_finished = events.append("call-1", "user_speech_finished", {"turn_id": 1})
+        transcript = events.append("call-1", "user_transcript", {"turn_id": 1, "text": "Question"})
+        request = events.append("call-1", "agent_response_requested", {"turn_id": 1, "text": "Question"})
+        response = events.append(
+            "call-1",
+            "agent_response_received",
+            {"text": "Answer", "response_to_event_id": request.id},
+        )
+        tts_started = events.append("call-1", "tts_started", {"response_to_event_id": request.id})
+        queued = events.append("call-1", "agent_response_queued", {"response_to_event_id": request.id})
+        playback = events.append("call-1", "bot_playback_started", {})
+        metric = events.append("call-1", "metrics", {"name": "tts_synthesis_latency_seconds", "value": 0.42})
+        fixed = [
+            type(speech_finished)(speech_finished.id, speech_finished.call_id, speech_finished.type, "2026-05-28T00:00:00+00:00", speech_finished.data),
+            type(transcript)(transcript.id, transcript.call_id, transcript.type, "2026-05-28T00:00:01+00:00", transcript.data),
+            type(request)(request.id, request.call_id, request.type, "2026-05-28T00:00:01.100000+00:00", request.data),
+            type(response)(response.id, response.call_id, response.type, "2026-05-28T00:00:03+00:00", response.data),
+            type(tts_started)(tts_started.id, tts_started.call_id, tts_started.type, "2026-05-28T00:00:03.500000+00:00", tts_started.data),
+            type(queued)(queued.id, queued.call_id, queued.type, "2026-05-28T00:00:03.600000+00:00", queued.data),
+            type(playback)(playback.id, playback.call_id, playback.type, "2026-05-28T00:00:03.700000+00:00", playback.data),
+            type(metric)(metric.id, metric.call_id, metric.type, "2026-05-28T00:00:03.800000+00:00", metric.data),
+        ]
+
+        summary = latency_observability_summary(fixed)
+
+        self.assertEqual(summary["turns"][0]["turn_id"], 1)
+        self.assertEqual(summary["turns"][0]["speech_to_transcript_seconds"], 1.0)
+        self.assertEqual(summary["turns"][0]["transcript_to_agent_response_seconds"], 2.0)
+        self.assertEqual(summary["turns"][0]["agent_response_to_tts_started_seconds"], 0.5)
+        self.assertEqual(summary["turns"][0]["end_of_speech_to_playback_started_seconds"], 3.7)
+        self.assertEqual(summary["slowest_turn"]["turn_id"], 1)
+        self.assertEqual(summary["metrics"]["tts_synthesis_latency_seconds"]["latest"]["event_id"], metric.id)
 
     def test_provider_summary_reports_latency_and_failures(self) -> None:
         events = EventStore(max_context_events=20)

@@ -56,6 +56,12 @@ The timeline also reports `duration_seconds` when at least two event timestamps
 can be parsed. This is the elapsed time between the first and last event in the
 selected debug window.
 
+The timeline also includes a `latency` object. It correlates each caller turn
+from speech end through transcript, agent response, TTS start, queued playback,
+and playback start when matching events are available. It also summarizes raw
+metric events by metric name, including latest value and max latency, so a slow
+call can be debugged without manually calculating event timestamp differences.
+
 ## Provider Summary
 
 `provider_observability_summary()` aggregates provider latency samples and

@@ -149,6 +149,7 @@ def build_timeline(events: list[VoicebotEvent]) -> dict[str, Any]:
         "counts": category_counts,
         "audio": audio,
         "providers": providers,
+        "latency": latency_observability_summary(events),
         "health": timeline_health_summary(audio, providers),
         "first_event_id": entries[0]["id"] if entries else None,
         "last_event_id": entries[-1]["id"] if entries else None,
@@ -211,6 +212,25 @@ def provider_observability_summary(events: list[VoicebotEvent]) -> dict[str, Any
             for provider, count in sorted(failures.items())
             if provider not in latencies
         }
+    }
+
+
+def latency_observability_summary(events: list[VoicebotEvent]) -> dict[str, Any]:
+    ordered = sorted(events, key=lambda item: item.id)
+    turns = _turn_latency_breakdowns(ordered)
+    metric_summary = _metric_latency_summary(ordered)
+    complete_turns = [
+        turn for turn in turns if turn.get("end_of_speech_to_playback_started_seconds") is not None
+    ]
+    slowest = max(
+        complete_turns,
+        key=lambda turn: float(turn["end_of_speech_to_playback_started_seconds"]),
+        default=None,
+    )
+    return {
+        "turns": turns,
+        "metrics": metric_summary,
+        "slowest_turn": slowest,
     }
 
 
@@ -289,6 +309,128 @@ def _provider_from_event_type(event_type: str) -> str | None:
     if event_type.startswith("agent_"):
         return "agent"
     return None
+
+
+def _turn_latency_breakdowns(events: list[VoicebotEvent]) -> list[dict[str, Any]]:
+    turn_ids = sorted(
+        {
+            turn_id
+            for event in events
+            for turn_id in [_optional_int(event.data.get("turn_id"))]
+            if turn_id is not None
+        }
+    )
+    turns = []
+    for turn_id in turn_ids:
+        speech_started = _first_event(events, "user_speech_started", turn_id=turn_id)
+        speech_finished = _first_event(events, "user_speech_finished", turn_id=turn_id)
+        stt_started = _first_event(events, "stt_started", turn_id=turn_id)
+        stt_finished = _first_event(events, "stt_finished", turn_id=turn_id)
+        transcript = _first_event(events, "user_transcript", turn_id=turn_id)
+        request = _first_event(events, "agent_response_requested", turn_id=turn_id)
+        response = _first_response_for_request(events, request.id if request else None)
+        tts_started = _first_response_event(events, "tts_started", request.id if request else None)
+        queued = _first_response_event(events, "agent_response_queued", request.id if request else None)
+        playback_started = _first_event_after(events, "bot_playback_started", queued)
+        turns.append(
+            {
+                "turn_id": turn_id,
+                "event_ids": {
+                    "speech_started": speech_started.id if speech_started else None,
+                    "speech_finished": speech_finished.id if speech_finished else None,
+                    "stt_started": stt_started.id if stt_started else None,
+                    "stt_finished": stt_finished.id if stt_finished else None,
+                    "transcript": transcript.id if transcript else None,
+                    "agent_request": request.id if request else None,
+                    "agent_response": response.id if response else None,
+                    "tts_started": tts_started.id if tts_started else None,
+                    "agent_response_queued": queued.id if queued else None,
+                    "playback_started": playback_started.id if playback_started else None,
+                },
+                "speech_to_transcript_seconds": _seconds_between_events(speech_finished, transcript),
+                "transcript_to_agent_response_seconds": _seconds_between_events(transcript, response),
+                "agent_response_to_tts_started_seconds": _seconds_between_events(response, tts_started),
+                "agent_response_to_playback_started_seconds": _seconds_between_events(response, playback_started),
+                "end_of_speech_to_playback_started_seconds": _seconds_between_events(speech_finished, playback_started),
+            }
+        )
+    return turns
+
+
+def _metric_latency_summary(events: list[VoicebotEvent]) -> dict[str, Any]:
+    values_by_name: dict[str, list[tuple[VoicebotEvent, float]]] = {}
+    for event in events:
+        if event.type != "metrics":
+            continue
+        name = str(event.data.get("name") or "")
+        value = _optional_float(event.data.get("value"))
+        if not name or value is None:
+            continue
+        values_by_name.setdefault(name, []).append((event, value))
+    return {
+        name: {
+            "count": len(values),
+            "avg": sum(value for _event, value in values) / len(values),
+            "max": max(value for _event, value in values),
+            "latest": {
+                "event_id": values[-1][0].id,
+                "value": values[-1][1],
+                "timestamp": values[-1][0].timestamp,
+            },
+        }
+        for name, values in sorted(values_by_name.items())
+    }
+
+
+def _first_event(events: list[VoicebotEvent], event_type: str, turn_id: int | None = None) -> VoicebotEvent | None:
+    for event in events:
+        if event.type != event_type:
+            continue
+        if turn_id is not None and _optional_int(event.data.get("turn_id")) != turn_id:
+            continue
+        return event
+    return None
+
+
+def _first_response_for_request(events: list[VoicebotEvent], request_event_id: int | None) -> VoicebotEvent | None:
+    return _first_response_event(events, "agent_response_received", request_event_id)
+
+
+def _first_response_event(
+    events: list[VoicebotEvent],
+    event_type: str,
+    request_event_id: int | None,
+) -> VoicebotEvent | None:
+    if request_event_id is None:
+        return None
+    for event in events:
+        if event.type == event_type and _optional_int(event.data.get("response_to_event_id")) == request_event_id:
+            return event
+    return None
+
+
+def _first_event_after(
+    events: list[VoicebotEvent],
+    event_type: str,
+    after_event: VoicebotEvent | None,
+) -> VoicebotEvent | None:
+    if after_event is None:
+        return None
+    for event in events:
+        if event.id > after_event.id and event.type == event_type:
+            return event
+    return None
+
+
+def _seconds_between_events(start: VoicebotEvent | None, end: VoicebotEvent | None) -> float | None:
+    if start is None or end is None:
+        return None
+    try:
+        started = _parse_timestamp(start.timestamp)
+        ended = _parse_timestamp(end.timestamp)
+    except ValueError:
+        return None
+    return max(0.0, (ended - started).total_seconds())
 
 
 def _max_consecutive_duplicates(values: list[str]) -> int:

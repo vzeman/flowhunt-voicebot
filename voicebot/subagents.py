@@ -48,6 +48,18 @@ class SubagentProviderDescriptor:
     required_metadata: tuple[str, ...] = ()
     result_context: Literal["clean", "raw"] = "clean"
 
+    def validation_issues(self) -> tuple[str, ...]:
+        issues: list[str] = []
+        if not self.kind:
+            issues.append("kind is required")
+        if not self.label.strip():
+            issues.append("label is required")
+        if any(not key.strip() for key in self.required_metadata):
+            issues.append("required metadata keys must not be blank")
+        if self.supports_async_polling is False and self.supports_cancel is True:
+            issues.append("non-polling providers must not declare cancellation support")
+        return tuple(issues)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "kind": self.kind,
@@ -77,6 +89,7 @@ DEFAULT_SUBAGENT_PROVIDER_DESCRIPTORS: dict[SubagentProviderKind, SubagentProvid
         kind="human_handoff",
         label="Human handoff",
         supports_async_polling=False,
+        supports_cancel=False,
     ),
 }
 
@@ -344,8 +357,12 @@ class SubagentCoordinator:
         provider: SubagentProvider,
         descriptor: SubagentProviderDescriptor | None = None,
     ) -> None:
+        resolved_descriptor = descriptor or DEFAULT_SUBAGENT_PROVIDER_DESCRIPTORS[provider.kind]
+        issues = resolved_descriptor.validation_issues()
+        if issues:
+            raise ValueError(f"invalid subagent provider descriptor for {provider.kind}: {', '.join(issues)}")
         self.providers[provider.kind] = provider
-        self.provider_descriptors[provider.kind] = descriptor or DEFAULT_SUBAGENT_PROVIDER_DESCRIPTORS[provider.kind]
+        self.provider_descriptors[provider.kind] = resolved_descriptor
 
     def provider_catalog(self) -> dict[str, Any]:
         return {

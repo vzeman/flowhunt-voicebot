@@ -133,6 +133,25 @@ class RealtimeAudioTests(unittest.TestCase):
         self.assertEqual(resolved.max_seconds, 12.0)
         self.assertEqual(resolved.barge_in_threshold, 0.7)
 
+    def test_turn_detection_config_rejects_invalid_values(self) -> None:
+        invalid_configs = [
+            {"sample_rate": 0},
+            {"start_threshold": -0.1},
+            {"stop_threshold": -0.1},
+            {"stop_threshold": 0.3},
+            {"vad_start_ms": -1},
+            {"silence_ms": 0},
+            {"min_seconds": -0.1},
+            {"max_seconds": 0},
+            {"min_seconds": 2.0, "max_seconds": 1.0},
+            {"barge_in_threshold": 0.1},
+        ]
+
+        for overrides in invalid_configs:
+            with self.subTest(overrides=overrides):
+                with self.assertRaises(ValueError):
+                    replace(config(), **overrides)
+
     def test_debug_audio_capture_is_gated_and_bounded(self) -> None:
         disabled = DebugAudioCapture(enabled=False, sample_rate=1000, max_seconds=1.0)
         disabled.append(np.ones(100, dtype=np.float32))

@@ -32,6 +32,28 @@ class TurnDetectionConfig:
     max_seconds: float
     barge_in_threshold: float
 
+    def __post_init__(self) -> None:
+        if self.sample_rate <= 0:
+            raise ValueError("sample_rate must be greater than 0")
+        if self.start_threshold < 0:
+            raise ValueError("start_threshold must be greater than or equal to 0")
+        if self.stop_threshold < 0:
+            raise ValueError("stop_threshold must be greater than or equal to 0")
+        if self.stop_threshold > self.start_threshold:
+            raise ValueError("stop_threshold must be less than or equal to start_threshold")
+        if self.vad_start_ms < 0:
+            raise ValueError("vad_start_ms must be greater than or equal to 0")
+        if self.silence_ms <= 0:
+            raise ValueError("silence_ms must be greater than 0")
+        if self.min_seconds < 0:
+            raise ValueError("min_seconds must be greater than or equal to 0")
+        if self.max_seconds <= 0:
+            raise ValueError("max_seconds must be greater than 0")
+        if self.max_seconds < self.min_seconds:
+            raise ValueError("max_seconds must be greater than or equal to min_seconds")
+        if self.barge_in_threshold < self.start_threshold:
+            raise ValueError("barge_in_threshold must be greater than or equal to start_threshold")
+
 
 def turn_detection_config_from_settings(settings, sample_rate: int) -> TurnDetectionConfig:
     return TurnDetectionConfig(

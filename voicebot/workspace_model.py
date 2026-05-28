@@ -123,6 +123,8 @@ class VoicebotSessionStore:
         existing = self._sessions.get(session.session_id)
         if existing is not None and existing.workspace_id != session.workspace_id:
             raise ValueError("cannot move voicebot session across workspaces")
+        if existing is not None and existing.voicebot_id != session.voicebot_id:
+            raise ValueError("cannot move voicebot session across voicebots")
         self._sessions[session.session_id] = session
         return session
 

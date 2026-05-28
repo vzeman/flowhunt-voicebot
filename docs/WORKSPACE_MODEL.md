@@ -37,7 +37,8 @@ It carries `workspace_id`, `voicebot_id`, `session_id`, optional channel and
 external session ids, status, timestamps, and metadata. `VoicebotSessionStore`
 is the first in-memory contract for listing active/concurrent sessions by
 workspace and voicebot; production should back the same shape with FlowHunt DB
-or another shared store.
+or another shared store. A saved session id cannot be reassigned to a different
+workspace or voicebot.
 
 ## Channel Resolution
 

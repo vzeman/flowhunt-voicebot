@@ -9,6 +9,7 @@ from voicebot.transports import (
     CallRoute,
     MediaSessionDescriptor,
     StaticMediaTransport,
+    TransportCapabilities,
     transport_catalog,
 )
 
@@ -53,6 +54,14 @@ class TransportContractTests(unittest.TestCase):
             MediaSessionDescriptor("call-1", "webrtc", sample_rate=0)
         with self.assertRaisesRegex(ValueError, "sample_rate"):
             StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES, sample_rate=0)
+        with self.assertRaisesRegex(ValueError, "unsupported transport kind"):
+            MediaSessionDescriptor("call-1", "unknown")
+        with self.assertRaisesRegex(ValueError, "unsupported transport kind"):
+            StaticMediaTransport("unknown", WEBRTC_CAPABILITIES)
+
+    def test_transport_capabilities_reject_unknown_call_control_actions(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported call-control actions"):
+            TransportCapabilities(call_control=frozenset({"hangup", "teleport"}))
 
     def test_lifecycle_event_data_is_flat_and_event_friendly(self) -> None:
         transport = StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES, sample_rate=16000)

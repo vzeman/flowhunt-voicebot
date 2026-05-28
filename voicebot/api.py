@@ -66,6 +66,7 @@ from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, s
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
 from .tool_executor import AgentToolExecutor
 from .transcripts import TranscriptStore
+from .transports import transport_catalog
 from .tools import tool_definitions_json_schema, tool_definitions_legacy
 from .webrtc import WebRTCSessionManager
 
@@ -263,6 +264,14 @@ def create_app(
             "config": provider_config_to_dict(config),
             "selection_plan": selection_plan_to_dict(provider_selection_plan(config)),
             "validation": [],
+        }
+
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/transports")
+    def get_voicebot_transport_catalog(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        return {
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            **transport_catalog(),
         }
 
     @app.put("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")

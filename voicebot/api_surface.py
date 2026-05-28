@@ -12,6 +12,7 @@ ApiArea = Literal[
     "transcript",
     "task",
     "provider",
+    "transport",
     "testing",
     "internal",
 ]
@@ -42,6 +43,7 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("POST", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/validate", "admin", "public", description="Validate runtime config."),
     ApiEndpointSpec("PUT", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers", "provider", "public", description="Save provider config."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers", "provider", "public", description="Read provider config."),
+    ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/transports", "transport", "public", description="List transport capabilities."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions", "session", "public", description="List sessions."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}", "session", "public", description="Read session."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/timeline", "session", "public", description="Event timeline."),

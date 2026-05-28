@@ -8,6 +8,7 @@ from voicebot.transports import (
     CallControlRequest,
     CallRoute,
     StaticMediaTransport,
+    transport_catalog,
 )
 
 
@@ -83,6 +84,15 @@ class TransportContractTests(unittest.TestCase):
         self.assertEqual(result.action, "transfer")
         self.assertIn("not supported", result.reason or "")
         self.assertEqual(result.data, {"transport": "webrtc"})
+
+    def test_transport_catalog_serializes_capabilities(self) -> None:
+        catalog = transport_catalog()
+
+        self.assertIn("asterisk_audiosocket", catalog["transports"])
+        self.assertIn("webrtc", catalog["transports"])
+        self.assertIn("transfer", catalog["transports"]["asterisk_audiosocket"]["capabilities"]["call_control"])
+        self.assertNotIn("transfer", catalog["transports"]["webrtc"]["capabilities"]["call_control"])
+        self.assertTrue(catalog["transports"]["webrtc"]["implemented"])
 
 
 if __name__ == "__main__":

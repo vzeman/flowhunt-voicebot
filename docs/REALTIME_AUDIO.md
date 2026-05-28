@@ -69,6 +69,12 @@ This rule is intentionally simple for the first shared primitive. Future impleme
 - `max_seconds`
 - `barge_in_threshold`
 
+Configuration is validated when constructed. Sample rate, silence, and max turn
+duration must be positive; stop threshold cannot exceed start threshold; max
+turn duration cannot be shorter than the minimum; and barge-in threshold cannot
+be below the start threshold. Invalid values should fail startup or voicebot
+config activation instead of producing unstable turn detection.
+
 These values should be resolved per voicebot/session once workspace-based configuration is implemented.
 
 `turn_detection_config_from_settings(settings, sample_rate)` maps the current

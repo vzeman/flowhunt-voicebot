@@ -10,6 +10,7 @@ from voicebot.api_surface import (
     api_scope_violations,
     api_surface_by_area,
     api_surface_integrity_issues,
+    api_surface_summary,
     prototype_endpoints,
     public_endpoints_are_workspace_scoped,
 )
@@ -25,6 +26,14 @@ class ApiSurfaceTests(unittest.TestCase):
 
     def test_api_surface_catalog_has_no_integrity_issues(self) -> None:
         self.assertEqual(api_surface_integrity_issues(), [])
+
+    def test_api_surface_summary_counts_catalog_dimensions(self) -> None:
+        summary = api_surface_summary()
+
+        self.assertEqual(summary["total"], sum(summary["by_area"].values()))
+        self.assertEqual(summary["total"], sum(summary["by_visibility"].values()))
+        self.assertEqual(summary["total"], sum(summary["by_scope_source"].values()))
+        self.assertEqual(summary["by_visibility"]["prototype"], 1)
 
     def test_api_surface_covers_required_areas(self) -> None:
         grouped = api_surface_by_area()
@@ -46,6 +55,7 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(response.json()["public_endpoints_are_workspace_scoped"])
         self.assertEqual(response.json()["scope_violations"], [])
         self.assertEqual(response.json()["integrity_issues"], [])
+        self.assertEqual(response.json()["summary"]["by_visibility"]["prototype"], 1)
         self.assertIn("admin", response.json()["areas"])
 
     def test_runtime_endpoint_declares_payload_workspace_scope(self) -> None:

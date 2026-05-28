@@ -198,6 +198,7 @@ class WebRTCCallSession:
             state.speech_ms = sum(int(len(item) / STT_SAMPLE_RATE * 1000) for item in state.collected)
             turn_id = self._new_turn()
             self.events.append(self.call_id, "user_speech_started", {"turn_id": turn_id, "level": level})
+            self._record_vad_decision("speech_started", level, block_ms, {"turn_id": turn_id})
             self._mark_interrupted("user_speech_started")
             if self.playback.interrupt():
                 self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "user_speech_started"})
@@ -214,6 +215,7 @@ class WebRTCCallSession:
             return
 
         audio = np.concatenate(state.collected)
+        final_silence_ms = state.silence_ms
         state.is_recording = False
         self.recording_event.clear()
         state.collected = []
@@ -224,6 +226,13 @@ class WebRTCCallSession:
         turn_id = self._current_turn()
         self.events.append(self.call_id, "user_speech_finished", {"turn_id": turn_id, "duration": duration})
         self._record_metric("speech_duration_seconds", duration, {"turn_id": turn_id})
+        self._record_metric("silence_duration_seconds", final_silence_ms / 1000, {"turn_id": turn_id})
+        self._record_vad_decision(
+            "speech_finished" if duration >= self.settings.min_seconds else "speech_too_short",
+            level,
+            block_ms,
+            {"turn_id": turn_id, "duration": duration},
+        )
         if duration >= self.settings.min_seconds:
             self._speech_jobs.put((turn_id, audio))
 
@@ -570,6 +579,20 @@ class WebRTCCallSession:
 
     def _record_metric(self, name: str, value: float, data: dict | None = None) -> None:
         self.events.append(self.call_id, "metrics", {"name": name, "value": value, **(data or {})})
+
+    def _record_vad_decision(self, decision: str, level: float, block_ms: int, data: dict | None = None) -> None:
+        self._record_metric(
+            "vad_decision",
+            1.0,
+            {
+                "decision": decision,
+                "level": level,
+                "block_ms": block_ms,
+                "sample_rate": STT_SAMPLE_RATE,
+                "transport": "webrtc",
+                **(data or {}),
+            },
+        )
 
     def _capture_debug_audio(self, turn_id: int, audio: np.ndarray) -> str | None:
         if not self.settings.debug_audio_capture:

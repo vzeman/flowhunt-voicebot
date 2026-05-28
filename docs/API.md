@@ -1127,6 +1127,36 @@ Response:
 
 The exact metrics depend on emitted `metrics` events.
 
+## Observability
+
+### GET `/observability/timeline`
+
+Returns a categorized event timeline for debugging a call or workspace slice.
+
+Query parameters:
+
+- `after`: optional event ID cursor.
+- `call_id`: optional call filter.
+- `workspace_id`: optional workspace filter.
+- `voicebot_id`: optional voicebot filter.
+- `session_id`: optional session filter.
+- `limit`: maximum events, default `1000`.
+
+### POST `/observability/evaluate`
+
+Runs deterministic conversation checks against selected events.
+
+Request:
+
+```json
+{
+  "call_id": "call-1",
+  "must_include_event_types": ["call_connected", "user_transcript"],
+  "max_duplicate_agent_responses": 1,
+  "require_final_agent_response": true
+}
+```
+
 ## WebSocket
 
 ### WS `/ws/events`

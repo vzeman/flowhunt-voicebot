@@ -16,6 +16,7 @@ from .api_models import (
     AgentToolRequest,
     CallControlRequest,
     CompactContextRequest,
+    ConversationEvaluationRequest,
     PlaybackInterruptRequest,
     SipTrunkRequest,
     WebRTCOfferRequest,
@@ -41,6 +42,7 @@ from .flowhunt import (
 )
 from .health import readiness_report
 from .metrics import summarize_metrics
+from .observability import ConversationExpectation, build_timeline, evaluate_conversation
 from .provider_catalog import provider_catalog
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
@@ -317,6 +319,44 @@ def create_app(
     @app.get("/metrics")
     def metrics(call_id: str | None = None) -> dict[str, Any]:
         return summarize_metrics(events.list_events(call_id=call_id, limit=1000))
+
+    @app.get("/observability/timeline")
+    def observability_timeline(
+        after: int = 0,
+        call_id: str | None = None,
+        workspace_id: str | None = None,
+        voicebot_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 1000,
+    ) -> dict[str, Any]:
+        return build_timeline(
+            events.list_events(
+                after=after,
+                call_id=call_id,
+                workspace_id=workspace_id,
+                voicebot_id=voicebot_id,
+                session_id=session_id,
+                limit=validated_limit(limit),
+            )
+        )
+
+    @app.post("/observability/evaluate")
+    def observability_evaluate(request: ConversationEvaluationRequest) -> dict[str, Any]:
+        return evaluate_conversation(
+            events.list_events(
+                after=request.after,
+                call_id=request.call_id,
+                workspace_id=request.workspace_id,
+                voicebot_id=request.voicebot_id,
+                session_id=request.session_id,
+                limit=validated_limit(request.limit),
+            ),
+            ConversationExpectation(
+                must_include_event_types=tuple(request.must_include_event_types),
+                max_duplicate_agent_responses=request.max_duplicate_agent_responses,
+                require_final_agent_response=request.require_final_agent_response,
+            ),
+        )
 
     @app.get("/context")
     def context(call_id: str | None = None) -> dict[str, Any]:

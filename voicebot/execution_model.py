@@ -40,6 +40,15 @@ class ExecutionScope:
             if value
         }
 
+    def require_workspace(self) -> "ExecutionScope":
+        if not self.workspace_id:
+            raise ValueError("workspace_id is required")
+        if not self.voicebot_id:
+            raise ValueError("voicebot_id is required")
+        if not self.session_id:
+            raise ValueError("session_id is required")
+        return self
+
 
 @dataclass(frozen=True)
 class ExecutionIds:

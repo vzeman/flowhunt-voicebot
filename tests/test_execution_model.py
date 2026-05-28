@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from voicebot.execution_model import (
+    ExecutionIds,
     ExecutionScope,
     frame_category,
     frame_is_cancellation,
@@ -10,6 +11,7 @@ from voicebot.execution_model import (
     ids_from_frame,
     scope_from_frame,
 )
+from voicebot.events import EventStore
 from voicebot.frames import ControlFrame, TextFrame, TranscriptionFrame
 
 
@@ -40,6 +42,37 @@ class ExecutionModelTests(unittest.TestCase):
         frame = TextFrame("system", "call-1", "hello")
 
         self.assertEqual(scope_from_frame(frame).session_id, "call-1")
+
+    def test_scope_can_require_workspace_voicebot_and_session(self) -> None:
+        with self.assertRaisesRegex(ValueError, "workspace_id"):
+            ExecutionScope().require_workspace()
+        with self.assertRaisesRegex(ValueError, "voicebot_id"):
+            ExecutionScope(workspace_id="workspace-1", session_id="session-1").require_workspace()
+        with self.assertRaisesRegex(ValueError, "session_id"):
+            ExecutionScope(workspace_id="workspace-1", voicebot_id="voicebot-1").require_workspace()
+
+    def test_event_store_append_scoped_adds_scope_and_execution_ids(self) -> None:
+        events = EventStore(max_context_events=20)
+
+        event = events.append_scoped(
+            ExecutionScope(
+                workspace_id="workspace-1",
+                voicebot_id="voicebot-1",
+                session_id="session-1",
+                call_id="call-1",
+            ),
+            "user_transcript",
+            {"text": "hello"},
+            ExecutionIds(turn_id=2, trace_id="trace-1"),
+        )
+
+        self.assertEqual(event.call_id, "call-1")
+        self.assertEqual(event.data["workspace_id"], "workspace-1")
+        self.assertEqual(event.data["voicebot_id"], "voicebot-1")
+        self.assertEqual(event.data["session_id"], "session-1")
+        self.assertEqual(event.data["turn_id"], 2)
+        self.assertEqual(event.data["trace_id"], "trace-1")
+        self.assertEqual(event.data["text"], "hello")
 
     def test_ids_from_frame_extracts_turn_request_and_external_task_ids(self) -> None:
         frame = TranscriptionFrame(

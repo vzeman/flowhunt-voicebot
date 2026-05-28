@@ -8,6 +8,7 @@ from typing import Any, Literal
 import json
 import threading
 
+from .execution_model import ExecutionIds, ExecutionScope
 from .transcripts import TranscriptStore
 
 
@@ -104,6 +105,20 @@ class EventStore:
                 self._transcript_store.append(event)
             self._compact_locked()
         return event
+
+    def append_scoped(
+        self,
+        scope: ExecutionScope,
+        event_type: EventType,
+        data: dict[str, Any] | None = None,
+        ids: ExecutionIds | None = None,
+    ) -> VoicebotEvent:
+        payload = {
+            **scope.to_data(),
+            **((ids or ExecutionIds()).to_data()),
+            **(data or {}),
+        }
+        return self.append(scope.call_id or scope.session_id, event_type, payload)
 
     def list_events(
         self,

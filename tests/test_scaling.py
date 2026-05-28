@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import unittest
 
-from voicebot.scaling import RoutingKey, WorkspaceBackpressure, default_deployment_topology
+from fastapi.testclient import TestClient
+
+from voicebot.agent_tasks import AgentTaskTracker
+from voicebot.api import WebSocketHub, create_app
+from voicebot.calls import CallRegistry
+from voicebot.events import EventStore
+from voicebot.scaling import RoutingKey, WorkloadProfile, WorkspaceBackpressure, build_workload_plan, default_deployment_topology
+from voicebot.transcripts import TranscriptStore
 
 
 class ScalingTests(unittest.TestCase):
@@ -35,6 +42,63 @@ class ScalingTests(unittest.TestCase):
         self.assertFalse(limiter.acquire("workspace-1"))
         limiter.release("workspace-1")
         self.assertTrue(limiter.acquire("workspace-1"))
+
+    def test_workload_plan_includes_partition_provider_keys_and_capacity_flags(self) -> None:
+        plan = build_workload_plan(
+            WorkloadProfile(
+                "workspace-1",
+                "voicebot-1",
+                120,
+                session_id="session-1",
+                stt_provider="openai",
+                tts_provider="openai",
+                agent_provider="anthropic",
+            )
+        )
+
+        self.assertEqual(plan["routing"]["partition_key"], "workspace-1:voicebot-1:session-1")
+        stt_queue = next(queue for queue in plan["queues"] if queue["role"] == "stt_worker")
+        agent_queue = next(queue for queue in plan["queues"] if queue["role"] == "agent_worker")
+        self.assertEqual(stt_queue["provider_key"], "workspace-1:voicebot-1:openai")
+        self.assertFalse(stt_queue["workspace_capacity_ok"])
+        self.assertEqual(agent_queue["provider_key"], "workspace-1:voicebot-1:anthropic")
+
+    def test_scaling_topology_endpoint_returns_runtime_topology(self) -> None:
+        client = self.build_client()
+
+        response = client.get("/scaling/topology")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["event_bus"], "workspace_event_stream")
+        self.assertIn("voicebot.media", {queue["queue"] for queue in response.json()["queues"]})
+
+    def test_scaling_workload_plan_endpoint_validates_and_plans(self) -> None:
+        client = self.build_client()
+
+        response = client.post(
+            "/scaling/workload-plan",
+            json={
+                "workspace_id": "workspace-1",
+                "voicebot_id": "voicebot-1",
+                "concurrent_sessions": 50,
+                "session_id": "session-1",
+                "stt_provider": "openai",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["routing"]["partition_key"], "workspace-1:voicebot-1:session-1")
+
+    def build_client(self) -> TestClient:
+        app = create_app(
+            EventStore(max_context_events=20),
+            CallRegistry(),
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+        )
+        return TestClient(app)
 
 
 if __name__ == "__main__":

@@ -41,6 +41,16 @@ class QueueBinding:
     max_inflight_per_voicebot: int | None = None
     max_inflight_per_provider: int | None = None
 
+    def as_dict(self) -> dict:
+        return {
+            "role": self.role,
+            "queue": self.queue,
+            "concurrency": self.concurrency,
+            "max_inflight_per_workspace": self.max_inflight_per_workspace,
+            "max_inflight_per_voicebot": self.max_inflight_per_voicebot,
+            "max_inflight_per_provider": self.max_inflight_per_provider,
+        }
+
 
 @dataclass(frozen=True)
 class DeploymentTopology:
@@ -58,17 +68,7 @@ class DeploymentTopology:
         return {
             "event_bus": self.event_bus,
             "shared_state": list(self.shared_state),
-            "queues": [
-                {
-                    "role": queue.role,
-                    "queue": queue.queue,
-                    "concurrency": queue.concurrency,
-                    "max_inflight_per_workspace": queue.max_inflight_per_workspace,
-                    "max_inflight_per_voicebot": queue.max_inflight_per_voicebot,
-                    "max_inflight_per_provider": queue.max_inflight_per_provider,
-                }
-                for queue in self.queues
-            ],
+            "queues": [queue.as_dict() for queue in self.queues],
         }
 
 
@@ -90,6 +90,68 @@ class WorkspaceBackpressure:
             self.inflight_by_key.pop(key, None)
             return
         self.inflight_by_key[key] = current - 1
+
+
+@dataclass(frozen=True)
+class WorkloadProfile:
+    workspace_id: str
+    voicebot_id: str
+    concurrent_sessions: int
+    session_id: str | None = None
+    stt_provider: str | None = None
+    tts_provider: str | None = None
+    agent_provider: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.workspace_id:
+            raise ValueError("workspace_id is required")
+        if not self.voicebot_id:
+            raise ValueError("voicebot_id is required")
+        if self.concurrent_sessions < 0:
+            raise ValueError("concurrent_sessions must be non-negative")
+
+
+def build_workload_plan(profile: WorkloadProfile, topology: DeploymentTopology | None = None) -> dict:
+    topology = topology or default_deployment_topology()
+    session_key = RoutingKey(profile.workspace_id, profile.voicebot_id, session_id=profile.session_id)
+    provider_by_role = {
+        "stt_worker": profile.stt_provider,
+        "tts_worker": profile.tts_provider,
+        "agent_worker": profile.agent_provider,
+    }
+    queues = []
+    for binding in topology.queues:
+        provider = provider_by_role.get(binding.role)
+        provider_key = None
+        if provider:
+            provider_key = RoutingKey(profile.workspace_id, profile.voicebot_id, provider=provider).provider_key()
+        queues.append(
+            {
+                **binding.as_dict(),
+                "partition_key": session_key.partition_key(),
+                "provider_key": provider_key,
+                "workspace_capacity_ok": _capacity_ok(profile.concurrent_sessions, binding.max_inflight_per_workspace),
+                "voicebot_capacity_ok": _capacity_ok(profile.concurrent_sessions, binding.max_inflight_per_voicebot),
+                "provider_capacity_ok": _capacity_ok(profile.concurrent_sessions, binding.max_inflight_per_provider),
+            }
+        )
+    return {
+        "routing": {
+            "workspace_id": profile.workspace_id,
+            "voicebot_id": profile.voicebot_id,
+            "session_id": profile.session_id,
+            "partition_key": session_key.partition_key(),
+        },
+        "concurrent_sessions": profile.concurrent_sessions,
+        "event_bus": topology.event_bus,
+        "queues": queues,
+    }
+
+
+def _capacity_ok(concurrent_sessions: int, limit: int | None) -> bool | None:
+    if limit is None:
+        return None
+    return concurrent_sessions <= limit
 
 
 def default_deployment_topology() -> DeploymentTopology:

@@ -31,6 +31,17 @@ Every unit of work should carry:
 The routing partition is `workspace_id:voicebot_id:session_id`. Provider
 rate-limits use `workspace_id:voicebot_id:provider`.
 
+## Runtime Scaling API
+
+`GET /scaling/topology` exposes the configured worker roles, queue names,
+concurrency, and backpressure limits.
+
+`POST /scaling/workload-plan` accepts a workspace, voicebot, expected concurrent
+session count, optional session id, and provider names. It returns the queue
+bindings, partition key, provider keys, and whether the requested concurrency
+fits the current workspace/voicebot/provider limits. This is a planning surface
+for FlowHunt deployment orchestration; it does not enqueue work itself.
+
 ## Shared State
 
 Production shared state:

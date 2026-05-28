@@ -48,6 +48,10 @@ type, text, and metadata only; it does not fetch URLs or inspect external
 content. It validates the normalized content shape before storing a part,
 including the requirement that each part include `text`, `uri`, or metadata.
 
+`MultimodalContextStore.delete(call_id)` removes accumulated context for a call
+when the runtime session ends, so long-running workers can release local
+references to multimodal content.
+
 ## Future Work
 
 - WebRTC chat and visual card events

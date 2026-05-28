@@ -101,6 +101,9 @@ class MultimodalContextStore:
     def get(self, call_id: str) -> MultimodalContext:
         return self._contexts.get(call_id) or MultimodalContext(call_id=call_id)
 
+    def delete(self, call_id: str) -> bool:
+        return self._contexts.pop(call_id, None) is not None
+
 
 @dataclass(frozen=True)
 class ModalityCapabilities:

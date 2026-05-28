@@ -52,6 +52,7 @@ class AgentProviderRegistry:
 
 def default_agent_provider_registry() -> AgentProviderRegistry:
     registry = AgentProviderRegistry()
+    registry.register("anthropic", run_anthropic_agent)
     registry.register("openai-responses", run_responses_agent)
     for provider in AGENT_CHAT_COMPATIBLE_PROVIDERS:
         registry.register(provider, run_chat_agent)
@@ -94,6 +95,71 @@ def run_chat_agent(
         timeout=timeout,
     )
     return (response.choices[0].message.content or "").strip(), []
+
+
+def run_anthropic_agent(
+    client: Any,
+    model: str,
+    prompt: str,
+    timeout: float,
+    max_output_tokens: int,
+    tools: list[dict] | None = None,
+) -> tuple[str, list[dict]]:
+    kwargs = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_output_tokens,
+        "temperature": 0,
+        "timeout": timeout,
+    }
+    converted_tools = anthropic_tools_from_json_schema(tools or [])
+    if converted_tools:
+        kwargs["tools"] = converted_tools
+    response = client.messages.create(**kwargs)
+    return extract_anthropic_text(response), extract_anthropic_tool_calls(response)
+
+
+def anthropic_tools_from_json_schema(tools: list[dict]) -> list[dict]:
+    converted = []
+    for tool in tools:
+        if tool.get("type") != "function":
+            continue
+        name = tool.get("name")
+        if not name:
+            continue
+        converted.append(
+            {
+                "name": name,
+                "description": tool.get("description", ""),
+                "input_schema": tool.get(
+                    "parameters",
+                    {"type": "object", "properties": {}, "additionalProperties": False},
+                ),
+            }
+        )
+    return converted
+
+
+def extract_anthropic_text(response: Any) -> str:
+    parts = []
+    for block in getattr(response, "content", []) or []:
+        if getattr(block, "type", None) == "text":
+            text = getattr(block, "text", "")
+            if text:
+                parts.append(text)
+    return "\n".join(parts).strip()
+
+
+def extract_anthropic_tool_calls(response: Any) -> list[dict]:
+    calls = []
+    for block in getattr(response, "content", []) or []:
+        if getattr(block, "type", None) != "tool_use":
+            continue
+        name = getattr(block, "name", "")
+        arguments = getattr(block, "input", {}) or {}
+        if name:
+            calls.append({"name": name, "arguments": arguments})
+    return calls
 
 
 def extract_responses_tool_calls(response: Any) -> list[dict]:

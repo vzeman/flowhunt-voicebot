@@ -78,7 +78,7 @@ flowchart LR
     end
 
     subgraph Agent[External AI agent]
-        AgentWorker[Agent worker<br/>OpenAI agent or local command]
+        AgentWorker[Agent worker<br/>OpenAI, Anthropic, or local command]
     end
 
     AgentWorker -->|poll /agent/tasks| API
@@ -98,9 +98,10 @@ flowchart LR
    `openai-agent`. The voicebot API listens on port `8080` inside Docker and is
    published to the host by `VOICEBOT_API_HOST_PORT`. AudioSocket listens on
    port `9019` inside the Docker network.
-2. **SIP registration**: Asterisk builds its PJSIP configuration from
-   `asterisk/docker-entrypoint.sh`, registers to the configured SIP trunk, and
-   exposes AMI so voicebot can request call-control actions.
+2. **SIP registration**: Asterisk builds its base PJSIP configuration from
+   `asterisk/docker-entrypoint.sh` and includes the generated dynamic trunk file
+   from `/data/asterisk/pjsip-trunks.conf`. Voicebot owns that generated file
+   and can add, connect, disconnect, or remove trunks through the HTTP API.
 3. **Incoming call**: the SIP provider sends an INVITE to Asterisk. Asterisk
    answers and starts an AudioSocket connection to `voicebot:9019`.
 4. **Call session creation**: voicebot creates a call session, emits
@@ -144,10 +145,11 @@ are retained so the same caller turn is not handled repeatedly.
 ## Docker SIP Runtime
 
 Create a local environment file or export variables in your shell. Do not commit
-real SIP credentials.
+real SIP credentials. SIP trunks are managed dynamically through the API; the
+optional `SIP_*` variables are only a local-development seed for the first
+default trunk.
 
 ```bash
-export SIP_PASSWORD='your-password-here'
 export VOICEBOT_WHISPER_MODEL=base
 export VOICEBOT_LANGUAGE=en
 ```
@@ -160,10 +162,12 @@ docker compose up -d --build
 
 Services:
 
-- `asterisk`: registers to the SIP trunk and answers incoming calls.
+- `asterisk`: registers to configured SIP trunks and answers incoming calls.
 - `voicebot`: receives Asterisk AudioSocket media, runs STT/TTS, stores events,
-  and exposes the agent API on `http://127.0.0.1:8080`.
+  manages dynamic SIP trunk config, and exposes the API on
+  `http://127.0.0.1:8080`.
 - `openai-agent`: optional online AI agent using the OpenAI Responses API.
+- `anthropic-agent`: optional online AI agent using the Anthropic Messages API.
 
 Useful checks:
 
@@ -172,6 +176,51 @@ docker compose ps
 docker compose logs -f asterisk
 curl http://127.0.0.1:8080/health
 ```
+
+## Dynamic SIP Trunks
+
+The runtime is designed to handle many SIP trunks in one cloud deployment.
+Trunks are no longer hardcoded in Compose. The voicebot API stores trunk
+definitions in `/data/sip_trunks.json`, writes the Asterisk include file at
+`/data/asterisk/pjsip-trunks.conf`, reloads PJSIP through AMI, and asks Asterisk
+to register or unregister the selected trunk.
+
+Create or update a trunk:
+
+```bash
+curl -X POST http://127.0.0.1:8080/sip-trunks \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "trunk_id": "customer-1",
+    "display_name": "Customer 1",
+    "host": "sip.example.com",
+    "user": "customer_user",
+    "password": "customer_password",
+    "enabled": true
+  }'
+```
+
+List configured trunks and current Asterisk registrations:
+
+```bash
+curl http://127.0.0.1:8080/sip-trunks
+```
+
+Connect or disconnect an existing trunk:
+
+```bash
+curl -X POST http://127.0.0.1:8080/sip-trunks/customer-1/connect
+curl -X POST http://127.0.0.1:8080/sip-trunks/customer-1/disconnect
+```
+
+Remove a trunk:
+
+```bash
+curl -X DELETE http://127.0.0.1:8080/sip-trunks/customer-1
+```
+
+API responses redact passwords. The generated Asterisk include contains the
+actual SIP passwords and must live only on private runtime storage.
 
 ## Agent API
 
@@ -199,7 +248,8 @@ websocat ws://127.0.0.1:8080/ws/events
 ```
 
 See [AGENTS.md](AGENTS.md) for the full event API, transcripts, context
-compaction, local command agent, and call-control endpoints.
+compaction, local command agent, and call-control endpoints. See
+[docs/API.md](docs/API.md) for the complete HTTP and WebSocket API reference.
 
 ## Call Control
 
@@ -284,6 +334,36 @@ The provider registry also recognizes the broader provider names used by modern
 voice-agent stacks. If a provider needs a protocol-specific native adapter, the
 runtime fails fast with the exact variables to set for an OpenAI-compatible
 gateway until that native adapter is added.
+
+## Anthropic Agent
+
+The runtime also includes an Anthropic agent worker. It uses the same voicebot
+task API and agent tools as `openai-agent`, but calls the Anthropic Messages API
+through the `anthropic` SDK.
+
+Configure it in `.env`:
+
+```bash
+ANTHROPIC_API_KEY='your-anthropic-api-key-here'
+VOICEBOT_ANTHROPIC_AGENT_MODEL=claude-sonnet-4-20250514
+```
+
+Start the voicebot stack with the Anthropic worker profile:
+
+```bash
+docker compose --profile anthropic up -d --build voicebot asterisk anthropic-agent
+```
+
+Or run it locally:
+
+```bash
+python agents/anthropic_agent.py \
+  --base-url http://127.0.0.1:8080 \
+  --model claude-sonnet-4-20250514
+```
+
+The worker supports native tool calls from Anthropic and the fallback JSON tool
+format used by the local command agent.
 
 ## Pipeline Configuration
 

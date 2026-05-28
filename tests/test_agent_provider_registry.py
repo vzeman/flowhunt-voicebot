@@ -40,6 +40,25 @@ class FakeClient:
         self.chat = SimpleNamespace(completions=FakeChatCompletions())
 
 
+class FakeAnthropicMessages:
+    def __init__(self) -> None:
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        return SimpleNamespace(
+            content=[
+                SimpleNamespace(type="text", text=" anthropic answer "),
+                SimpleNamespace(type="tool_use", name="transfer_call", input={"call_id": "call-1", "target": "123"}),
+            ],
+        )
+
+
+class FakeAnthropicClient:
+    def __init__(self) -> None:
+        self.messages = FakeAnthropicMessages()
+
+
 class AgentProviderRegistryTests(unittest.TestCase):
     def test_registry_runs_custom_provider(self) -> None:
         registry = AgentProviderRegistry()
@@ -79,11 +98,42 @@ class AgentProviderRegistryTests(unittest.TestCase):
         self.assertEqual(tool_calls, [])
         self.assertEqual(client.chat.completions.kwargs["messages"], [{"role": "user", "content": "prompt"}])
 
+    def test_default_registry_runs_anthropic_provider_with_tools(self) -> None:
+        registry = default_agent_provider_registry()
+        client = FakeAnthropicClient()
+
+        answer, tool_calls = registry.run(
+            client,
+            "anthropic",
+            "claude-test",
+            "prompt",
+            2.0,
+            100,
+            [
+                {
+                    "type": "function",
+                    "name": "transfer_call",
+                    "description": "Transfer call.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"call_id": {"type": "string"}, "target": {"type": "string"}},
+                        "required": ["call_id", "target"],
+                    },
+                }
+            ],
+        )
+
+        self.assertEqual(answer, "anthropic answer")
+        self.assertEqual(tool_calls, [{"name": "transfer_call", "arguments": {"call_id": "call-1", "target": "123"}}])
+        self.assertEqual(client.messages.kwargs["model"], "claude-test")
+        self.assertEqual(client.messages.kwargs["tools"][0]["name"], "transfer_call")
+        self.assertEqual(client.messages.kwargs["tools"][0]["input_schema"]["required"], ["call_id", "target"])
+
     def test_registry_reports_known_but_unimplemented_agent_provider(self) -> None:
         registry = AgentProviderRegistry()
 
-        with self.assertRaisesRegex(RuntimeError, "Unsupported agent provider adapter for 'anthropic'"):
-            registry.run(object(), "anthropic", "model", "prompt", 1.0, 100)
+        with self.assertRaisesRegex(RuntimeError, "Unsupported agent provider adapter for 'gemini'"):
+            registry.run(object(), "gemini", "model", "prompt", 1.0, 100)
 
 
 if __name__ == "__main__":

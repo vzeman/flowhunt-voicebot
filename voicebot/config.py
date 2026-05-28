@@ -75,6 +75,11 @@ class Settings:
     max_context_events: int = env_int("VOICEBOT_MAX_CONTEXT_EVENTS", 80)
     agent_task_responded_event_retention: int = env_int("VOICEBOT_AGENT_TASK_RESPONDED_EVENT_RETENTION", 10000)
     transcript_dir: str = os.getenv("VOICEBOT_TRANSCRIPT_DIR", "/data/transcripts")
+    sip_trunk_registry_path: str = os.getenv("VOICEBOT_SIP_TRUNK_REGISTRY_PATH", "/data/sip_trunks.json")
+    sip_trunk_pjsip_include_path: str = os.getenv(
+        "VOICEBOT_SIP_TRUNK_PJSIP_INCLUDE_PATH",
+        "/data/asterisk/pjsip-trunks.conf",
+    )
     greet_on_connect: bool = env_bool("VOICEBOT_GREET_ON_CONNECT", True)
     connect_greeting_prompt: str = os.getenv(
         "VOICEBOT_CONNECT_GREETING_PROMPT",

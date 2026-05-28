@@ -15,8 +15,9 @@ from .api_models import (
     CallControlRequest,
     CompactContextRequest,
     PlaybackInterruptRequest,
+    SipTrunkRequest,
 )
-from .asterisk_control import AsteriskAMI
+from .asterisk_control import AsteriskAMI, ControlResult
 from .calls import AgentResponse, CallRegistry
 from .config import Settings, redacted_settings
 from .event_catalog import event_catalog
@@ -24,6 +25,7 @@ from .events import EventStore, VoicebotEvent, event_to_dict
 from .health import readiness_report
 from .metrics import summarize_metrics
 from .provider_catalog import provider_catalog
+from .sip_trunks import SipTrunk, SipTrunkStore
 from .tool_executor import AgentToolExecutor
 from .transcripts import TranscriptStore
 from .tools import tool_definitions_json_schema, tool_definitions_legacy
@@ -71,6 +73,7 @@ def create_app(
     transcripts: TranscriptStore,
     asterisk: AsteriskAMI | None,
     settings: Settings | None = None,
+    sip_trunks: SipTrunkStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Flowhunt Voicebot", version="0.1.0")
     tool_executor = AgentToolExecutor()
@@ -106,6 +109,99 @@ def create_app(
     @app.get("/config")
     def config() -> dict[str, Any]:
         return {"settings": redacted_settings(runtime_settings)}
+
+    @app.get("/sip-trunks")
+    def list_sip_trunks() -> dict[str, Any]:
+        if sip_trunks is None:
+            raise HTTPException(status_code=503, detail="SIP trunk registry is not configured")
+        return {
+            "trunks": [trunk.redacted_dict() for trunk in sip_trunks.list()],
+            "registrations": control_result_dict(safe_asterisk_action(lambda: asterisk.show_registrations())),
+        }
+
+    @app.post("/sip-trunks")
+    def upsert_sip_trunk(request: SipTrunkRequest) -> dict[str, Any]:
+        if sip_trunks is None:
+            raise HTTPException(status_code=503, detail="SIP trunk registry is not configured")
+        try:
+            trunk = SipTrunk(
+                trunk_id=request.trunk_id,
+                host=request.host,
+                user=request.user,
+                password=request.password,
+                display_name=request.display_name,
+                enabled=request.enabled,
+                codecs=tuple(request.codecs),
+                expiration=request.expiration,
+                retry_interval=request.retry_interval,
+                forbidden_retry_interval=request.forbidden_retry_interval,
+            )
+            saved = sip_trunks.upsert(trunk)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        result = reload_asterisk_pjsip()
+        register_result = register_trunk(saved) if saved.enabled else None
+        return {
+            "trunk": saved.redacted_dict(),
+            "reload": control_result_dict(result),
+            "register": control_result_dict(register_result),
+        }
+
+    @app.post("/sip-trunks/{trunk_id}/connect")
+    def connect_sip_trunk(trunk_id: str) -> dict[str, Any]:
+        if sip_trunks is None:
+            raise HTTPException(status_code=503, detail="SIP trunk registry is not configured")
+        try:
+            trunk = sip_trunks.set_enabled(trunk_id, True)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        if trunk is None:
+            raise HTTPException(status_code=404, detail=f"SIP trunk not found: {trunk_id}")
+        reload_result = reload_asterisk_pjsip()
+        register_result = register_trunk(trunk)
+        return {
+            "trunk": trunk.redacted_dict(),
+            "reload": control_result_dict(reload_result),
+            "register": control_result_dict(register_result),
+        }
+
+    @app.post("/sip-trunks/{trunk_id}/disconnect")
+    def disconnect_sip_trunk(trunk_id: str) -> dict[str, Any]:
+        if sip_trunks is None:
+            raise HTTPException(status_code=503, detail="SIP trunk registry is not configured")
+        try:
+            existing = sip_trunks.get(trunk_id)
+            if existing is None:
+                raise HTTPException(status_code=404, detail=f"SIP trunk not found: {trunk_id}")
+            unregister_result = unregister_trunk(existing) if existing.enabled else None
+            trunk = sip_trunks.set_enabled(trunk_id, False)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        reload_result = reload_asterisk_pjsip()
+        return {
+            "trunk": trunk.redacted_dict() if trunk is not None else None,
+            "unregister": control_result_dict(unregister_result),
+            "reload": control_result_dict(reload_result),
+        }
+
+    @app.delete("/sip-trunks/{trunk_id}")
+    def delete_sip_trunk(trunk_id: str) -> dict[str, Any]:
+        if sip_trunks is None:
+            raise HTTPException(status_code=503, detail="SIP trunk registry is not configured")
+        try:
+            existing = sip_trunks.get(trunk_id)
+            if existing is None:
+                raise HTTPException(status_code=404, detail=f"SIP trunk not found: {trunk_id}")
+            unregister_result = unregister_trunk(existing) if existing.enabled else None
+            removed = sip_trunks.delete(trunk_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        reload_result = reload_asterisk_pjsip()
+        return {
+            "trunk": removed.redacted_dict() if removed is not None else None,
+            "unregister": control_result_dict(unregister_result),
+            "reload": control_result_dict(reload_result),
+        }
 
     @app.get("/events")
     def list_events(after: int = 0, call_id: str | None = None, limit: int = 200) -> dict[str, Any]:
@@ -400,6 +496,28 @@ def create_app(
         tracker.mark_responded(request.response_to_event_id)
         await hub.broadcast(event)
         return {"event": event_to_dict(event)}
+
+    def reload_asterisk_pjsip():
+        return safe_asterisk_action(lambda: asterisk.reload_pjsip())
+
+    def register_trunk(trunk: SipTrunk):
+        return safe_asterisk_action(lambda: asterisk.send_register(trunk.registration_name))
+
+    def unregister_trunk(trunk: SipTrunk):
+        return safe_asterisk_action(lambda: asterisk.send_unregister(trunk.registration_name))
+
+    def safe_asterisk_action(action):
+        if asterisk is None:
+            return None
+        try:
+            return action()
+        except OSError as exc:
+            return ControlResult(False, f"Asterisk AMI request failed: {exc}")
+
+    def control_result_dict(result) -> dict[str, Any] | None:
+        if result is None:
+            return None
+        return {"ok": result.ok, "message": result.message}
 
     @app.websocket("/ws/events")
     async def websocket_events(websocket: WebSocket) -> None:

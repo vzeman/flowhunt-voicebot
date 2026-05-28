@@ -70,17 +70,25 @@ Python AudioSocket bridge.
 ## Dockerized Asterisk
 
 The repository includes `docker-compose.yml` for running Asterisk locally in
-Docker. Start the Python bridge first:
+Docker. The current Docker stack manages SIP trunks dynamically through the
+voicebot API. Asterisk includes `/data/asterisk/pjsip-trunks.conf`, which is
+generated from `/data/sip_trunks.json` by the voicebot service.
+
+Start the Python bridge first when using only the low-level demo:
 
 ```bash
 source .venv/bin/activate
 python sip_audiosocket_bridge.py --host 0.0.0.0 --port 9019 --whisper-model base
 ```
 
-Then start Asterisk with the SIP password supplied only through the environment:
+Then start Asterisk. Supplying `SIP_HOST`, `SIP_USER`, and `SIP_PASSWORD` is
+only a local-development seed when no dynamic trunk file exists:
 
 ```bash
-SIP_PASSWORD='your-password-here' docker compose up -d asterisk
+SIP_HOST='sip.example.com' \
+SIP_USER='customer_user' \
+SIP_PASSWORD='your-password-here' \
+docker compose up -d asterisk
 ```
 
 Check registration:
@@ -92,7 +100,20 @@ docker exec supertronic-asterisk asterisk -rx 'pjsip show registrations'
 The full Docker stack runs both Asterisk and the voicebot service:
 
 ```bash
-SIP_PASSWORD='your-password-here' docker compose up -d --build
+docker compose up -d --build
+```
+
+Add a trunk through the API:
+
+```bash
+curl -X POST http://127.0.0.1:8080/sip-trunks \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "trunk_id": "customer-1",
+    "host": "sip.example.com",
+    "user": "customer_user",
+    "password": "your-password-here"
+  }'
 ```
 
 The agent API is exposed on `http://127.0.0.1:8080`.

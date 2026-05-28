@@ -47,6 +47,22 @@ class AsteriskAMI:
         response = self.action({"Action": "PlayDTMF", "Channel": channel, "Digit": digit})
         return ControlResult("Response: Success" in response, response)
 
+    def command(self, command: str) -> ControlResult:
+        response = self.action({"Action": "Command", "Command": command})
+        return ControlResult("Response: Success" in response, response)
+
+    def reload_pjsip(self) -> ControlResult:
+        return self.command("pjsip reload")
+
+    def send_register(self, registration: str) -> ControlResult:
+        return self.command(f"pjsip send register {registration}")
+
+    def send_unregister(self, registration: str) -> ControlResult:
+        return self.command(f"pjsip send unregister {registration}")
+
+    def show_registrations(self) -> ControlResult:
+        return self.command("pjsip show registrations")
+
     def find_channel(self, call_id: str) -> str | None:
         response = self.action({"Action": "Command", "Command": "core show channels concise"})
         for line in response.splitlines():

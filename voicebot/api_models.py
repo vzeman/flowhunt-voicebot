@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AgentResponseRequest(BaseModel):
@@ -20,6 +20,19 @@ class CallControlRequest(BaseModel):
     target: str | None = None
     digit: str | None = None
     response_to_event_id: int | None = None
+
+
+class SipTrunkRequest(BaseModel):
+    trunk_id: str
+    host: str
+    user: str
+    password: str
+    display_name: str = ""
+    enabled: bool = True
+    codecs: list[str] = Field(default_factory=lambda: ["ulaw", "alaw", "slin"])
+    expiration: int = 300
+    retry_interval: int = 30
+    forbidden_retry_interval: int = 300
 
 
 class PlaybackInterruptRequest(BaseModel):

@@ -1,12 +1,12 @@
 #!/bin/sh
 set -eu
 
-: "${SIP_HOST:?missing SIP_HOST}"
-: "${SIP_USER:?missing SIP_USER}"
-: "${SIP_PASSWORD:?missing SIP_PASSWORD}"
 : "${AUDIOSOCKET_SERVICE:?missing AUDIOSOCKET_SERVICE}"
 : "${AMI_USERNAME:=voicebot}"
 : "${AMI_PASSWORD:=voicebot-local-dev}"
+: "${PJSIP_DYNAMIC_INCLUDE:=/data/asterisk/pjsip-trunks.conf}"
+
+mkdir -p "$(dirname "$PJSIP_DYNAMIC_INCLUDE")"
 
 cat >/etc/asterisk/pjsip.conf <<EOF
 [transport-udp]
@@ -14,37 +14,44 @@ type=transport
 protocol=udp
 bind=0.0.0.0:5060
 
-[liveagent-reg]
+#include ${PJSIP_DYNAMIC_INCLUDE}
+EOF
+
+if [ ! -s "$PJSIP_DYNAMIC_INCLUDE" ]; then
+  if [ -n "${SIP_HOST:-}" ] && [ -n "${SIP_USER:-}" ] && [ -n "${SIP_PASSWORD:-}" ]; then
+    cat >"$PJSIP_DYNAMIC_INCLUDE" <<EOF
+; Seeded from SIP_HOST/SIP_USER/SIP_PASSWORD for local development.
+[trunk-default-reg]
 type=registration
 transport=transport-udp
-outbound_auth=liveagent-auth
+outbound_auth=trunk-default-auth
 server_uri=sip:${SIP_HOST}
 client_uri=sip:${SIP_USER}@${SIP_HOST}
 contact_user=${SIP_USER}
-endpoint=liveagent-endpoint
+endpoint=trunk-default-endpoint
 line=yes
 retry_interval=30
 forbidden_retry_interval=300
 expiration=300
 
-[liveagent-auth]
+[trunk-default-auth]
 type=auth
 auth_type=userpass
 username=${SIP_USER}
 password=${SIP_PASSWORD}
 
-[liveagent-aor]
+[trunk-default-aor]
 type=aor
 contact=sip:${SIP_HOST}
 
-[liveagent-endpoint]
+[trunk-default-endpoint]
 type=endpoint
 transport=transport-udp
 context=from-liveagent
 disallow=all
 allow=ulaw,alaw,slin
-outbound_auth=liveagent-auth
-aors=liveagent-aor
+outbound_auth=trunk-default-auth
+aors=trunk-default-aor
 from_user=${SIP_USER}
 from_domain=${SIP_HOST}
 direct_media=no
@@ -53,11 +60,15 @@ force_rport=yes
 rewrite_contact=yes
 timers=no
 
-[liveagent-identify]
+[trunk-default-identify]
 type=identify
-endpoint=liveagent-endpoint
+endpoint=trunk-default-endpoint
 match=${SIP_HOST}
 EOF
+  else
+    printf '; Dynamic SIP trunks are managed by the voicebot API.\n' >"$PJSIP_DYNAMIC_INCLUDE"
+  fi
+fi
 
 cat >/etc/asterisk/manager.conf <<EOF
 [general]

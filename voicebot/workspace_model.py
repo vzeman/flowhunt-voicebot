@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 
@@ -64,6 +65,93 @@ class ChannelResolver:
         return sorted(
             [binding for binding in self._bindings.values() if binding.workspace_id == workspace_id],
             key=lambda item: item.channel_id,
+        )
+
+
+@dataclass(frozen=True)
+class VoicebotSessionRecord:
+    session_id: str
+    workspace_id: str
+    voicebot_id: str
+    channel_id: str | None = None
+    external_session_id: str | None = None
+    status: Literal["active", "ended"] = "active"
+    started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    ended_at: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.session_id:
+            raise ValueError("session_id is required")
+        WorkspaceScope(self.workspace_id, self.voicebot_id, self.session_id)
+
+    def scope(self) -> WorkspaceScope:
+        return WorkspaceScope(self.workspace_id, self.voicebot_id, self.session_id)
+
+    def end(self, ended_at: str | None = None) -> "VoicebotSessionRecord":
+        return VoicebotSessionRecord(
+            session_id=self.session_id,
+            workspace_id=self.workspace_id,
+            voicebot_id=self.voicebot_id,
+            channel_id=self.channel_id,
+            external_session_id=self.external_session_id,
+            status="ended",
+            started_at=self.started_at,
+            ended_at=ended_at or datetime.now(UTC).isoformat(),
+            metadata=self.metadata,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "workspace_id": self.workspace_id,
+            "voicebot_id": self.voicebot_id,
+            "channel_id": self.channel_id,
+            "external_session_id": self.external_session_id,
+            "status": self.status,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "metadata": self.metadata,
+        }
+
+
+class VoicebotSessionStore:
+    def __init__(self) -> None:
+        self._sessions: dict[str, VoicebotSessionRecord] = {}
+
+    def save(self, session: VoicebotSessionRecord) -> VoicebotSessionRecord:
+        existing = self._sessions.get(session.session_id)
+        if existing is not None and existing.workspace_id != session.workspace_id:
+            raise ValueError("cannot move voicebot session across workspaces")
+        self._sessions[session.session_id] = session
+        return session
+
+    def get(self, session_id: str, workspace_id: str | None = None) -> VoicebotSessionRecord | None:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return None
+        if workspace_id is not None and session.workspace_id != workspace_id:
+            return None
+        return session
+
+    def end(self, session_id: str, workspace_id: str) -> VoicebotSessionRecord:
+        session = self.get(session_id, workspace_id)
+        if session is None:
+            raise KeyError(f"unknown session in workspace {workspace_id}: {session_id}")
+        return self.save(session.end())
+
+    def list(
+        self,
+        workspace_id: str | None = None,
+        voicebot_id: str | None = None,
+        active_only: bool = False,
+    ) -> tuple[VoicebotSessionRecord, ...]:
+        return tuple(
+            session
+            for session in sorted(self._sessions.values(), key=lambda item: item.session_id)
+            if (workspace_id is None or session.workspace_id == workspace_id)
+            and (voicebot_id is None or session.voicebot_id == voicebot_id)
+            and (not active_only or session.status == "active")
         )
 
 

@@ -5,6 +5,8 @@ import unittest
 from voicebot.workspace_model import (
     ChannelResolver,
     VoicebotChannelBinding,
+    VoicebotSessionRecord,
+    VoicebotSessionStore,
     WorkspaceScope,
     require_same_workspace,
 )
@@ -66,6 +68,32 @@ class WorkspaceModelTests(unittest.TestCase):
     def test_cross_workspace_operation_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "cross-workspace"):
             require_same_workspace(WorkspaceScope("workspace-1", "voicebot-1"), "workspace-2")
+
+    def test_session_record_carries_workspace_voicebot_and_session_scope(self) -> None:
+        session = VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1", channel_id="channel-1")
+
+        self.assertEqual(session.scope(), WorkspaceScope("workspace-1", "voicebot-1", "session-1"))
+        self.assertEqual(session.as_dict()["channel_id"], "channel-1")
+
+    def test_session_store_lists_active_sessions_by_workspace_and_voicebot(self) -> None:
+        store = VoicebotSessionStore()
+        first = store.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1"))
+        store.save(VoicebotSessionRecord("session-2", "workspace-1", "voicebot-2"))
+        store.save(VoicebotSessionRecord("session-3", "workspace-2", "voicebot-1"))
+        ended = store.end("session-1", "workspace-1")
+
+        self.assertEqual(ended.status, "ended")
+        self.assertEqual(store.get("session-1", "workspace-2"), None)
+        self.assertEqual([session.session_id for session in store.list("workspace-1")], ["session-1", "session-2"])
+        self.assertEqual(store.list("workspace-1", "voicebot-1", active_only=True), ())
+        self.assertEqual(first.scope().task_dedupe_key(7), "session-1:7")
+
+    def test_session_store_rejects_cross_workspace_move(self) -> None:
+        store = VoicebotSessionStore()
+        store.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1"))
+
+        with self.assertRaisesRegex(ValueError, "across workspaces"):
+            store.save(VoicebotSessionRecord("session-1", "workspace-2", "voicebot-1"))
 
 
 if __name__ == "__main__":

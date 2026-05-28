@@ -58,3 +58,18 @@ Current runtime adapters:
 Future adapters should add a descriptor before adding factory code, so pipeline
 selection can reason about streaming, latency, credentials, output formats, and
 tool support consistently.
+
+## Runtime Telemetry
+
+`voicebot.provider_runtime` defines standard provider call context and telemetry
+helpers:
+
+- `ProviderCallContext`
+- `ProviderFailure`
+- `record_provider_latency()`
+- `record_provider_failure()`
+
+Provider adapters should use these helpers when they are integrated into the
+runtime event path. Latency is emitted as metrics with provider/model/kind
+metadata. Failures are emitted as `provider_call_failed` events with typed error
+codes, retryability, trace ids, and workspace/session scope.

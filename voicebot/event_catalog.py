@@ -50,6 +50,7 @@ EVENT_CATALOG: tuple[EventCatalogEntry, ...] = (
     EventCatalogEntry("flowhunt_flow_invoked", "agent_team", "Voice agent invoked a FlowHunt Flow for a complex request."),
     EventCatalogEntry("flowhunt_flow_updated", "agent_team", "FlowHunt Flow invocation returned an interim update."),
     EventCatalogEntry("flowhunt_flow_completed", "agent_team", "FlowHunt Flow invocation returned a result."),
+    EventCatalogEntry("provider_call_failed", "providers", "Provider adapter call failed with typed error metadata."),
     EventCatalogEntry("subagent_task_completed", "agent_team", "Delegated subagent task completed successfully."),
     EventCatalogEntry("subagent_task_failed", "agent_team", "Delegated subagent task failed."),
     EventCatalogEntry("subagent_task_timed_out", "agent_team", "Delegated subagent task exceeded its timeout."),

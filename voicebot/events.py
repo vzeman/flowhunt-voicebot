@@ -119,9 +119,9 @@ class EventStore:
         ids: ExecutionIds | None = None,
     ) -> VoicebotEvent:
         payload = {
+            **(data or {}),
             **scope.to_data(),
             **((ids or ExecutionIds()).to_data()),
-            **(data or {}),
         }
         return self.append(scope.call_id or scope.session_id, event_type, payload)
 

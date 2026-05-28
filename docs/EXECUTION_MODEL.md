@@ -22,7 +22,8 @@ Definitions:
 New runtime code should prefer `EventStore.append_scoped()`. It combines
 `ExecutionScope`, `ExecutionIds`, and event-specific payload data so events
 consistently carry workspace, voicebot, session, trace, turn, request, response,
-and external task identifiers.
+and external task identifiers. Canonical execution scope and correlation IDs
+take precedence over event-specific payload keys with the same names.
 
 Use `ExecutionScope.same_session()` when deciding whether a response,
 cancellation, or playback/control frame belongs to the same conversation. The

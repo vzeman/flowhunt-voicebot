@@ -83,6 +83,28 @@ class ExecutionModelTests(unittest.TestCase):
         self.assertEqual(event.data["trace_id"], "trace-1")
         self.assertEqual(event.data["text"], "hello")
 
+    def test_event_store_append_scoped_preserves_canonical_scope_and_ids(self) -> None:
+        events = EventStore(max_context_events=20)
+
+        event = events.append_scoped(
+            ExecutionScope("workspace-1", "voicebot-1", "session-1", "call-1"),
+            "user_transcript",
+            {
+                "workspace_id": "payload-workspace",
+                "voicebot_id": "payload-voicebot",
+                "session_id": "payload-session",
+                "trace_id": "payload-trace",
+                "text": "hello",
+            },
+            ExecutionIds(trace_id="trace-1"),
+        )
+
+        self.assertEqual(event.data["workspace_id"], "workspace-1")
+        self.assertEqual(event.data["voicebot_id"], "voicebot-1")
+        self.assertEqual(event.data["session_id"], "session-1")
+        self.assertEqual(event.data["trace_id"], "trace-1")
+        self.assertEqual(event.data["text"], "hello")
+
     def test_ids_from_frame_extracts_turn_request_and_external_task_ids(self) -> None:
         frame = TranscriptionFrame(
             "user_transcript",

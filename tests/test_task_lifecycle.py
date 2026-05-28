@@ -189,6 +189,21 @@ class TaskLifecycleTests(unittest.TestCase):
         self.assertIn("does not support cancellation", cancelled[0].progress_messages[-1])
         self.assertEqual(events, ["subagent_task_cancelled"])
 
+    def test_polling_policy_rejects_invalid_values(self) -> None:
+        invalid_policies = [
+            {"initial_interval_seconds": 0},
+            {"max_interval_seconds": 0},
+            {"initial_interval_seconds": 5, "max_interval_seconds": 3},
+            {"backoff_multiplier": 0.5},
+            {"timeout_seconds": 0},
+            {"max_attempts": 0},
+        ]
+
+        for kwargs in invalid_policies:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    PollingPolicy(**kwargs)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,6 +28,20 @@ class PollingPolicy:
     timeout_seconds: float = 600.0
     max_attempts: int = 100
 
+    def __post_init__(self) -> None:
+        if self.initial_interval_seconds <= 0:
+            raise ValueError("initial_interval_seconds must be greater than 0")
+        if self.max_interval_seconds <= 0:
+            raise ValueError("max_interval_seconds must be greater than 0")
+        if self.max_interval_seconds < self.initial_interval_seconds:
+            raise ValueError("max_interval_seconds must be greater than or equal to initial_interval_seconds")
+        if self.backoff_multiplier < 1:
+            raise ValueError("backoff_multiplier must be greater than or equal to 1")
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be greater than 0")
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be greater than or equal to 1")
+
     def next_interval(self, attempts: int) -> float:
         exponent = max(0, attempts - 1)
         interval = self.initial_interval_seconds * (self.backoff_multiplier**exponent)
@@ -52,8 +66,8 @@ class SubagentTaskLifecycleRunner:
         if task.is_terminal():
             return self._mark_terminal(task)
         current = now or _now()
-        deadline_at = task.deadline_at or _iso(current + timedelta(seconds=max(0.0, self.policy.timeout_seconds)))
-        next_poll_at = task.next_poll_at or _iso(current + timedelta(seconds=max(0.0, self.policy.initial_interval_seconds)))
+        deadline_at = task.deadline_at or _iso(current + timedelta(seconds=self.policy.timeout_seconds))
+        next_poll_at = task.next_poll_at or _iso(current + timedelta(seconds=self.policy.initial_interval_seconds))
         return self.coordinator.store.update(
             task.with_poll_schedule(next_poll_at=next_poll_at, deadline_at=deadline_at)
         )

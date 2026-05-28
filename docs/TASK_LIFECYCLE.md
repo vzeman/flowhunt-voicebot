@@ -50,6 +50,12 @@ FlowHunt database, but the protocol is now explicit and restart-safe.
 - timeout
 - cancellation per session
 
+Polling policy configuration is validated when the runner is created. Intervals
+and timeout must be positive, max interval cannot be lower than the initial
+interval, backoff must not shrink retry intervals, and max attempts must allow at
+least one poll. Invalid settings should fail startup instead of creating a tight
+poll loop or a task that never reaches the provider.
+
 Polling uses the registered subagent provider only. For FlowHunt flows, that
 means the official invoke task protocol: submit once, store the task id, then
 poll by `flow_id + task_id`.

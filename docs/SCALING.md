@@ -27,6 +27,10 @@ as draining, remove a worker, expire stale heartbeats, and summarize active
 worker capacity by role. The first implementation is in-memory; production
 should back it with Redis or FlowHunt shared state.
 
+A worker id is bound to its role and queue. Heartbeats may update status,
+capacity, workspace affinity, and heartbeat time, but they cannot silently move
+the same worker id to another role or queue.
+
 ## Routing
 
 Every unit of work should carry:

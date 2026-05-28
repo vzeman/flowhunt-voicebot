@@ -112,6 +112,11 @@ class WorkerRegistry:
 
     def heartbeat(self, worker: WorkerInstance, now: datetime | None = None) -> WorkerInstance:
         current = now or datetime.now(UTC)
+        existing = self._workers.get(worker.worker_id)
+        if existing is not None and existing.role != worker.role:
+            raise ValueError("cannot move worker instance across roles")
+        if existing is not None and existing.queue != worker.queue:
+            raise ValueError("cannot move worker instance across queues")
         updated = WorkerInstance(
             worker_id=worker.worker_id,
             role=worker.role,

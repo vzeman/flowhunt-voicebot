@@ -104,6 +104,16 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual([worker.worker_id for worker in expired], ["agent-1"])
         self.assertEqual(registry.snapshot(now + timedelta(seconds=12))["workers"], [])
 
+    def test_worker_registry_rejects_role_or_queue_moves(self) -> None:
+        registry = WorkerRegistry(heartbeat_ttl_seconds=30)
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        registry.heartbeat(WorkerInstance("worker-1", "agent_worker", "voicebot.agent"), now)
+
+        with self.assertRaisesRegex(ValueError, "roles"):
+            registry.heartbeat(WorkerInstance("worker-1", "stt_worker", "voicebot.stt"), now)
+        with self.assertRaisesRegex(ValueError, "queues"):
+            registry.heartbeat(WorkerInstance("worker-1", "agent_worker", "voicebot.other"), now)
+
     def test_worker_registry_reports_active_capacity_by_role(self) -> None:
         registry = WorkerRegistry(heartbeat_ttl_seconds=30)
         now = datetime(2026, 5, 28, tzinfo=UTC)

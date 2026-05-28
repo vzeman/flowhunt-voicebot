@@ -54,6 +54,8 @@ descriptors, then move transport-specific call-control execution behind the same
 result contract.
 
 WebRTC sessions now build a `MediaSessionDescriptor` at session creation and use
-it for lifecycle event payloads and session snapshots. SIP/Asterisk should be
-integrated the same way after channel routing is moved behind workspace-scoped
-bindings.
+it for lifecycle event payloads and session snapshots. SIP/Asterisk AudioSocket
+sessions also build descriptors when the AudioSocket UUID is received and use
+descriptor data for lifecycle events and snapshots. Workspace/voicebot routing
+for SIP still depends on moving trunk bindings behind workspace-scoped channel
+resolution.

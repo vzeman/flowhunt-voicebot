@@ -82,6 +82,39 @@ class DurableEventTests(unittest.TestCase):
 
     def test_event_from_dict_rejects_invalid_payloads(self) -> None:
         self.assertIsNone(event_from_dict({"id": "bad"}))
+        self.assertIsNone(
+            event_from_dict(
+                {
+                    "id": 0,
+                    "call_id": "call-1",
+                    "type": "call_started",
+                    "timestamp": "2026-05-28T00:00:00+00:00",
+                    "data": {},
+                }
+            )
+        )
+        self.assertIsNone(
+            event_from_dict(
+                {
+                    "id": 1,
+                    "call_id": " ",
+                    "type": "call_started",
+                    "timestamp": "2026-05-28T00:00:00+00:00",
+                    "data": {},
+                }
+            )
+        )
+        self.assertIsNone(
+            event_from_dict(
+                {
+                    "id": 1,
+                    "call_id": "call-1",
+                    "type": "",
+                    "timestamp": "2026-05-28T00:00:00+00:00",
+                    "data": {},
+                }
+            )
+        )
         self.assertIsNotNone(
             event_from_dict(
                 {

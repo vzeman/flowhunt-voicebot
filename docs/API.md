@@ -1223,6 +1223,18 @@ Request:
 }
 ```
 
+## API Surface
+
+### GET `/api/surface`
+
+Returns the FlowHunt API surface catalog grouped by area, plus a boolean showing
+whether all public endpoints are workspace-scoped.
+
+### GET `/api/surface/prototypes`
+
+Returns prototype-only endpoints that should not be exposed as public product
+APIs.
+
 ## WebSocket
 
 ### WS `/ws/events`

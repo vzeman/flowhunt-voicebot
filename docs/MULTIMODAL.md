@@ -45,7 +45,8 @@ context for a call.
 `POST /calls/{call_id}/multimodal/parts` attaches one normalized part and emits
 `multimodal_content_added`. The endpoint stores references such as URI, MIME
 type, text, and metadata only; it does not fetch URLs or inspect external
-content.
+content. It validates the normalized content shape before storing a part,
+including the requirement that each part include `text`, `uri`, or metadata.
 
 ## Future Work
 

@@ -127,6 +127,17 @@ class MultimodalTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_multimodal_api_rejects_empty_content_part(self) -> None:
+        client = self.build_client(EventStore(max_context_events=20))
+
+        response = client.post(
+            "/calls/call-1/multimodal/parts",
+            json={"modality": "text", "direction": "input"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"][0]["field"], "content")
+
     def build_client(self, events: EventStore) -> TestClient:
         app = create_app(
             events,

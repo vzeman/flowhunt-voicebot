@@ -46,7 +46,14 @@ from .flowhunt import (
 )
 from .health import readiness_report
 from .metrics import summarize_metrics
-from .multimodal import ContentDirection, Modality, MultimodalContent, MultimodalContextStore
+from .multimodal import (
+    ContentDirection,
+    Modality,
+    ModalityCapabilities,
+    MultimodalContent,
+    MultimodalContextStore,
+    validate_multimodal_content,
+)
 from .observability import ConversationExpectation, build_timeline, evaluate_conversation
 from .provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities, provider_catalog
 from .provider_config import (
@@ -72,6 +79,10 @@ from .webrtc import WebRTCSessionManager
 
 _MODALITIES = set(get_args(Modality))
 _CONTENT_DIRECTIONS = set(get_args(ContentDirection))
+_API_MULTIMODAL_CAPABILITIES = ModalityCapabilities(
+    input=frozenset(_MODALITIES),
+    output=frozenset(_MODALITIES),
+)
 
 
 class WebSocketHub:
@@ -219,6 +230,9 @@ def create_app(
             text=request.text,
             metadata=request.metadata,
         )
+        validation_issues = validate_multimodal_content(part, _API_MULTIMODAL_CAPABILITIES)
+        if validation_issues:
+            raise HTTPException(status_code=400, detail=[issue.to_dict() for issue in validation_issues])
         context = multimodal_store.add_part(
             call_id,
             part,

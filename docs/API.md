@@ -1150,6 +1150,8 @@ The exact metrics depend on emitted `metrics` events.
 ### GET `/observability/timeline`
 
 Returns a categorized event timeline for debugging a call or workspace slice.
+The response includes event category counts, audio health counters, and provider
+latency/failure rollups.
 
 Query parameters:
 

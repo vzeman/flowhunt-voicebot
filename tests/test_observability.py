@@ -175,14 +175,16 @@ class ObservabilityTests(unittest.TestCase):
         health = timeline_health_summary(
             {"open_speech_turns": 1, "open_playbacks": 1},
             {"openai": {"failure_count": 2}, "anthropic": {"failure_count": 0}},
+            {"slowest_turn": {"turn_id": 4, "end_of_speech_to_playback_started_seconds": 6.25}},
         )
 
         self.assertFalse(health["ok"])
         self.assertEqual(
             health["warnings"],
-            ["open speech turn", "open playback", "provider failures: openai"],
+            ["open speech turn", "open playback", "provider failures: openai", "slow response latency on turn 4: 6.250s"],
         )
         self.assertEqual(health["failed_providers"], ["openai"])
+        self.assertEqual(health["slowest_response_latency_seconds"], 6.25)
 
     def test_conversation_evaluator_detects_missing_events_and_duplicate_responses(self) -> None:
         events = EventStore(max_context_events=20)

@@ -74,6 +74,8 @@ EVENT_CATEGORIES: dict[str, TimelineCategory] = {
     "system": "system",
 }
 
+SLOW_TURN_WARNING_SECONDS = 5.0
+
 
 @dataclass(frozen=True)
 class TraceContext:
@@ -144,13 +146,14 @@ def build_timeline(events: list[VoicebotEvent]) -> dict[str, Any]:
         )
     audio = audio_observability_summary(events)
     providers = provider_observability_summary(events)["providers"]
+    latency = latency_observability_summary(events)
     return {
         "events": entries,
         "counts": category_counts,
         "audio": audio,
         "providers": providers,
-        "latency": latency_observability_summary(events),
-        "health": timeline_health_summary(audio, providers),
+        "latency": latency,
+        "health": timeline_health_summary(audio, providers, latency),
         "first_event_id": entries[0]["id"] if entries else None,
         "last_event_id": entries[-1]["id"] if entries else None,
         "duration_seconds": timeline_duration_seconds(events),
@@ -234,7 +237,11 @@ def latency_observability_summary(events: list[VoicebotEvent]) -> dict[str, Any]
     }
 
 
-def timeline_health_summary(audio: dict[str, Any], providers: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def timeline_health_summary(
+    audio: dict[str, Any],
+    providers: dict[str, dict[str, Any]],
+    latency: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     warnings: list[str] = []
     if int(audio.get("open_speech_turns") or 0) > 0:
         warnings.append("open speech turn")
@@ -247,10 +254,17 @@ def timeline_health_summary(audio: dict[str, Any], providers: dict[str, dict[str
     )
     if failed_providers:
         warnings.append(f"provider failures: {', '.join(failed_providers)}")
+    slowest_turn = (latency or {}).get("slowest_turn") or {}
+    slowest_latency = _optional_float(slowest_turn.get("end_of_speech_to_playback_started_seconds"))
+    if slowest_latency is not None and slowest_latency > SLOW_TURN_WARNING_SECONDS:
+        turn_id = slowest_turn.get("turn_id")
+        suffix = f" on turn {turn_id}" if turn_id is not None else ""
+        warnings.append(f"slow response latency{suffix}: {slowest_latency:.3f}s")
     return {
         "ok": not warnings,
         "warnings": warnings,
         "failed_providers": failed_providers,
+        "slowest_response_latency_seconds": slowest_latency,
     }
 
 

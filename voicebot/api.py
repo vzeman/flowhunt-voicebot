@@ -31,6 +31,7 @@ from .api_models import (
     ScalingWorkloadPlanRequest,
     SipTrunkRequest,
     VoicebotProviderConfigRequest,
+    WorkerHeartbeatRequest,
     WebRTCOfferRequest,
 )
 from .asterisk_control import AsteriskAMI, ControlResult
@@ -75,7 +76,7 @@ from .provider_config import (
     validate_provider_config,
     validation_issue_to_dict,
 )
-from .scaling import WorkloadProfile, build_workload_plan, default_deployment_topology
+from .scaling import WorkerInstance, WorkerRegistry, WorkerRole, WorkloadProfile, build_workload_plan, default_deployment_topology
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
@@ -140,6 +141,7 @@ def create_app(
     subagent_coordinator: SubagentCoordinator | None = None,
     multimodal_contexts: MultimodalContextStore | None = None,
     provider_configs: ProviderConfigStore | None = None,
+    worker_registry: WorkerRegistry | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -166,6 +168,7 @@ def create_app(
     runtime_settings = settings or Settings()
     multimodal_store = multimodal_contexts or MultimodalContextStore()
     provider_config_store = provider_configs or ProviderConfigStore()
+    scaling_workers = worker_registry or WorkerRegistry()
     subagent_terminal_events: list[VoicebotEvent] = []
 
     def emit_subagent_terminal_event(event_type: TaskLifecycleEventType, task: SubagentTask) -> None:
@@ -354,6 +357,49 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         return build_workload_plan(profile)
+
+    @app.post("/scaling/workers/heartbeat")
+    def scaling_worker_heartbeat(request: WorkerHeartbeatRequest) -> dict[str, Any]:
+        try:
+            worker = scaling_workers.heartbeat(
+                WorkerInstance(
+                    worker_id=request.worker_id,
+                    role=validated_worker_role(request.role),
+                    queue=request.queue,
+                    workspace_id=request.workspace_id,
+                    voicebot_id=request.voicebot_id,
+                    capacity=request.capacity,
+                    status=validated_worker_status(request.status),
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"worker": worker.as_dict()}
+
+    @app.get("/scaling/workers")
+    def scaling_worker_list(role: str | None = None, workspace_id: str | None = None) -> dict[str, Any]:
+        try:
+            worker_role = validated_worker_role(role) if role else None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        workers = scaling_workers.active(role=worker_role, workspace_id=workspace_id)
+        return {"workers": [worker.as_dict() for worker in workers]}
+
+    @app.post("/scaling/workers/{worker_id}/drain")
+    def scaling_worker_drain(worker_id: str) -> dict[str, Any]:
+        try:
+            worker = scaling_workers.mark_draining(worker_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="worker not found") from None
+        return {"worker": worker.as_dict()}
+
+    @app.delete("/scaling/workers/{worker_id}")
+    def scaling_worker_remove(worker_id: str) -> dict[str, Any]:
+        return {"removed": scaling_workers.remove(worker_id)}
+
+    @app.get("/scaling/capacity")
+    def scaling_capacity(workspace_id: str | None = None) -> dict[str, Any]:
+        return scaling_workers.capacity_summary(workspace_id=workspace_id)
 
     def provider_choice_from_request(family: str, request, workspace_id: str) -> ProviderChoice:
         secret_ref = None
@@ -1739,6 +1785,18 @@ def validated_limit(limit: int, *, maximum: int = 1000) -> int:
     if limit > maximum:
         raise HTTPException(status_code=400, detail=f"limit must be at most {maximum}")
     return limit
+
+
+def validated_worker_role(value: str) -> WorkerRole:
+    if value not in get_args(WorkerRole):
+        raise ValueError(f"unsupported worker role: {value}")
+    return value  # type: ignore[return-value]
+
+
+def validated_worker_status(value: str):
+    if value not in {"active", "draining"}:
+        raise ValueError(f"unsupported worker status: {value}")
+    return value
 
 
 def optional_int_arg(args: dict[str, Any], name: str, default: int) -> int:

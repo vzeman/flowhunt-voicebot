@@ -17,6 +17,7 @@ from voicebot.observability import (
     provider_observability_summary,
     structured_log_record,
     timeline_health_summary,
+    timeline_duration_seconds,
 )
 from voicebot.transcripts import TranscriptStore
 
@@ -107,6 +108,18 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(summary["playback_interrupted"], 1)
         self.assertEqual(summary["possible_barge_ins"], 1)
         self.assertEqual(summary["open_playbacks"], 0)
+
+    def test_timeline_reports_elapsed_duration(self) -> None:
+        events = EventStore(max_context_events=20)
+        first = events.append("call-1", "call_started", {})
+        second = events.append("call-1", "call_ended", {})
+        first = type(first)(first.id, first.call_id, first.type, "2026-05-28T00:00:00+00:00", first.data)
+        second = type(second)(second.id, second.call_id, second.type, "2026-05-28T00:00:03.500000+00:00", second.data)
+
+        timeline = build_timeline([second, first])
+
+        self.assertEqual(timeline["duration_seconds"], 3.5)
+        self.assertEqual(timeline_duration_seconds([first]), None)
 
     def test_provider_summary_reports_latency_and_failures(self) -> None:
         events = EventStore(max_context_events=20)

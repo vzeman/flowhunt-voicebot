@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -151,6 +152,7 @@ def build_timeline(events: list[VoicebotEvent]) -> dict[str, Any]:
         "health": timeline_health_summary(audio, providers),
         "first_event_id": entries[0]["id"] if entries else None,
         "last_event_id": entries[-1]["id"] if entries else None,
+        "duration_seconds": timeline_duration_seconds(events),
     }
 
 
@@ -230,6 +232,18 @@ def timeline_health_summary(audio: dict[str, Any], providers: dict[str, dict[str
         "warnings": warnings,
         "failed_providers": failed_providers,
     }
+
+
+def timeline_duration_seconds(events: list[VoicebotEvent]) -> float | None:
+    if len(events) < 2:
+        return None
+    ordered = sorted(events, key=lambda item: item.id)
+    try:
+        started = _parse_timestamp(ordered[0].timestamp)
+        ended = _parse_timestamp(ordered[-1].timestamp)
+    except ValueError:
+        return None
+    return max(0.0, (ended - started).total_seconds())
 
 
 @dataclass(frozen=True)
@@ -314,3 +328,7 @@ def _optional_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _parse_timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))

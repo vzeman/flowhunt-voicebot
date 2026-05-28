@@ -54,6 +54,7 @@ EVENT_CATEGORIES: dict[str, TimelineCategory] = {
     "flowhunt_flow_invoked": "task",
     "flowhunt_flow_updated": "task",
     "flowhunt_flow_completed": "task",
+    "provider_call_failed": "telemetry",
     "subagent_task_completed": "task",
     "subagent_task_failed": "task",
     "subagent_task_timed_out": "task",
@@ -158,7 +159,7 @@ def provider_observability_summary(events: list[VoicebotEvent]) -> dict[str, Any
             value = _optional_float(event.data.get("value"))
             if value is not None:
                 latencies.setdefault(provider, []).append(value)
-        if event.type.endswith("_failed") or event.type in {"transport_error", "subagent_task_failed"}:
+        if event.type.endswith("_failed") or event.type in {"transport_error", "subagent_task_failed", "provider_call_failed"}:
             failures[provider] = failures.get(provider, 0) + 1
     return {
         "providers": {

@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import unittest
 
-from voicebot.multimodal import ModalityCapabilities, MultimodalContent, MultimodalContext
+from fastapi.testclient import TestClient
+
+from voicebot.agent_tasks import AgentTaskTracker
+from voicebot.api import WebSocketHub, create_app
+from voicebot.calls import CallRegistry
+from voicebot.events import EventStore
+from voicebot.multimodal import ModalityCapabilities, MultimodalContent, MultimodalContext, MultimodalContextStore
 from voicebot.providers import ProviderCapabilities
+from voicebot.transcripts import TranscriptStore
 from voicebot.transports import WEBRTC_CAPABILITIES
 
 
@@ -60,6 +67,59 @@ class MultimodalTests(unittest.TestCase):
 
         self.assertTrue(capabilities.supports("image_input"))
         self.assertTrue(capabilities.supports("visual_output"))
+
+    def test_context_store_accumulates_parts_by_call(self) -> None:
+        store = MultimodalContextStore()
+
+        store.add_part("call-1", MultimodalContent("chat", "input", text="hello"), workspace_id="workspace-1")
+        context = store.add_part("call-1", MultimodalContent("visual_card", "output", text="card"))
+
+        self.assertEqual(context.workspace_id, "workspace-1")
+        self.assertEqual([part.modality for part in context.parts], ["chat", "visual_card"])
+
+    def test_multimodal_api_adds_part_and_emits_event(self) -> None:
+        events = EventStore(max_context_events=20)
+        client = self.build_client(events)
+
+        response = client.post(
+            "/calls/call-1/multimodal/parts",
+            json={
+                "modality": "image",
+                "direction": "input",
+                "mime_type": "image/png",
+                "uri": "s3://workspace/file.png",
+                "workspace_id": "workspace-1",
+                "metadata": {"source": "browser"},
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["context"]["parts"][0]["modality"], "image")
+        self.assertEqual(events.list_events(call_id="call-1")[-1].type, "multimodal_content_added")
+
+        context_response = client.get("/calls/call-1/multimodal")
+        self.assertEqual(context_response.json()["parts"][0]["uri"], "s3://workspace/file.png")
+
+    def test_multimodal_api_rejects_unknown_modality(self) -> None:
+        client = self.build_client(EventStore(max_context_events=20))
+
+        response = client.post(
+            "/calls/call-1/multimodal/parts",
+            json={"modality": "unknown", "direction": "input"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def build_client(self, events: EventStore) -> TestClient:
+        app = create_app(
+            events,
+            CallRegistry(),
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+        )
+        return TestClient(app)
 
 
 if __name__ == "__main__":

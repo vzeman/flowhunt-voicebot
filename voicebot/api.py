@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, get_args
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -17,6 +17,7 @@ from .api_models import (
     CallControlRequest,
     CompactContextRequest,
     ConversationEvaluationRequest,
+    MultimodalContentRequest,
     PlaybackInterruptRequest,
     ScalingWorkloadPlanRequest,
     SipTrunkRequest,
@@ -43,6 +44,7 @@ from .flowhunt import (
 )
 from .health import readiness_report
 from .metrics import summarize_metrics
+from .multimodal import ContentDirection, Modality, MultimodalContent, MultimodalContextStore
 from .observability import ConversationExpectation, build_timeline, evaluate_conversation
 from .provider_catalog import provider_catalog
 from .scaling import WorkloadProfile, build_workload_plan, default_deployment_topology
@@ -53,6 +55,9 @@ from .tool_executor import AgentToolExecutor
 from .transcripts import TranscriptStore
 from .tools import tool_definitions_json_schema, tool_definitions_legacy
 from .webrtc import WebRTCSessionManager
+
+_MODALITIES = set(get_args(Modality))
+_CONTENT_DIRECTIONS = set(get_args(ContentDirection))
 
 
 class WebSocketHub:
@@ -100,6 +105,7 @@ def create_app(
     sip_trunks: SipTrunkStore | None = None,
     webrtc: WebRTCSessionManager | None = None,
     subagent_coordinator: SubagentCoordinator | None = None,
+    multimodal_contexts: MultimodalContextStore | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -124,6 +130,7 @@ def create_app(
     app = FastAPI(title="Flowhunt Voicebot", version="0.1.0", lifespan=lifespan)
     tool_executor = AgentToolExecutor()
     runtime_settings = settings or Settings()
+    multimodal_store = multimodal_contexts or MultimodalContextStore()
     subagent_terminal_events: list[VoicebotEvent] = []
 
     def emit_subagent_terminal_event(event_type: TaskLifecycleEventType, task: SubagentTask) -> None:
@@ -177,6 +184,45 @@ def create_app(
         if snapshot is None:
             raise HTTPException(status_code=404, detail=f"Active call not found: {call_id}")
         return snapshot
+
+    @app.get("/calls/{call_id}/multimodal")
+    def call_multimodal_context(call_id: str) -> dict[str, Any]:
+        return multimodal_store.get(call_id).to_agent_context()
+
+    @app.post("/calls/{call_id}/multimodal/parts")
+    async def add_call_multimodal_part(call_id: str, request: MultimodalContentRequest) -> dict[str, Any]:
+        if request.modality not in _MODALITIES:
+            raise HTTPException(status_code=400, detail=f"unsupported modality: {request.modality}")
+        if request.direction not in _CONTENT_DIRECTIONS:
+            raise HTTPException(status_code=400, detail=f"unsupported content direction: {request.direction}")
+        part = MultimodalContent(
+            modality=request.modality,  # type: ignore[arg-type]
+            direction=request.direction,  # type: ignore[arg-type]
+            mime_type=request.mime_type,
+            uri=request.uri,
+            text=request.text,
+            metadata=request.metadata,
+        )
+        context = multimodal_store.add_part(
+            call_id,
+            part,
+            workspace_id=request.workspace_id,
+            voicebot_id=request.voicebot_id,
+            session_id=request.session_id,
+        )
+        event = events.append(
+            call_id,
+            "multimodal_content_added",
+            {
+                "workspace_id": request.workspace_id,
+                "voicebot_id": request.voicebot_id,
+                "session_id": request.session_id,
+                "part": part.to_agent_part(),
+                "part_count": len(context.parts),
+            },
+        )
+        await hub.broadcast(event)
+        return {"context": context.to_agent_context(), "event": event_to_dict(event)}
 
     @app.get("/providers")
     def providers() -> dict[str, Any]:

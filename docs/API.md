@@ -1182,6 +1182,29 @@ Request:
 }
 ```
 
+## Multimodal Context
+
+### GET `/calls/{call_id}/multimodal`
+
+Returns normalized multimodal content parts attached to a call.
+
+### POST `/calls/{call_id}/multimodal/parts`
+
+Attaches one normalized content part and emits `multimodal_content_added`.
+
+Request:
+
+```json
+{
+  "modality": "image",
+  "direction": "input",
+  "mime_type": "image/png",
+  "uri": "s3://workspace/file.png",
+  "workspace_id": "workspace-1",
+  "metadata": {"source": "browser"}
+}
+```
+
 ## WebSocket
 
 ### WS `/ws/events`

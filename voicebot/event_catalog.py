@@ -71,6 +71,7 @@ EVENT_CATALOG: tuple[EventCatalogEntry, ...] = (
     EventCatalogEntry("bot_playback_finished", "playback", "Queued bot audio finished playing."),
     EventCatalogEntry("metrics", "telemetry", "Timing or operational metric emitted by the runtime."),
     EventCatalogEntry("dtmf", "caller_media", "Caller sent a DTMF digit."),
+    EventCatalogEntry("multimodal_content_added", "agent", "Normalized mixed-modal content was attached to a call context."),
     EventCatalogEntry("transport_error", "transport", "SIP, AudioSocket, or WebRTC transport emitted an error."),
     EventCatalogEntry("system", "system", "Operational fallback event for unexpected or low-level conditions."),
     EventCatalogEntry("context_compacted", "context", "Long event context was summarized."),

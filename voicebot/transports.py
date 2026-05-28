@@ -147,10 +147,11 @@ class StaticMediaTransport:
         self.sample_rate = sample_rate
 
     def describe_session(self, call_id: str, metadata: dict[str, Any] | None = None) -> MediaSessionDescriptor:
+        route = CallRoute.from_metadata(metadata)
         return MediaSessionDescriptor(
             call_id=call_id,
             transport=self.kind,
-            route=CallRoute.from_metadata(metadata),
+            route=route,
             capabilities=self.capabilities,
             sample_rate=self.sample_rate,
         )

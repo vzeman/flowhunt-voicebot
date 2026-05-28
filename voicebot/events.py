@@ -222,6 +222,7 @@ class JsonEventStore(EventStore):
             "skipped_blank_lines": 0,
             "skipped_malformed_json": 0,
             "skipped_invalid_events": 0,
+            "skipped_duplicate_event_ids": 0,
         }
         super().__init__(
             max_context_events=max_context_events,
@@ -239,6 +240,7 @@ class JsonEventStore(EventStore):
             return []
         events: list[VoicebotEvent] = []
         diagnostics = dict(self.load_diagnostics)
+        seen_ids: set[int] = set()
         with self.path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
@@ -252,6 +254,10 @@ class JsonEventStore(EventStore):
                 if isinstance(payload, dict):
                     event = event_from_dict(payload)
                     if event is not None:
+                        if event.id in seen_ids:
+                            diagnostics["skipped_duplicate_event_ids"] += 1
+                            continue
+                        seen_ids.add(event.id)
                         events.append(event)
                         diagnostics["loaded_events"] += 1
                         continue

@@ -48,6 +48,35 @@ class DurableEventTests(unittest.TestCase):
         self.assertEqual(store.load_diagnostics["skipped_blank_lines"], 1)
         self.assertEqual(store.load_diagnostics["skipped_malformed_json"], 1)
         self.assertEqual(store.load_diagnostics["skipped_invalid_events"], 1)
+        self.assertEqual(store.load_diagnostics["skipped_duplicate_event_ids"], 0)
+
+    def test_json_event_store_skips_duplicate_event_ids_on_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/events.jsonl"
+            first = {
+                "id": 1,
+                "call_id": "call-1",
+                "type": "call_started",
+                "timestamp": "2026-05-28T00:00:00+00:00",
+                "data": {"source": "first"},
+            }
+            duplicate = {
+                **first,
+                "call_id": "call-2",
+                "timestamp": "2026-05-28T00:00:01+00:00",
+                "data": {"source": "duplicate"},
+            }
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(first) + "\n")
+                handle.write(json.dumps(duplicate) + "\n")
+
+            store = JsonEventStore(path, max_context_events=100)
+            next_event = store.append("call-3", "call_connected", {})
+
+        self.assertEqual([event.call_id for event in store.list_events()], ["call-1", "call-3"])
+        self.assertEqual(store.load_diagnostics["loaded_events"], 1)
+        self.assertEqual(store.load_diagnostics["skipped_duplicate_event_ids"], 1)
+        self.assertEqual(next_event.id, 2)
 
     def test_event_store_filters_by_workspace_voicebot_and_session(self) -> None:
         store = EventStore(max_context_events=100)

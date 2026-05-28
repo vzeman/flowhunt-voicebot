@@ -5,6 +5,7 @@ import unittest
 
 from voicebot.subagents import (
     FlowHuntSubagentProvider,
+    SubagentProviderDescriptor,
     SubagentCoordinator,
     SubagentTask,
     SubagentTaskRequest,
@@ -179,6 +180,33 @@ class SubagentTests(unittest.TestCase):
         self.assertEqual(client.polled, [("flow-1", "task-1")])
         self.assertEqual(completed.status, "completed")
         self.assertEqual(completed.result.summary, "The answer is 42.")
+
+    def test_coordinator_exposes_registered_subagent_provider_catalog(self) -> None:
+        coordinator = SubagentCoordinator()
+        coordinator.register(FakeProvider())
+
+        catalog = coordinator.provider_catalog()
+
+        self.assertIn("internal_worker", catalog["providers"])
+        self.assertTrue(catalog["providers"]["internal_worker"]["registered"])
+        self.assertFalse(catalog["providers"]["flowhunt_flow"]["registered"])
+        self.assertEqual(catalog["providers"]["internal_worker"]["result_context"], "clean")
+
+    def test_coordinator_accepts_custom_subagent_provider_descriptor(self) -> None:
+        coordinator = SubagentCoordinator()
+        coordinator.register(
+            FakeProvider(),
+            SubagentProviderDescriptor(
+                kind="internal_worker",
+                label="Custom internal worker",
+                required_metadata=("skill",),
+            ),
+        )
+
+        provider = coordinator.provider_catalog()["providers"]["internal_worker"]
+
+        self.assertEqual(provider["label"], "Custom internal worker")
+        self.assertEqual(provider["required_metadata"], ["skill"])
 
 
 if __name__ == "__main__":

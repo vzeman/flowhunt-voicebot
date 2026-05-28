@@ -58,6 +58,16 @@ The generic provider interface has:
 - `poll(task)`
 - `cancel(task)`
 
+Providers also expose `SubagentProviderDescriptor` metadata through
+`SubagentCoordinator.provider_catalog()`:
+
+- provider kind and label
+- workspace scoping
+- async polling support
+- cancel support
+- required metadata such as `flow_id` or `project_id`
+- whether the provider returns clean result context or raw payloads
+
 The first adapter is `FlowHuntSubagentProvider`, with provider kinds:
 
 - `flowhunt_flow`

@@ -14,6 +14,7 @@ ApiArea = Literal[
     "provider",
     "transport",
     "scaling",
+    "multimodal",
     "testing",
     "internal",
 ]
@@ -59,6 +60,8 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("POST", "/scaling/workers/{worker_id}/drain", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Mark a worker as draining."),
     ApiEndpointSpec("DELETE", "/scaling/workers/{worker_id}", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Remove worker presence."),
     ApiEndpointSpec("GET", "/scaling/capacity", "scaling", "internal", workspace_scoped=True, scope_source="query", description="Summarize active worker capacity."),
+    ApiEndpointSpec("GET", "/calls/{call_id}/multimodal", "multimodal", "internal", workspace_scoped=True, scope_source="route_binding", description="Read normalized multimodal call context."),
+    ApiEndpointSpec("POST", "/calls/{call_id}/multimodal/parts", "multimodal", "internal", workspace_scoped=True, scope_source="payload", description="Attach normalized multimodal content to a call."),
     ApiEndpointSpec("POST", "/runtime/webrtc/sessions", "runtime", "public", scope_source="payload", description="Create WebRTC runtime session."),
     ApiEndpointSpec("POST", "/runtime/sip-trunks/{trunk_id}/register", "runtime", "internal", scope_source="route_binding", description="Register SIP trunk runtime binding."),
     ApiEndpointSpec("GET", "/webrtc/test", "testing", "prototype", workspace_scoped=False, scope_source="none", description="Local browser test app."),

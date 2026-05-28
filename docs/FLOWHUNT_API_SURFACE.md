@@ -62,6 +62,15 @@ Provider config uses secret references and must validate before channel enable.
 Runtime APIs create or update active call/session bindings. They should resolve
 workspace and voicebot from channel/trunk/widget configuration.
 
+## Multimodal Runtime APIs
+
+- `GET /calls/{call_id}/multimodal`
+- `POST /calls/{call_id}/multimodal/parts`
+
+These internal runtime endpoints attach normalized multimodal references to an
+active call. They remain scoped by the call route or request payload and do not
+fetch external URLs.
+
 ## Session APIs
 
 - `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions`

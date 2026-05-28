@@ -48,6 +48,7 @@ class ApiSurfaceTests(unittest.TestCase):
             "provider",
             "transport",
             "scaling",
+            "multimodal",
             "testing",
         ):
             self.assertIn(area, grouped)
@@ -75,6 +76,13 @@ class ApiSurfaceTests(unittest.TestCase):
 
         self.assertEqual(runtime["scope_source"], "payload")
         self.assertTrue(runtime["workspace_scoped"])
+
+    def test_multimodal_endpoints_are_cataloged(self) -> None:
+        grouped = api_surface_by_area()
+        paths = {endpoint["path"]: endpoint for endpoint in grouped["multimodal"]}
+
+        self.assertEqual(paths["/calls/{call_id}/multimodal"]["scope_source"], "route_binding")
+        self.assertEqual(paths["/calls/{call_id}/multimodal/parts"]["scope_source"], "payload")
 
     def test_api_surface_prototypes_endpoint_lists_prototypes(self) -> None:
         response = self.build_client().get("/api/surface/prototypes")

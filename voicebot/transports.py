@@ -114,6 +114,9 @@ class CallControlRequest:
     action: CallControlAction
     data: dict[str, Any] = field(default_factory=dict)
 
+    def as_event_data(self) -> dict[str, Any]:
+        return {"call_id": self.call_id, "action": self.action, **self.data}
+
 
 @dataclass(frozen=True)
 class CallControlResult:
@@ -122,6 +125,17 @@ class CallControlResult:
     ok: bool
     reason: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
+
+    def as_event_data(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "call_id": self.call_id,
+            "action": self.action,
+            "ok": self.ok,
+            **self.data,
+        }
+        if self.reason:
+            payload["reason"] = self.reason
+        return payload
 
     @classmethod
     def unsupported(cls, request: CallControlRequest, transport: TransportKind) -> "CallControlResult":

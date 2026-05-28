@@ -85,6 +85,25 @@ class TransportContractTests(unittest.TestCase):
         self.assertIn("not supported", result.reason or "")
         self.assertEqual(result.data, {"transport": "webrtc"})
 
+    def test_call_control_request_and_result_are_event_ready(self) -> None:
+        request = CallControlRequest("call-1", "hangup", {"reason": "caller_requested"})
+        result = StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES).execute_call_control(request)
+
+        self.assertEqual(
+            request.as_event_data(),
+            {"call_id": "call-1", "action": "hangup", "reason": "caller_requested"},
+        )
+        self.assertEqual(
+            result.as_event_data(),
+            {
+                "call_id": "call-1",
+                "action": "hangup",
+                "ok": True,
+                "transport": "webrtc",
+                "reason": "caller_requested",
+            },
+        )
+
     def test_transport_catalog_serializes_capabilities(self) -> None:
         catalog = transport_catalog()
 

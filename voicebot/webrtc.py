@@ -528,7 +528,7 @@ class WebRTCCallSession:
             self._ignore_input_until = max(self._ignore_input_until, time.monotonic() + tail_ms / 1000)
 
     def _should_ignore_input(self, level: float) -> bool:
-        if self.playback.is_active() and level < self.settings.barge_in_threshold:
+        if self.playback.is_active() and level < self.settings.start_threshold:
             return True
         with self._ignore_input_lock:
             return time.monotonic() < self._ignore_input_until

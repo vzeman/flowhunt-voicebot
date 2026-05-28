@@ -56,10 +56,14 @@ Decision values:
 
 When playback is active:
 
-- audio below `barge_in_threshold` is treated as likely bot echo and ignored;
-- audio above `barge_in_threshold` can start a caller turn and should interrupt playback.
+- audio below `start_threshold` is treated as likely bot echo and ignored;
+- audio above `start_threshold` can start a caller turn and should interrupt
+  playback, even if it is below the higher diagnostic `barge_in_threshold`.
 
-This rule is intentionally simple for the first shared primitive. Future implementations can replace it with stronger echo cancellation or VAD models without changing the session pipeline contract.
+The higher `barge_in_threshold` remains useful for diagnostics and future
+confidence scoring, but live interruption must favor the caller. Browser echo
+cancellation, the playback echo tail, and future echo-cancellation stages carry
+the main self-audio suppression responsibility.
 
 ## Configuration
 

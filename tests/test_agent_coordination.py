@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agents"))
 
 from local_command_agent import (
     colleague_update_answer,
+    customer_facing_colleague_text,
     fast_tool_call,
     needs_spoken_followup,
     remove_colleague_reentrant_tool_calls,
@@ -72,6 +73,55 @@ class AgentCoordinationTests(unittest.TestCase):
             answer,
             "I checked with a colleague. Connect the VoIP number first, then assign an IVR tree.",
         )
+
+    def test_colleague_result_strips_internal_status_before_speaking(self) -> None:
+        raw = """
+        status: completed
+        task_id: abc-123
+        Internal note: sitemap crawler used 4 requests.
+        Final answer: LiveAgent has 1,950 sitemap pages. The sitemap index was counted directly.
+        """
+
+        answer = customer_facing_colleague_text(raw)
+
+        self.assertEqual(answer, "LiveAgent has 1,950 sitemap pages. The sitemap index was counted directly.")
+
+    def test_colleague_result_turns_pricing_table_into_customer_summary(self) -> None:
+        raw = """
+        Hello and welcome to LiveAgent Support!
+        I'm AI chatbot assistant ready to assist with any questions.
+
+        Here's the detailed pricing info for LiveAgent accounts with Call Center functionality you can share with your colleague:
+
+        ## Call Center availability by plan
+        - Small Business: $19/agent/month (monthly) or $15/agent/month (annual) - Call Center: not included
+        - Medium Business: $35/agent/month (monthly) or $29/agent/month (annual) - Call Center: included
+        - Large Business: $59/agent/month (monthly) or $49/agent/month (annual) - Call Center: included
+        - Enterprise: $85/agent/month (monthly) or $69/agent/month (annual) - Call Center: included
+        """
+
+        answer = customer_facing_colleague_text(raw)
+
+        self.assertEqual(
+            answer,
+            "Call center functionality is included starting with Medium Business, "
+            "which is $35 per agent per month, or $29 annually. "
+            "Large Business is $59 monthly, or $49 annually. "
+            "Enterprise is $85 monthly, or $69 annually. "
+            "Small Business does not include call center functionality.",
+        )
+
+    def test_colleague_progress_uses_canned_customer_update(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {
+                "reason": "colleague_progress",
+                "text": "status: running task_id=abc internal polling still active",
+            },
+        }
+
+        self.assertEqual(colleague_update_answer(task), "I am still checking that with a colleague.")
 
 
 if __name__ == "__main__":

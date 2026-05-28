@@ -74,6 +74,17 @@ class ConversationFlowDefinition:
             raise ValueError(f"Conversation flow '{self.flow_id}' references unknown state '{state_id}'") from exc
 
     def validate(self) -> None:
+        if not self.flow_id.strip():
+            raise ValueError("conversation flow_id is required")
+        if not self.initial_state.strip():
+            raise ValueError("conversation initial_state is required")
+        for key, state in self.states.items():
+            if not key.strip():
+                raise ValueError("conversation state id is required")
+            if key != state.state_id:
+                raise ValueError("conversation state key must match state_id")
+            if not state.state_id.strip():
+                raise ValueError("conversation state id is required")
         self.state(self.initial_state)
         for state in self.states.values():
             for action in state.entry_actions:

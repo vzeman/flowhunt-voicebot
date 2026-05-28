@@ -111,6 +111,18 @@ class RealtimeAudioTests(unittest.TestCase):
 
         self.assertAlmostEqual(float(audio.mean()), 0.25, delta=0.02)
 
+    def test_audio_chunk_normalizer_rejects_invalid_transport_settings(self) -> None:
+        invalid_settings = [
+            {"source_rate": 0, "target_rate": 16000, "channels": 1},
+            {"source_rate": 48000, "target_rate": 0, "channels": 1},
+            {"source_rate": 48000, "target_rate": 16000, "channels": 0},
+        ]
+
+        for settings in invalid_settings:
+            with self.subTest(settings=settings):
+                with self.assertRaises(ValueError):
+                    AudioChunkNormalizer(**settings)
+
     def test_turn_detection_config_can_be_built_from_runtime_settings(self) -> None:
         settings = Settings(
             start_threshold=0.12,

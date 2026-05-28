@@ -58,7 +58,9 @@ selected debug window.
 
 The timeline also includes a `latency` object. It correlates each caller turn
 from speech end through transcript, agent response, TTS start, queued playback,
-and playback start when matching events are available. It also summarizes raw
+and playback start when matching events are available. Playback events include
+`response_to_event_id`, so the timeline can attribute playback to the response
+that generated it instead of relying on event order. It also summarizes raw
 metric events by metric name, including latest value and max latency, so a slow
 call can be debugged without manually calculating event timestamp differences.
 

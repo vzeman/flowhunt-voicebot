@@ -62,11 +62,11 @@ class WebRTCAudioOutputTrack(MediaStreamTrack):
 
     async def recv(self):
         await asyncio.sleep(self.packet_seconds)
-        packet, started, finished = self.session.next_playback_packet(self.packet_samples)
+        packet, started, finished, playback_data = self.session.next_playback_packet(self.packet_samples)
         if started:
-            self.session.events.append(self.session.call_id, "bot_playback_started", {})
+            self.session.events.append(self.session.call_id, "bot_playback_started", playback_data)
         if finished:
-            self.session.events.append(self.session.call_id, "bot_playback_finished", {})
+            self.session.events.append(self.session.call_id, "bot_playback_finished", playback_data)
 
         frame = AudioFrame(format="s16", layout="mono", samples=self.packet_samples)
         frame.sample_rate = CALL_SAMPLE_RATE
@@ -347,7 +347,7 @@ class WebRTCCallSession:
                 )
             ):
                 for chunk in audio_chunks:
-                    self.playback.enqueue(chunk)
+                    self.playback.enqueue(chunk, {"response_to_event_id": response.response_to_event_id})
                 self.events.append(
                     self.call_id,
                     "agent_response_queued",
@@ -364,7 +364,7 @@ class WebRTCCallSession:
             )
             return event
         for chunk in audio_chunks:
-            self.playback.enqueue(chunk)
+            self.playback.enqueue(chunk, {"response_to_event_id": response.response_to_event_id})
         if startup_response and self.recording_event.is_set():
             self._startup_playback_guard = True
         self.events.append(
@@ -384,20 +384,20 @@ class WebRTCCallSession:
             {"reason": reason, "interrupted": interrupted},
         )
 
-    def next_playback_packet(self, packet_samples: int) -> tuple[np.ndarray, bool, bool]:
+    def next_playback_packet(self, packet_samples: int) -> tuple[np.ndarray, bool, bool, dict[str, object]]:
         if self.recording_event.is_set():
             if self._startup_playback_guard and self.playback.is_active():
-                return np.zeros(packet_samples, dtype=np.float32), False, False
+                return np.zeros(packet_samples, dtype=np.float32), False, False, {}
             if self.playback.interrupt():
                 self._mark_interrupted("caller_is_speaking")
                 self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "caller_is_speaking"})
-            return np.zeros(packet_samples, dtype=np.float32), False, False
-        packet, started, finished = self.playback.next_packet(packet_samples)
+            return np.zeros(packet_samples, dtype=np.float32), False, False, {}
+        packet, started, finished, playback_data = self.playback.next_packet_with_metadata(packet_samples)
         if started or finished:
             if started:
                 self._startup_playback_guard = False
             self._set_echo_tail(self.settings.echo_tail_ms)
-        return packet, started, finished
+        return packet, started, finished, playback_data
 
     def snapshot(self) -> dict[str, Any]:
         return {

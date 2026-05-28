@@ -39,6 +39,49 @@ SubagentTaskStatus = Literal[
 
 
 @dataclass(frozen=True)
+class SubagentProviderDescriptor:
+    kind: SubagentProviderKind
+    label: str
+    workspace_scoped: bool = True
+    supports_async_polling: bool = True
+    supports_cancel: bool = True
+    required_metadata: tuple[str, ...] = ()
+    result_context: Literal["clean", "raw"] = "clean"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "label": self.label,
+            "workspace_scoped": self.workspace_scoped,
+            "supports_async_polling": self.supports_async_polling,
+            "supports_cancel": self.supports_cancel,
+            "required_metadata": list(self.required_metadata),
+            "result_context": self.result_context,
+        }
+
+
+DEFAULT_SUBAGENT_PROVIDER_DESCRIPTORS: dict[SubagentProviderKind, SubagentProviderDescriptor] = {
+    "flowhunt_flow": SubagentProviderDescriptor(
+        kind="flowhunt_flow",
+        label="FlowHunt flow invoke",
+        required_metadata=("flow_id",),
+    ),
+    "flowhunt_project": SubagentProviderDescriptor(
+        kind="flowhunt_project",
+        label="FlowHunt project issue",
+        required_metadata=("project_id",),
+    ),
+    "internal_worker": SubagentProviderDescriptor(kind="internal_worker", label="Internal worker agent"),
+    "http_service": SubagentProviderDescriptor(kind="http_service", label="HTTP/service task provider"),
+    "human_handoff": SubagentProviderDescriptor(
+        kind="human_handoff",
+        label="Human handoff",
+        supports_async_polling=False,
+    ),
+}
+
+
+@dataclass(frozen=True)
 class SubagentTaskRequest:
     workspace_id: str
     session_id: str
@@ -292,9 +335,28 @@ class SubagentCoordinator:
         self.store = store or SubagentTaskStore()
         self.events = events
         self.providers: dict[SubagentProviderKind, SubagentProvider] = {}
+        self.provider_descriptors: dict[SubagentProviderKind, SubagentProviderDescriptor] = dict(
+            DEFAULT_SUBAGENT_PROVIDER_DESCRIPTORS
+        )
 
-    def register(self, provider: SubagentProvider) -> None:
+    def register(
+        self,
+        provider: SubagentProvider,
+        descriptor: SubagentProviderDescriptor | None = None,
+    ) -> None:
         self.providers[provider.kind] = provider
+        self.provider_descriptors[provider.kind] = descriptor or DEFAULT_SUBAGENT_PROVIDER_DESCRIPTORS[provider.kind]
+
+    def provider_catalog(self) -> dict[str, Any]:
+        return {
+            "providers": {
+                kind: {
+                    **descriptor.to_dict(),
+                    "registered": kind in self.providers,
+                }
+                for kind, descriptor in sorted(self.provider_descriptors.items())
+            }
+        }
 
     def request(self, request: SubagentTaskRequest) -> SubagentTask:
         task, created = self.store.get_or_create_requested(request)

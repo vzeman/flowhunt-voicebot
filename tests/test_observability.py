@@ -16,6 +16,7 @@ from voicebot.observability import (
     evaluate_conversation,
     provider_observability_summary,
     structured_log_record,
+    timeline_health_summary,
 )
 from voicebot.transcripts import TranscriptStore
 
@@ -81,6 +82,9 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(timeline["counts"]["agent"], 1)
         self.assertEqual(timeline["counts"]["playback"], 1)
         self.assertEqual(timeline["providers"]["openai"]["failure_count"], 1)
+        self.assertFalse(timeline["health"]["ok"])
+        self.assertIn("open speech turn", timeline["health"]["warnings"])
+        self.assertEqual(timeline["health"]["failed_providers"], ["openai"])
         self.assertEqual(timeline["audio"]["speech_turns_started"], 1)
         self.assertEqual(timeline["audio"]["open_speech_turns"], 1)
         self.assertEqual([entry["id"] for entry in timeline["events"]], sorted(entry["id"] for entry in timeline["events"]))
@@ -117,6 +121,19 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(summary["providers"]["openai"]["latency_avg"], 0.30000000000000004)
         self.assertEqual(summary["providers"]["openai"]["failure_count"], 1)
         self.assertEqual(summary["providers"]["flowhunt_flow"]["failure_count"], 1)
+
+    def test_timeline_health_summary_reports_operational_warnings(self) -> None:
+        health = timeline_health_summary(
+            {"open_speech_turns": 1, "open_playbacks": 1},
+            {"openai": {"failure_count": 2}, "anthropic": {"failure_count": 0}},
+        )
+
+        self.assertFalse(health["ok"])
+        self.assertEqual(
+            health["warnings"],
+            ["open speech turn", "open playback", "provider failures: openai"],
+        )
+        self.assertEqual(health["failed_providers"], ["openai"])
 
     def test_conversation_evaluator_detects_missing_events_and_duplicate_responses(self) -> None:
         events = EventStore(max_context_events=20)

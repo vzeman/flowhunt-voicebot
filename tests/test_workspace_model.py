@@ -65,6 +65,28 @@ class WorkspaceModelTests(unittest.TestCase):
 
         self.assertIsNone(resolver.resolve("webrtc_widget", "widget-1"))
 
+    def test_channel_binding_rejects_invalid_identity_fields(self) -> None:
+        valid = {
+            "channel_id": "channel-1",
+            "kind": "sip_trunk",
+            "workspace_id": "workspace-1",
+            "voicebot_id": "voicebot-1",
+            "external_id": "trunk-1",
+        }
+
+        for field, message in (
+            ("channel_id", "channel_id"),
+            ("workspace_id", "workspace_id"),
+            ("voicebot_id", "voicebot_id"),
+            ("external_id", "external_id"),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, message):
+                    VoicebotChannelBinding(**{**valid, field: " "})
+
+        with self.assertRaisesRegex(ValueError, "unsupported channel kind"):
+            VoicebotChannelBinding(**{**valid, "kind": "fax"})
+
     def test_channel_resolver_unregisters_route_binding(self) -> None:
         resolver = ChannelResolver()
         binding = VoicebotChannelBinding(

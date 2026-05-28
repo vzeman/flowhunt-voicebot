@@ -63,6 +63,11 @@ tables. The resolver supports registering and unregistering bindings by route
 key or channel id so the admin layer can connect/disconnect SIP trunks, phone
 numbers, and WebRTC widgets without restarting runtime workers.
 
+Channel bindings are identity-guarded. A route cannot be reassigned to another
+channel id, and an existing channel id cannot silently move across route,
+workspace, or voicebot. Dynamic disconnect/reconnect should unregister the old
+binding before registering a different route.
+
 ## Subagents
 
 Subagent and FlowHunt project/flow calls must run in the same `workspace_id` as

@@ -53,7 +53,20 @@ class ChannelResolver:
             self.register(binding)
 
     def register(self, binding: VoicebotChannelBinding) -> None:
-        self._bindings[(binding.kind, binding.external_id)] = binding
+        route_key = (binding.kind, binding.external_id)
+        existing_route = self._bindings.get(route_key)
+        if existing_route is not None and existing_route.channel_id != binding.channel_id:
+            raise ValueError("cannot reassign channel route to another channel")
+        for existing_key, existing_binding in self._bindings.items():
+            if existing_binding.channel_id != binding.channel_id:
+                continue
+            if existing_key != route_key:
+                raise ValueError("cannot move channel binding across routes")
+            if existing_binding.workspace_id != binding.workspace_id:
+                raise ValueError("cannot move channel binding across workspaces")
+            if existing_binding.voicebot_id != binding.voicebot_id:
+                raise ValueError("cannot move channel binding across voicebots")
+        self._bindings[route_key] = binding
 
     def unregister(self, kind: ChannelKind, external_id: str) -> VoicebotChannelBinding | None:
         return self._bindings.pop((kind, external_id), None)

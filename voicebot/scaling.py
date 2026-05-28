@@ -166,6 +166,20 @@ class WorkerRegistry:
         self.expire(current)
         return {"workers": [worker.as_dict() for worker in sorted(self._workers.values(), key=lambda item: item.worker_id)]}
 
+    def capacity_summary(self, workspace_id: str | None = None, now: datetime | None = None) -> dict:
+        workers = self.active(workspace_id=workspace_id, now=now)
+        roles: dict[str, dict[str, int]] = {}
+        for worker in workers:
+            role = roles.setdefault(worker.role, {"workers": 0, "capacity": 0})
+            role["workers"] += 1
+            role["capacity"] += worker.capacity
+        return {
+            "workspace_id": workspace_id,
+            "roles": dict(sorted(roles.items())),
+            "total_workers": len(workers),
+            "total_capacity": sum(worker.capacity for worker in workers),
+        }
+
 
 @dataclass
 class WorkspaceBackpressure:

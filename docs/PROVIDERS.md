@@ -62,6 +62,12 @@ Future adapters should add a descriptor before adding factory code, so pipeline
 selection can reason about streaming, latency, credentials, output formats, and
 tool support consistently.
 
+The standalone communication-agent runtime registry in `agents/` follows the
+same descriptor contract. `AgentProviderRegistry.describe()` and
+`AgentProviderRegistry.catalog()` expose `ProviderDescriptor` metadata for
+OpenAI Responses, Anthropic, and chat-compatible agent providers, so execution
+and product catalog views can converge on the same capability shape.
+
 ## Runtime Telemetry
 
 `voicebot.provider_runtime` defines standard provider call context and telemetry

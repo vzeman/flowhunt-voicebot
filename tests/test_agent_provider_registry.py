@@ -68,6 +68,7 @@ class AgentProviderRegistryTests(unittest.TestCase):
 
         self.assertEqual(answer, "ok")
         self.assertEqual(tool_calls, [])
+        self.assertEqual(registry.describe("custom_agent").family, "agent")
 
     def test_default_registry_runs_responses_provider_with_tools(self) -> None:
         registry = default_agent_provider_registry()
@@ -87,6 +88,7 @@ class AgentProviderRegistryTests(unittest.TestCase):
         self.assertEqual(tool_calls, [{"name": "hangup_call", "arguments": {"call_id": "call-1"}}])
         self.assertEqual(client.responses.kwargs["model"], "model-a")
         self.assertEqual(client.responses.kwargs["tools"], [{"type": "function", "name": "hangup_call"}])
+        self.assertTrue(registry.describe("openai-responses").capabilities.native_tools)
 
     def test_default_registry_runs_chat_compatible_provider(self) -> None:
         registry = default_agent_provider_registry()
@@ -134,6 +136,15 @@ class AgentProviderRegistryTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Unsupported agent provider adapter for 'gemini'"):
             registry.run(object(), "gemini", "model", "prompt", 1.0, 100)
+
+    def test_registry_catalog_exposes_agent_provider_capabilities(self) -> None:
+        registry = default_agent_provider_registry()
+
+        catalog = registry.catalog()
+
+        self.assertIn("anthropic", catalog["providers"])
+        self.assertEqual(catalog["providers"]["anthropic"]["family"], "agent")
+        self.assertEqual(catalog["providers"]["openai-chat-compatible"]["adapter"], "chat_compatible")
 
 
 if __name__ == "__main__":

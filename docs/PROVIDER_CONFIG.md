@@ -26,6 +26,7 @@ secrets are validation errors before enabling a voicebot/channel.
 
 `validate_provider_config()` checks:
 
+- provider choices include a provider id
 - provider choice family matches the config slot
 - provider is registered for the family
 - required credentials have a secret reference

@@ -138,6 +138,10 @@ class ProviderConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "workspace_id"):
             SecretReference("openai", "")
 
+    def test_provider_choice_requires_provider_name(self) -> None:
+        with self.assertRaisesRegex(ValueError, "provider is required"):
+            ProviderChoice("stt", "")
+
     def test_provider_config_store_saves_by_workspace_voicebot(self) -> None:
         store = ProviderConfigStore()
 

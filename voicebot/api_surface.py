@@ -73,6 +73,19 @@ def public_endpoints_are_workspace_scoped() -> bool:
     return not api_scope_violations()
 
 
+def api_surface_integrity_issues() -> list[dict]:
+    issues: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for endpoint in FLOWHUNT_API_SURFACE:
+        key = (endpoint.method.upper(), endpoint.path)
+        if key in seen:
+            issues.append({**api_endpoint_to_dict(endpoint), "issue": "duplicate method/path in API surface catalog"})
+        seen.add(key)
+        if not endpoint.description.strip():
+            issues.append({**api_endpoint_to_dict(endpoint), "issue": "endpoint description is required"})
+    return issues
+
+
 def api_scope_violations() -> list[dict]:
     violations = []
     for endpoint in FLOWHUNT_API_SURFACE:

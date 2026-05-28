@@ -164,6 +164,24 @@ Response:
 }
 ```
 
+### PUT `/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers`
+
+Validates and saves workspace voicebot provider choices.
+
+Request:
+
+```json
+{
+  "stt": {"provider": "openai", "model": "gpt-4o-transcribe", "secret_ref": {"name": "openai-main"}},
+  "tts": {"provider": "openai", "model": "gpt-4o-mini-tts", "secret_ref": {"name": "openai-main"}},
+  "agent": {"provider": "openai-responses", "model": "gpt-4.1", "secret_ref": {"name": "openai-main"}}
+}
+```
+
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers`
+
+Returns the saved provider config and normalized runtime selection plan.
+
 ## Calls
 
 ### GET `/calls`

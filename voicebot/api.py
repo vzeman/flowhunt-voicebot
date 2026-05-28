@@ -21,6 +21,7 @@ from .api_models import (
     PlaybackInterruptRequest,
     ScalingWorkloadPlanRequest,
     SipTrunkRequest,
+    VoicebotProviderConfigRequest,
     WebRTCOfferRequest,
 )
 from .asterisk_control import AsteriskAMI, ControlResult
@@ -46,7 +47,18 @@ from .health import readiness_report
 from .metrics import summarize_metrics
 from .multimodal import ContentDirection, Modality, MultimodalContent, MultimodalContextStore
 from .observability import ConversationExpectation, build_timeline, evaluate_conversation
-from .provider_catalog import provider_catalog
+from .provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities, provider_catalog
+from .provider_config import (
+    ProviderChoice,
+    ProviderConfigStore,
+    SecretReference,
+    VoicebotProviderConfig,
+    provider_config_to_dict,
+    provider_selection_plan,
+    selection_plan_to_dict,
+    validate_provider_config,
+    validation_issue_to_dict,
+)
 from .scaling import WorkloadProfile, build_workload_plan, default_deployment_topology
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
@@ -106,6 +118,7 @@ def create_app(
     webrtc: WebRTCSessionManager | None = None,
     subagent_coordinator: SubagentCoordinator | None = None,
     multimodal_contexts: MultimodalContextStore | None = None,
+    provider_configs: ProviderConfigStore | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -131,6 +144,7 @@ def create_app(
     tool_executor = AgentToolExecutor()
     runtime_settings = settings or Settings()
     multimodal_store = multimodal_contexts or MultimodalContextStore()
+    provider_config_store = provider_configs or ProviderConfigStore()
     subagent_terminal_events: list[VoicebotEvent] = []
 
     def emit_subagent_terminal_event(event_type: TaskLifecycleEventType, task: SubagentTask) -> None:
@@ -228,6 +242,53 @@ def create_app(
     def providers() -> dict[str, Any]:
         return provider_catalog()
 
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")
+    def get_voicebot_provider_config(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        config = provider_config_store.get(workspace_id, voicebot_id)
+        if config is None:
+            raise HTTPException(status_code=404, detail="Provider config not found")
+        return {
+            "config": provider_config_to_dict(config),
+            "selection_plan": selection_plan_to_dict(provider_selection_plan(config)),
+            "validation": [],
+        }
+
+    @app.put("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")
+    def put_voicebot_provider_config(
+        workspace_id: str,
+        voicebot_id: str,
+        request: VoicebotProviderConfigRequest,
+    ) -> dict[str, Any]:
+        try:
+            config = VoicebotProviderConfig(
+                workspace_id=workspace_id,
+                voicebot_id=voicebot_id,
+                stt=provider_choice_from_request("stt", request.stt, workspace_id),
+                tts=provider_choice_from_request("tts", request.tts, workspace_id),
+                agent=provider_choice_from_request("agent", request.agent, workspace_id),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        descriptors = {
+            "stt": provider_catalog_descriptors("stt"),
+            "tts": provider_catalog_descriptors("tts"),
+            "agent": provider_catalog_descriptors("agent"),
+        }
+        issues = validate_provider_config(config, descriptors)
+        if issues:
+            return {
+                "ok": False,
+                "config": provider_config_to_dict(config),
+                "validation": [validation_issue_to_dict(issue) for issue in issues],
+            }
+        saved = provider_config_store.save(config)
+        return {
+            "ok": True,
+            "config": provider_config_to_dict(saved),
+            "selection_plan": selection_plan_to_dict(provider_selection_plan(saved)),
+            "validation": [],
+        }
+
     @app.get("/scaling/topology")
     def scaling_topology() -> dict[str, Any]:
         return default_deployment_topology().as_dict()
@@ -247,6 +308,29 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         return build_workload_plan(profile)
+
+    def provider_choice_from_request(family: str, request, workspace_id: str) -> ProviderChoice:
+        secret_ref = None
+        if request.secret_ref is not None:
+            secret_ref = SecretReference(
+                name=request.secret_ref.name,
+                workspace_id=request.secret_ref.workspace_id or workspace_id,
+            )
+        return ProviderChoice(
+            family,  # type: ignore[arg-type]
+            request.provider,
+            model=request.model,
+            secret_ref=secret_ref,
+            fallback_provider=request.fallback_provider,
+            config=request.config,
+        )
+
+    def provider_catalog_descriptors(family: str):
+        if family == "stt":
+            return _stt_capabilities()
+        if family == "tts":
+            return _tts_capabilities()
+        return _agent_capabilities()
 
     @app.get("/config")
     def config() -> dict[str, Any]:

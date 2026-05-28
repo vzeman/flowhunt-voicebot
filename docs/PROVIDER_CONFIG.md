@@ -37,6 +37,18 @@ Validation should run when saving provider config and before enabling a channel.
 `provider_selection_plan()` converts product config into normalized provider,
 fallback, and model selections that runtime workers can use per session.
 
+## Runtime API
+
+`PUT /workspaces/{workspace_id}/voicebots/{voicebot_id}/providers` validates and
+saves STT, TTS, and communication-agent provider choices for a voicebot.
+
+`GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/providers` returns the
+saved config plus the normalized runtime selection plan.
+
+This first store is process-local. In FlowHunt production the same payload
+should be backed by workspace-scoped database rows and secret references should
+resolve through FlowHunt's secret store.
+
 ## Fallback Policy
 
 Each family can define a fallback provider. The first implementation only models

@@ -104,6 +104,47 @@ class SubagentTaskLifecycleRunner:
             )
         return cancelled
 
+    def snapshot(
+        self,
+        *,
+        workspace_id: str | None = None,
+        session_id: str | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, object]:
+        current = now or _now()
+        tasks = self.coordinator.store.list(workspace_id=workspace_id, session_id=session_id)
+        status_counts: dict[str, int] = {}
+        pending_count = 0
+        terminal_count = 0
+        due_count = 0
+        overdue_count = 0
+        next_poll_times: list[str] = []
+        deadline_times: list[str] = []
+        for task in tasks:
+            status_counts[task.status] = status_counts.get(task.status, 0) + 1
+            if task.is_terminal():
+                terminal_count += 1
+                continue
+            pending_count += 1
+            if self._is_due(task, current):
+                due_count += 1
+            if self._timed_out(task, current):
+                overdue_count += 1
+            if task.next_poll_at:
+                next_poll_times.append(task.next_poll_at)
+            if task.deadline_at:
+                deadline_times.append(task.deadline_at)
+        return {
+            "total": len(tasks),
+            "pending": pending_count,
+            "terminal": terminal_count,
+            "due": due_count,
+            "overdue": overdue_count,
+            "status_counts": status_counts,
+            "next_poll_at": min(next_poll_times) if next_poll_times else None,
+            "deadline_at": min(deadline_times) if deadline_times else None,
+        }
+
     def _poll_due_task(self, task: SubagentTask, now: datetime) -> SubagentTask:
         attempts = task.attempts + 1
         self.coordinator.store.update(task.with_poll_schedule(attempts=attempts))

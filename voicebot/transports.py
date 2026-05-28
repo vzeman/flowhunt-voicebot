@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, get_args, runtime_checkable
 
 from .multimodal import ModalityCapabilities
 from .workspace_model import WorkspaceScope
@@ -75,6 +75,12 @@ class TransportCapabilities:
     concurrent_sessions: bool = True
     modalities: ModalityCapabilities = field(default_factory=ModalityCapabilities)
 
+    def __post_init__(self) -> None:
+        supported_actions = set(get_args(CallControlAction))
+        invalid_actions = sorted(action for action in self.call_control if action not in supported_actions)
+        if invalid_actions:
+            raise ValueError(f"unsupported call-control actions: {', '.join(invalid_actions)}")
+
     def supports(self, action: CallControlAction) -> bool:
         return action in self.call_control
 
@@ -112,6 +118,8 @@ class MediaSessionDescriptor:
     def __post_init__(self) -> None:
         if not self.call_id:
             raise ValueError("call_id is required for media session descriptor")
+        if self.transport not in get_args(TransportKind):
+            raise ValueError(f"unsupported transport kind: {self.transport}")
         if self.sample_rate <= 0:
             raise ValueError("sample_rate must be greater than 0")
 
@@ -187,6 +195,8 @@ class StaticMediaTransport:
         *,
         sample_rate: int = 8_000,
     ) -> None:
+        if kind not in get_args(TransportKind):
+            raise ValueError(f"unsupported transport kind: {kind}")
         if sample_rate <= 0:
             raise ValueError("sample_rate must be greater than 0")
         self.kind = kind

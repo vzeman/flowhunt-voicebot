@@ -20,9 +20,10 @@ The descriptor has `lifecycle_event_data()` so `call_started` and
 `call_connected` events can carry the same route and transport fields for every
 transport.
 
-Descriptors require a non-empty `call_id` and positive `sample_rate`. Transport
-factories should fail fast on invalid media rates before creating runtime
-sessions or emitting lifecycle events.
+Descriptors require a non-empty `call_id`, supported transport kind, and
+positive `sample_rate`. Transport factories should fail fast on invalid media
+rates or unsupported transport kinds before creating runtime sessions or
+emitting lifecycle events.
 
 `MediaSessionDescriptor.require_workspace_scope()` converts routed transport
 metadata into a `WorkspaceScope` and fails if `workspace_id`, `voicebot_id`, or
@@ -40,6 +41,8 @@ Call control must be explicit per transport. The first capability sets are:
 Unsupported actions return a failed `CallControlResult` with a reason and
 transport name. Runtime code should emit that result as a call-control event
 instead of throwing transport-specific errors into the agent loop.
+Capability declarations reject unknown call-control actions when the transport
+descriptor is created.
 
 `CallControlRequest.as_event_data()` and `CallControlResult.as_event_data()`
 provide normalized event payloads for `call_control_requested` and

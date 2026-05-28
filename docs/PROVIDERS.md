@@ -89,4 +89,6 @@ helpers:
 Provider adapters should use these helpers when they are integrated into the
 runtime event path. Latency is emitted as metrics with provider/model/kind
 metadata. Failures are emitted as `provider_call_failed` events with typed error
-codes, retryability, trace ids, and workspace/session scope.
+codes, retryability, trace ids, and workspace/session scope. Runtime telemetry
+rejects blank provider ids, unsupported provider call kinds, blank model names,
+negative latency values, and failure records without code/message fields.

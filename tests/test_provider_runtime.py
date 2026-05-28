@@ -41,6 +41,18 @@ class ProviderRuntimeTests(unittest.TestCase):
         self.assertEqual(event.data["turn_id"], 3)
         self.assertEqual(event.data["trace_id"], "trace-1")
 
+    def test_provider_call_context_rejects_invalid_metadata(self) -> None:
+        with self.assertRaisesRegex(ValueError, "provider is required"):
+            ProviderCallContext(provider="", kind="stt", scope=ExecutionScope(call_id="call-1"))
+        with self.assertRaisesRegex(ValueError, "unsupported provider call kind"):
+            ProviderCallContext(provider="openai", kind="voice", scope=ExecutionScope(call_id="call-1"))
+        with self.assertRaisesRegex(ValueError, "model"):
+            ProviderCallContext(provider="openai", kind="stt", model=" ", scope=ExecutionScope(call_id="call-1"))
+
+    def test_provider_latency_rejects_negative_values(self) -> None:
+        with self.assertRaisesRegex(ValueError, "latency_seconds"):
+            record_provider_latency(EventStore(max_context_events=20), self.context(), -0.1)
+
     def test_record_provider_failure_emits_typed_failure_event(self) -> None:
         events = EventStore(max_context_events=20)
 
@@ -55,6 +67,12 @@ class ProviderRuntimeTests(unittest.TestCase):
         self.assertTrue(event.data["retryable"])
         self.assertEqual(event.data["details"], {"status": 429})
         self.assertEqual(event.data["provider_kind"], "stt")
+
+    def test_provider_failure_rejects_invalid_metadata(self) -> None:
+        with self.assertRaisesRegex(ValueError, "code"):
+            ProviderFailure("", "failed")
+        with self.assertRaisesRegex(ValueError, "message"):
+            ProviderFailure("failed", "")
 
     def test_provider_observability_counts_typed_provider_failures(self) -> None:
         events = EventStore(max_context_events=20)

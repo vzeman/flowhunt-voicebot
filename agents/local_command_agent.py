@@ -443,7 +443,7 @@ def colleague_update_answer(task: dict) -> str:
     data = task.get("data", {})
     reason = str(data.get("reason") or "")
     if reason == "colleague_progress":
-        return _speech_limit(str(data.get("text") or "I am still checking that with a colleague."))
+        return "I am still checking that with a colleague."
     if reason != "colleague_result":
         return ""
 
@@ -458,7 +458,133 @@ def colleague_update_answer(task: dict) -> str:
             candidate = candidate.split(marker, 1)[1].strip()
     if not candidate:
         return ""
-    return _speech_limit(f"I checked with a colleague. {candidate}")
+    spoken = customer_facing_colleague_text(candidate)
+    if not spoken:
+        return "I checked with a colleague, but I do not have a clear customer-facing result yet."
+    return _speech_limit(f"I checked with a colleague. {spoken}", max_chars=420)
+
+
+def customer_facing_colleague_text(text: str) -> str:
+    cleaned = strip_internal_colleague_text(text)
+    customer_markers = (
+        "customer-facing answer:",
+        "customer facing answer:",
+        "answer to the customer:",
+        "final answer:",
+        "answer:",
+        "result:",
+    )
+    lowered = cleaned.lower()
+    for marker in customer_markers:
+        index = lowered.rfind(marker)
+        if index >= 0:
+            cleaned = cleaned[index + len(marker) :].strip()
+            break
+    cleaned = strip_internal_colleague_text(cleaned)
+    return conversationalize_colleague_text(cleaned)
+
+
+def strip_internal_colleague_text(text: str) -> str:
+    cleaned = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    cleaned = re.sub(r"\{[^{}]*(?:task_id|status|workspace_id|flow_id|event_id)[^{}]*\}", " ", cleaned, flags=re.IGNORECASE)
+    kept_lines = []
+    for raw_line in cleaned.splitlines():
+        line = raw_line.strip(" -*\t#")
+        if not line:
+            continue
+        lowered = line.lower()
+        if "you can share with your colleague" in lowered:
+            line = re.sub(r"\byou can share with your colleague\b", "", line, flags=re.IGNORECASE).strip(" -:;,.")
+            lowered = line.lower()
+        if not line:
+            continue
+        if lowered.startswith(
+            (
+                "internal",
+                "debug",
+                "log",
+                "raw",
+                "metadata",
+                "status:",
+                "task_id:",
+                "workspace_id:",
+                "flow_id:",
+                "event_id:",
+                "trace_id:",
+                "tool result",
+                "system:",
+                "assistant:",
+                "hello and welcome",
+                "i'm ai chatbot",
+                "i am ai chatbot",
+                "got any questions",
+                "reference:",
+            )
+        ):
+            continue
+        kept_lines.append(line)
+    return " ".join(kept_lines)
+
+
+def conversationalize_colleague_text(text: str) -> str:
+    pricing_summary = extract_plan_pricing_summary(text)
+    if pricing_summary:
+        return pricing_summary
+    cleaned = re.sub(r"https?://\S+", "", text)
+    cleaned = re.sub(r"[*_`#]", "", cleaned)
+    cleaned = cleaned.replace("\u2705", "included").replace("\u274c", "not included")
+    cleaned = re.sub(r"\b(?:completed|success|finished)\s*[:=-]\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:;,.")
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"\bthe caller\b", "you", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bthe customer\b", "you", cleaned, flags=re.IGNORECASE)
+    sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+    useful = []
+    for sentence in sentences:
+        normalized = sentence.strip()
+        if not normalized:
+            continue
+        if re.search(r"\b(task|ticket|issue|execution|metadata|log|json)\b", normalized, re.IGNORECASE):
+            continue
+        useful.append(normalized)
+        if len(" ".join(useful)) >= 260 or len(useful) >= 2:
+            break
+    spoken = " ".join(useful) or cleaned
+    if spoken and spoken[-1] not in ".!?":
+        spoken = f"{spoken}."
+    return spoken
+
+
+def extract_plan_pricing_summary(text: str) -> str:
+    if "call center" not in text.lower() or "$" not in text:
+        return ""
+    plans = []
+    for plan in ("Small Business", "Medium Business", "Large Business", "Enterprise"):
+        pattern = rf"{re.escape(plan)}.*?\$(\d+)[^$]+?\$(\d+).*?Call Center:\s*(.*?)(?:$|\n)"
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        monthly, annual, tail = match.groups()
+        included = "not included" not in tail.lower()
+        plans.append((plan, monthly, annual, included))
+    if not plans:
+        return ""
+
+    included_plans = [plan for plan in plans if plan[3]]
+    parts = []
+    if included_plans:
+        first = included_plans[0]
+        parts.append(
+            f"Call center functionality is included starting with {first[0]}, "
+            f"which is ${first[1]} per agent per month, or ${first[2]} annually."
+        )
+        for plan, monthly, annual, _included in included_plans[1:]:
+            parts.append(f"{plan} is ${monthly} monthly, or ${annual} annually.")
+    excluded = [plan for plan in plans if not plan[3]]
+    if excluded:
+        parts.append(f"{excluded[0][0]} does not include call center functionality.")
+    return " ".join(parts)
 
 
 def _speech_limit(text: str, max_chars: int = 900) -> str:

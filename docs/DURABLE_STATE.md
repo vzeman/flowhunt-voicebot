@@ -9,10 +9,12 @@ the storage contracts explicit and testable.
 `JsonEventStore` persists every event as JSONL and reloads it on startup. It
 preserves the next event id, so restart does not create duplicate event ids.
 Reload diagnostics are available on the store as `load_diagnostics`, including
-loaded events and skipped blank, malformed JSON, or invalid event rows. Corrupt
-rows are skipped so restart recovery can continue, but operators can still see
-that the local log needs attention. Invalid event rows include non-positive
-event ids and blank call id, event type, or timestamp fields.
+loaded events and skipped blank, malformed JSON, invalid event rows, or
+duplicate event ids. Corrupt rows are skipped so restart recovery can continue,
+but operators can still see that the local log needs attention. Invalid event
+rows include non-positive event ids and blank call id, event type, or timestamp
+fields. When duplicate event ids are found during reload, the first row wins and
+later duplicates are skipped.
 
 The runtime selects the event store with:
 

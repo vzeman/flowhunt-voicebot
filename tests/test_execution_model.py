@@ -14,6 +14,7 @@ from voicebot.execution_model import (
     sort_frames_for_session,
 )
 from voicebot.events import EventStore
+from voicebot.frame_events import frame_event_mapping_issues
 from voicebot.frames import ControlFrame, TextFrame, TranscriptionFrame
 
 
@@ -155,6 +156,24 @@ class ExecutionModelTests(unittest.TestCase):
 
         self.assertEqual([frame.data["text"] for frame in ordered], ["first", "second"])
         self.assertEqual(FrameOrderingKey.from_frame(earlier).to_data()["session_id"], "session-1")
+
+    def test_frame_event_mapping_covers_persistable_frames(self) -> None:
+        self.assertEqual(frame_event_mapping_issues(), [])
+
+    def test_frame_event_mapping_reports_invalid_entries(self) -> None:
+        issues = frame_event_mapping_issues(
+            {
+                "agent_response": "agent_response_received",
+                "unknown_frame": "system",
+                "system": "unknown_event",
+            }
+        )
+
+        issue_names = {issue["issue"] for issue in issues}
+
+        self.assertIn("frame kind is not declared", issue_names)
+        self.assertIn("event type is not declared", issue_names)
+        self.assertIn("persistable frame kind missing event mapping", issue_names)
 
 
 if __name__ == "__main__":

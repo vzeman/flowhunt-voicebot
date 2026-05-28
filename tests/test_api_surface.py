@@ -6,7 +6,13 @@ from fastapi.testclient import TestClient
 
 from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
-from voicebot.api_surface import api_scope_violations, api_surface_by_area, prototype_endpoints, public_endpoints_are_workspace_scoped
+from voicebot.api_surface import (
+    api_scope_violations,
+    api_surface_by_area,
+    api_surface_integrity_issues,
+    prototype_endpoints,
+    public_endpoints_are_workspace_scoped,
+)
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.transcripts import TranscriptStore
@@ -16,6 +22,9 @@ class ApiSurfaceTests(unittest.TestCase):
     def test_public_endpoints_are_workspace_scoped(self) -> None:
         self.assertTrue(public_endpoints_are_workspace_scoped())
         self.assertEqual(api_scope_violations(), [])
+
+    def test_api_surface_catalog_has_no_integrity_issues(self) -> None:
+        self.assertEqual(api_surface_integrity_issues(), [])
 
     def test_api_surface_covers_required_areas(self) -> None:
         grouped = api_surface_by_area()
@@ -36,6 +45,7 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["public_endpoints_are_workspace_scoped"])
         self.assertEqual(response.json()["scope_violations"], [])
+        self.assertEqual(response.json()["integrity_issues"], [])
         self.assertIn("admin", response.json()["areas"])
 
     def test_runtime_endpoint_declares_payload_workspace_scope(self) -> None:

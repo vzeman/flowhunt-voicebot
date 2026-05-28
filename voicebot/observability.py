@@ -144,8 +144,30 @@ def build_timeline(events: list[VoicebotEvent]) -> dict[str, Any]:
     return {
         "events": entries,
         "counts": category_counts,
+        "audio": audio_observability_summary(events),
         "first_event_id": entries[0]["id"] if entries else None,
         "last_event_id": entries[-1]["id"] if entries else None,
+    }
+
+
+def audio_observability_summary(events: list[VoicebotEvent]) -> dict[str, Any]:
+    speech_started = _count_events(events, "user_speech_started")
+    speech_finished = _count_events(events, "user_speech_finished")
+    playback_started = _count_events(events, "bot_playback_started")
+    playback_finished = _count_events(events, "bot_playback_finished")
+    playback_interrupted = _count_events(events, "bot_playback_interrupted")
+    return {
+        "speech_turns_started": speech_started,
+        "speech_turns_finished": speech_finished,
+        "stt_no_text": _count_events(events, "stt_no_text"),
+        "transcripts": _count_events(events, "user_transcript"),
+        "partial_transcripts": _count_events(events, "user_transcript_partial"),
+        "playback_started": playback_started,
+        "playback_finished": playback_finished,
+        "playback_interrupted": playback_interrupted,
+        "possible_barge_ins": playback_interrupted,
+        "open_speech_turns": max(0, speech_started - speech_finished),
+        "open_playbacks": max(0, playback_started - playback_finished - playback_interrupted),
     }
 
 
@@ -243,6 +265,10 @@ def _max_consecutive_duplicates(values: list[str]) -> int:
             current_count = 1
         max_count = max(max_count, current_count)
     return max_count
+
+
+def _count_events(events: list[VoicebotEvent], event_type: str) -> int:
+    return sum(1 for event in events if event.type == event_type)
 
 
 def _optional_str(value: Any) -> str | None:

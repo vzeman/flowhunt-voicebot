@@ -11,6 +11,7 @@ from voicebot.events import EventStore
 from voicebot.observability import (
     ConversationExpectation,
     TraceContext,
+    audio_observability_summary,
     build_timeline,
     evaluate_conversation,
     provider_observability_summary,
@@ -78,7 +79,28 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(timeline["counts"]["stt"], 1)
         self.assertEqual(timeline["counts"]["agent"], 1)
         self.assertEqual(timeline["counts"]["playback"], 1)
+        self.assertEqual(timeline["audio"]["speech_turns_started"], 1)
+        self.assertEqual(timeline["audio"]["open_speech_turns"], 1)
         self.assertEqual([entry["id"] for entry in timeline["events"]], sorted(entry["id"] for entry in timeline["events"]))
+
+    def test_audio_summary_reports_stt_and_playback_health(self) -> None:
+        events = EventStore(max_context_events=20)
+        events.append("call-1", "user_speech_started", {})
+        events.append("call-1", "user_speech_finished", {})
+        events.append("call-1", "stt_no_text", {})
+        events.append("call-1", "user_transcript", {"text": "hello"})
+        events.append("call-1", "bot_playback_started", {})
+        events.append("call-1", "bot_playback_interrupted", {"reason": "user_speech_started"})
+
+        summary = audio_observability_summary(events.list_events(call_id="call-1"))
+
+        self.assertEqual(summary["speech_turns_started"], 1)
+        self.assertEqual(summary["speech_turns_finished"], 1)
+        self.assertEqual(summary["stt_no_text"], 1)
+        self.assertEqual(summary["transcripts"], 1)
+        self.assertEqual(summary["playback_interrupted"], 1)
+        self.assertEqual(summary["possible_barge_ins"], 1)
+        self.assertEqual(summary["open_playbacks"], 0)
 
     def test_provider_summary_reports_latency_and_failures(self) -> None:
         events = EventStore(max_context_events=20)

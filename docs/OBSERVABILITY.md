@@ -35,6 +35,15 @@ single call and regression-testing voicebot behavior without a live call.
 
 This is the backend shape needed for a call timeline viewer.
 
+The timeline also includes `audio_observability_summary()` output for quick
+debugging of realtime behavior:
+
+- speech turns started and finished
+- STT no-text events and transcript counts
+- playback starts, finishes, and interruptions
+- possible barge-ins
+- open speech/playback counters
+
 ## Provider Summary
 
 `provider_observability_summary()` aggregates provider latency samples and

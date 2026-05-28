@@ -406,6 +406,9 @@ def fast_tool_call(task: dict) -> dict | None:
             },
         }
 
+    if is_colleague_update_task(task):
+        return None
+
     if wants_hangup(normalized):
         return {
             "name": "hangup_call",

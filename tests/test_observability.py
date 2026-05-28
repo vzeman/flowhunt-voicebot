@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import unittest
 
+from fastapi.testclient import TestClient
+
+from voicebot.agent_tasks import AgentTaskTracker
+from voicebot.api import WebSocketHub, create_app
+from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.observability import (
     ConversationExpectation,
@@ -11,6 +16,7 @@ from voicebot.observability import (
     provider_observability_summary,
     structured_log_record,
 )
+from voicebot.transcripts import TranscriptStore
 
 
 class ObservabilityTests(unittest.TestCase):
@@ -123,6 +129,49 @@ class ObservabilityTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["failures"], [])
+
+    def test_timeline_endpoint_filters_by_workspace_and_session(self) -> None:
+        events = EventStore(max_context_events=20)
+        events.append("call-1", "call_started", {"workspace_id": "workspace-1", "session_id": "session-1"})
+        events.append("call-2", "call_started", {"workspace_id": "workspace-2", "session_id": "session-2"})
+        client = self.build_client(events)
+
+        response = client.get("/observability/timeline?workspace_id=workspace-1&session_id=session-1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["counts"], {"call": 1})
+        self.assertEqual(response.json()["events"][0]["call_id"], "call-1")
+
+    def test_evaluate_endpoint_runs_conversation_checks(self) -> None:
+        events = EventStore(max_context_events=20)
+        events.append("call-1", "call_connected", {})
+        events.append("call-1", "user_transcript", {"text": "Question"})
+        events.append("call-1", "agent_response_received", {"text": "Answer"})
+        client = self.build_client(events)
+
+        response = client.post(
+            "/observability/evaluate",
+            json={
+                "call_id": "call-1",
+                "must_include_event_types": ["call_connected", "user_transcript"],
+                "require_final_agent_response": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["failures"], [])
+
+    def build_client(self, events: EventStore) -> TestClient:
+        app = create_app(
+            events,
+            CallRegistry(),
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+        )
+        return TestClient(app)
 
 
 if __name__ == "__main__":

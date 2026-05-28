@@ -53,7 +53,17 @@ This is the first regression-test harness for problems we observed during manual
 testing, especially repeated responses and missing final answers after delegated
 work.
 
+## Runtime API
+
+`GET /observability/timeline` returns a categorized event timeline. It accepts
+`after`, `call_id`, `workspace_id`, `voicebot_id`, `session_id`, and `limit`
+filters.
+
+`POST /observability/evaluate` runs deterministic conversation checks against
+the selected event window. The request can provide required event types,
+duplicate response tolerance, and whether a final agent response is required.
+
 ## Next Step
 
-Wire these primitives into API endpoints and runtime logging, then add audio
-fixture tests for VAD, STT quality, barge-in, and playback interruption.
+Add runtime structured logging and audio fixture tests for VAD, STT quality,
+barge-in, and playback interruption.

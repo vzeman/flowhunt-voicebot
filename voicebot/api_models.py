@@ -15,6 +15,18 @@ class CompactContextRequest(BaseModel):
     call_id: str = "system"
 
 
+class ConversationEvaluationRequest(BaseModel):
+    call_id: str | None = None
+    workspace_id: str | None = None
+    voicebot_id: str | None = None
+    session_id: str | None = None
+    after: int = 0
+    limit: int = 1000
+    must_include_event_types: list[str] = Field(default_factory=list)
+    max_duplicate_agent_responses: int = 1
+    require_final_agent_response: bool = False
+
+
 class CallControlRequest(BaseModel):
     action: str
     target: str | None = None

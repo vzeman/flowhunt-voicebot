@@ -69,6 +69,10 @@ Polling uses the registered subagent provider only. For FlowHunt flows, that
 means the official invoke task protocol: submit once, store the task id, then
 poll by `flow_id + task_id`.
 
+Providers that declare `supports_async_polling=False` are not polled by the
+runner. The task remains running, receives a diagnostic progress message, and is
+rescheduled until it is completed externally, cancelled, or reaches its timeout.
+
 Session cancellation honors the registered provider descriptor. If a provider
 does not support cancellation, the runner does not call provider `cancel()`; it
 marks the task terminal with a progress diagnostic so operations can see why no

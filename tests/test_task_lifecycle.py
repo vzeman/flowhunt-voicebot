@@ -242,6 +242,32 @@ class TaskLifecycleTests(unittest.TestCase):
         self.assertIn("does not support cancellation", cancelled[0].progress_messages[-1])
         self.assertEqual(events, ["subagent_task_cancelled"])
 
+    def test_lifecycle_runner_does_not_poll_non_polling_provider(self) -> None:
+        provider = SequencedProvider(["completed"])
+        coordinator = SubagentCoordinator()
+        coordinator.register(
+            provider,
+            SubagentProviderDescriptor(
+                kind="internal_worker",
+                label="Manual worker",
+                supports_async_polling=False,
+                supports_cancel=False,
+            ),
+        )
+        runner = SubagentTaskLifecycleRunner(
+            coordinator,
+            policy=PollingPolicy(initial_interval_seconds=1, timeout_seconds=60),
+        )
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        runner.schedule(coordinator.request(self.request()), now)
+
+        updated = runner.tick(now + timedelta(seconds=1))[0]
+
+        self.assertEqual(provider.polls, 0)
+        self.assertEqual(updated.status, "running")
+        self.assertIn("does not support async polling", updated.progress_messages[-1])
+        self.assertIsNotNone(updated.next_poll_at)
+
     def test_polling_policy_rejects_invalid_values(self) -> None:
         invalid_policies = [
             {"initial_interval_seconds": 0},

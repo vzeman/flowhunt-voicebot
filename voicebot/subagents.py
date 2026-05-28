@@ -400,6 +400,9 @@ class SubagentCoordinator:
     def supports_cancel(self, kind: SubagentProviderKind) -> bool:
         return self.provider_descriptor(kind).supports_cancel
 
+    def supports_async_polling(self, kind: SubagentProviderKind) -> bool:
+        return self.provider_descriptor(kind).supports_async_polling
+
     def request(self, request: SubagentTaskRequest) -> SubagentTask:
         self._validate_request_metadata(request)
         task, created = self.store.get_or_create_requested(request)

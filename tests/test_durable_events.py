@@ -3,7 +3,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 
+from voicebot.config import Settings
 from voicebot.events import EventStore, JsonEventStore, event_from_dict
+from voicebot.runtime_storage import build_event_store
+from voicebot.transcripts import TranscriptStore
 
 
 class DurableEventTests(unittest.TestCase):
@@ -66,6 +69,35 @@ class DurableEventTests(unittest.TestCase):
                 }
             )
         )
+
+    def test_runtime_builder_selects_json_event_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = Settings(
+                event_store_provider="json",
+                event_store_path=f"{directory}/events.jsonl",
+                transcript_dir=f"{directory}/transcripts",
+            )
+            transcripts = TranscriptStore(settings.transcript_dir)
+
+            store = build_event_store(settings, transcripts)
+            store.append("call-1", "call_started", {"workspace_id": "workspace-1"})
+            reloaded = build_event_store(settings, transcripts)
+
+        self.assertIsInstance(store, JsonEventStore)
+        self.assertEqual([event.type for event in reloaded.list_events()], ["call_started"])
+
+    def test_runtime_builder_can_select_memory_event_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = Settings(
+                event_store_provider="memory",
+                event_store_path=f"{directory}/events.jsonl",
+                transcript_dir=f"{directory}/transcripts",
+            )
+
+            store = build_event_store(settings, TranscriptStore(settings.transcript_dir))
+
+        self.assertIsInstance(store, EventStore)
+        self.assertNotIsInstance(store, JsonEventStore)
 
 
 if __name__ == "__main__":

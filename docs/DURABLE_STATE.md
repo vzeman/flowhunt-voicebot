@@ -9,6 +9,15 @@ the storage contracts explicit and testable.
 `JsonEventStore` persists every event as JSONL and reloads it on startup. It
 preserves the next event id, so restart does not create duplicate event ids.
 
+The runtime selects the event store with:
+
+- `VOICEBOT_EVENT_STORE_PROVIDER=json|memory`
+- `VOICEBOT_EVENT_STORE_PATH=/data/events/events.jsonl`
+
+Docker defaults to `json`, so local service restarts keep the event cursor and
+subagent result history. Tests and embedded callers can still use the in-memory
+store directly when durability is not required.
+
 The event store can query by:
 
 - `call_id`

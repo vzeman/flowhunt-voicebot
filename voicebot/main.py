@@ -14,6 +14,7 @@ from .config import Settings
 from .events import EventStore
 from .flowhunt import FlowHuntClient
 from .provider_registry import default_provider_registry
+from .runtime_storage import build_event_store
 from .sip_trunks import SipTrunkStore
 from .subagents import FlowHuntSubagentProvider, JsonSubagentTaskStore, SubagentCoordinator
 from .transcripts import TranscriptStore
@@ -24,7 +25,7 @@ def main() -> None:
     settings = Settings()
     hub = WebSocketHub()
     transcripts = TranscriptStore(settings.transcript_dir)
-    events = EventStore(settings.max_context_events, transcript_store=transcripts)
+    events = build_event_store(settings, transcripts)
     registry = CallRegistry()
     tracker = AgentTaskTracker(settings.agent_task_responded_event_retention)
     sip_trunks = SipTrunkStore(settings.sip_trunk_registry_path, settings.sip_trunk_pjsip_include_path)

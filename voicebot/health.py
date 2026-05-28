@@ -5,7 +5,7 @@ import tempfile
 from typing import Any
 
 from .asterisk_control import AsteriskAMI
-from .event_catalog import missing_catalog_event_types
+from .event_catalog import event_catalog_integrity_issues, missing_catalog_event_types
 from .provider_catalog import provider_catalog
 from .transcripts import TranscriptStore
 
@@ -89,9 +89,10 @@ def provider_catalog_check() -> HealthCheck:
 
 
 def event_catalog_check() -> HealthCheck:
+    issues = event_catalog_integrity_issues()
     missing = sorted(missing_catalog_event_types())
     return HealthCheck(
-        not missing,
-        "event catalog covers all declared event types" if not missing else "event catalog is missing event types",
-        {"missing_event_types": missing},
+        not issues,
+        "event catalog is valid" if not issues else "event catalog has integrity issues",
+        {"missing_event_types": missing, "integrity_issues": issues},
     )

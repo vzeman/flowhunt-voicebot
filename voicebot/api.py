@@ -37,7 +37,7 @@ from .api_models import (
 from .asterisk_control import AsteriskAMI, ControlResult
 from .calls import AgentResponse, CallRegistry
 from .config import Settings, redacted_settings
-from .event_catalog import event_catalog
+from .event_catalog import event_catalog, event_catalog_integrity_issues
 from .events import EventStore, VoicebotEvent, event_to_dict
 from .execution_model import ExecutionScope
 from .flowhunt import (
@@ -561,7 +561,7 @@ def create_app(
 
     @app.get("/events/catalog")
     def list_event_catalog() -> dict[str, Any]:
-        return {"events": event_catalog()}
+        return {"events": event_catalog(), "integrity_issues": event_catalog_integrity_issues()}
 
     @app.get("/metrics")
     def metrics(call_id: str | None = None) -> dict[str, Any]:

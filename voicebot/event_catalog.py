@@ -86,3 +86,34 @@ def missing_catalog_event_types() -> set[str]:
     catalog_types = {entry.type for entry in EVENT_CATALOG}
     declared_types = set(get_args(EventType))
     return declared_types - catalog_types
+
+
+def event_catalog_integrity_issues(catalog: tuple[EventCatalogEntry, ...] = EVENT_CATALOG) -> list[dict[str, object]]:
+    issues: list[dict[str, object]] = []
+    declared_types = set(get_args(EventType))
+    seen: set[str] = set()
+    for entry in catalog:
+        if not entry.type.strip():
+            issues.append({**entry.to_dict(), "issue": "event type is required"})
+            continue
+        if entry.type in seen:
+            issues.append({**entry.to_dict(), "issue": "duplicate event catalog type"})
+        seen.add(entry.type)
+        if entry.type not in declared_types:
+            issues.append({**entry.to_dict(), "issue": "event type is not declared by runtime"})
+        if not entry.category.strip():
+            issues.append({**entry.to_dict(), "issue": "event category is required"})
+        if not entry.description.strip():
+            issues.append({**entry.to_dict(), "issue": "event description is required"})
+
+    for missing_type in sorted(declared_types - seen):
+        issues.append(
+            {
+                "type": missing_type,
+                "category": "",
+                "description": "",
+                "agent_visible": True,
+                "issue": "declared event type missing from catalog",
+            }
+        )
+    return issues

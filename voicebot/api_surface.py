@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
 
 
 ApiArea = Literal[
@@ -32,6 +32,20 @@ class ApiEndpointSpec:
     workspace_scoped: bool = True
     scope_source: ApiScopeSource = "path"
     description: str = ""
+
+    def __post_init__(self) -> None:
+        if self.method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+            raise ValueError(f"unsupported API method: {self.method}")
+        if not self.path.startswith("/"):
+            raise ValueError("API path must start with /")
+        if self.area not in get_args(ApiArea):
+            raise ValueError(f"unsupported API area: {self.area}")
+        if self.visibility not in get_args(ApiVisibility):
+            raise ValueError(f"unsupported API visibility: {self.visibility}")
+        if self.scope_source not in get_args(ApiScopeSource):
+            raise ValueError(f"unsupported API scope source: {self.scope_source}")
+        if not self.workspace_scoped and self.scope_source != "none":
+            raise ValueError("unscoped API endpoints must use scope_source=none")
 
 
 FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (

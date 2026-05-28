@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
 from voicebot.api_surface import (
+    ApiEndpointSpec,
     api_scope_violations,
     api_surface_by_area,
     api_surface_integrity_issues,
@@ -26,6 +27,20 @@ class ApiSurfaceTests(unittest.TestCase):
 
     def test_api_surface_catalog_has_no_integrity_issues(self) -> None:
         self.assertEqual(api_surface_integrity_issues(), [])
+
+    def test_api_endpoint_spec_rejects_invalid_contract_fields(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported API method"):
+            ApiEndpointSpec("TRACE", "/x", "admin", "public")
+        with self.assertRaisesRegex(ValueError, "path"):
+            ApiEndpointSpec("GET", "x", "admin", "public")
+        with self.assertRaisesRegex(ValueError, "unsupported API area"):
+            ApiEndpointSpec("GET", "/x", "unknown", "public")
+        with self.assertRaisesRegex(ValueError, "unsupported API visibility"):
+            ApiEndpointSpec("GET", "/x", "admin", "external")
+        with self.assertRaisesRegex(ValueError, "unsupported API scope source"):
+            ApiEndpointSpec("GET", "/x", "admin", "public", scope_source="header")
+        with self.assertRaisesRegex(ValueError, "scope_source=none"):
+            ApiEndpointSpec("GET", "/health", "internal", "internal", workspace_scoped=False, scope_source="query")
 
     def test_api_surface_summary_counts_catalog_dimensions(self) -> None:
         summary = api_surface_summary()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 
@@ -70,6 +71,100 @@ class DeploymentTopology:
             "shared_state": list(self.shared_state),
             "queues": [queue.as_dict() for queue in self.queues],
         }
+
+
+@dataclass(frozen=True)
+class WorkerInstance:
+    worker_id: str
+    role: WorkerRole
+    queue: str
+    workspace_id: str | None = None
+    voicebot_id: str | None = None
+    capacity: int = 1
+    status: Literal["active", "draining"] = "active"
+    last_heartbeat_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+    def as_dict(self) -> dict:
+        return {
+            "worker_id": self.worker_id,
+            "role": self.role,
+            "queue": self.queue,
+            "workspace_id": self.workspace_id,
+            "voicebot_id": self.voicebot_id,
+            "capacity": self.capacity,
+            "status": self.status,
+            "last_heartbeat_at": self.last_heartbeat_at,
+        }
+
+
+class WorkerRegistry:
+    def __init__(self, heartbeat_ttl_seconds: float = 30.0) -> None:
+        self.heartbeat_ttl_seconds = heartbeat_ttl_seconds
+        self._workers: dict[str, WorkerInstance] = {}
+
+    def heartbeat(self, worker: WorkerInstance, now: datetime | None = None) -> WorkerInstance:
+        current = now or datetime.now(UTC)
+        updated = WorkerInstance(
+            worker_id=worker.worker_id,
+            role=worker.role,
+            queue=worker.queue,
+            workspace_id=worker.workspace_id,
+            voicebot_id=worker.voicebot_id,
+            capacity=worker.capacity,
+            status=worker.status,
+            last_heartbeat_at=current.isoformat(),
+        )
+        self._workers[updated.worker_id] = updated
+        return updated
+
+    def mark_draining(self, worker_id: str, now: datetime | None = None) -> WorkerInstance:
+        worker = self._workers[worker_id]
+        return self.heartbeat(
+            WorkerInstance(
+                worker_id=worker.worker_id,
+                role=worker.role,
+                queue=worker.queue,
+                workspace_id=worker.workspace_id,
+                voicebot_id=worker.voicebot_id,
+                capacity=worker.capacity,
+                status="draining",
+                last_heartbeat_at=worker.last_heartbeat_at,
+            ),
+            now,
+        )
+
+    def remove(self, worker_id: str) -> bool:
+        return self._workers.pop(worker_id, None) is not None
+
+    def active(
+        self,
+        role: WorkerRole | None = None,
+        workspace_id: str | None = None,
+        now: datetime | None = None,
+    ) -> tuple[WorkerInstance, ...]:
+        current = now or datetime.now(UTC)
+        self.expire(current)
+        return tuple(
+            worker
+            for worker in sorted(self._workers.values(), key=lambda item: item.worker_id)
+            if worker.status == "active"
+            and (role is None or worker.role == role)
+            and (workspace_id is None or worker.workspace_id in (None, workspace_id))
+        )
+
+    def expire(self, now: datetime | None = None) -> tuple[WorkerInstance, ...]:
+        current = now or datetime.now(UTC)
+        expired: list[WorkerInstance] = []
+        for worker_id, worker in list(self._workers.items()):
+            if _parse_time(worker.last_heartbeat_at) + timedelta(seconds=self.heartbeat_ttl_seconds) <= current:
+                expired.append(worker)
+                self._workers.pop(worker_id, None)
+        return tuple(expired)
+
+    def snapshot(self, now: datetime | None = None) -> dict:
+        current = now or datetime.now(UTC)
+        self.expire(current)
+        return {"workers": [worker.as_dict() for worker in sorted(self._workers.values(), key=lambda item: item.worker_id)]}
 
 
 @dataclass
@@ -152,6 +247,10 @@ def _capacity_ok(concurrent_sessions: int, limit: int | None) -> bool | None:
     if limit is None:
         return None
     return concurrent_sessions <= limit
+
+
+def _parse_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
 
 
 def default_deployment_topology() -> DeploymentTopology:

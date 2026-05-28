@@ -41,6 +41,17 @@ reports corruption statistics. It remains the call transcript surface.
 `JsonSubagentTaskStore` persists delegated subagent tasks, including provider
 task ids, status, retry state, deadline, and terminal-event emission markers.
 
+## Agent Task Leases
+
+`JsonAgentTaskTracker` persists communication-agent task state:
+
+- responded event ids and retention floor
+- active worker claims with absolute lease expiration
+
+On restart, unexpired claims are restored and expired claims are dropped. This is
+still a local JSON implementation, but it makes the lease persistence contract
+explicit before the tracker moves to Redis or FlowHunt database-backed leases.
+
 ## Production Direction
 
 The JSON stores are implementation scaffolding. In FlowHunt production:

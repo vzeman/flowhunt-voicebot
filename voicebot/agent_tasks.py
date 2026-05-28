@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import json
+from pathlib import Path
 import threading
 import time
 from typing import Any
@@ -133,3 +135,83 @@ class AgentTaskTracker:
             event_id = self._responded_order.popleft()
             self.responded_event_ids.discard(event_id)
             self._responded_event_id_floor = max(self._responded_event_id_floor, event_id)
+
+
+class JsonAgentTaskTracker(AgentTaskTracker):
+    def __init__(self, path: str | Path, max_responded_event_ids: int = 10000) -> None:
+        self.path = Path(path)
+        super().__init__(max_responded_event_ids=max_responded_event_ids)
+        self._load()
+
+    def mark_responded(self, event_id: int | None) -> None:
+        super().mark_responded(event_id)
+        self._save()
+
+    def claim(self, event_ids: list[int], owner: str, ttl_seconds: float) -> list[int]:
+        claimed = super().claim(event_ids, owner, ttl_seconds)
+        self._save()
+        return claimed
+
+    def release(self, event_id: int | None) -> None:
+        super().release(event_id)
+        self._save()
+
+    def release_many(self, event_ids: list[int], owner: str | None = None) -> list[int]:
+        released = super().release_many(event_ids, owner=owner)
+        self._save()
+        return released
+
+    def renew_many(self, event_ids: list[int], owner: str, ttl_seconds: float) -> list[int]:
+        renewed = super().renew_many(event_ids, owner, ttl_seconds)
+        self._save()
+        return renewed
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        with self._lock:
+            responded = [int(item) for item in payload.get("responded_event_ids", [])]
+            self.responded_event_ids = set(responded)
+            self._responded_order = deque(responded)
+            self._responded_event_id_floor = int(payload.get("responded_event_id_floor") or 0)
+            self._prune_responded_locked()
+
+            now_wall = time.time()
+            now_monotonic = time.monotonic()
+            claims = {}
+            for event_id, claim in (payload.get("claims") or {}).items():
+                try:
+                    expires_at_wall = float(claim["expires_at"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if expires_at_wall <= now_wall:
+                    continue
+                claims[int(event_id)] = (str(claim.get("owner", "")), now_monotonic + (expires_at_wall - now_wall))
+            self._claimed_event_ids = claims
+
+    def _save(self) -> None:
+        now_wall = time.time()
+        now_monotonic = time.monotonic()
+        with self._lock:
+            self._expire_claims_locked(now_monotonic)
+            claims = {
+                str(event_id): {
+                    "owner": owner,
+                    "expires_at": now_wall + max(0.0, expires_at - now_monotonic),
+                }
+                for event_id, (owner, expires_at) in sorted(self._claimed_event_ids.items())
+            }
+            payload = {
+                "version": 1,
+                "responded_event_ids": list(self._responded_order),
+                "responded_event_id_floor": self._responded_event_id_floor,
+                "claims": claims,
+            }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+        tmp.replace(self.path)

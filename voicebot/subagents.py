@@ -321,6 +321,8 @@ class JsonSubagentTaskStore(SubagentTaskStore):
             "loaded_tasks": 0,
             "skipped_malformed_json": 0,
             "skipped_invalid_tasks": 0,
+            "skipped_duplicate_task_ids": 0,
+            "skipped_duplicate_dedupe_keys": 0,
         }
         super().__init__()
         self._load()
@@ -344,14 +346,25 @@ class JsonSubagentTaskStore(SubagentTaskStore):
         except (OSError, json.JSONDecodeError):
             self.load_diagnostics["skipped_malformed_json"] += 1
             return
+        seen_task_ids: set[str] = set()
+        seen_dedupe_keys: set[tuple[str, str]] = set()
         for item in raw.get("tasks", []):
             try:
                 task = subagent_task_from_dict(item)
             except (KeyError, TypeError, ValueError):
                 self.load_diagnostics["skipped_invalid_tasks"] += 1
                 continue
+            if task.task_id in seen_task_ids:
+                self.load_diagnostics["skipped_duplicate_task_ids"] += 1
+                continue
+            dedupe_key = (task.workspace_id, task.dedupe_key)
+            if dedupe_key in seen_dedupe_keys:
+                self.load_diagnostics["skipped_duplicate_dedupe_keys"] += 1
+                continue
+            seen_task_ids.add(task.task_id)
+            seen_dedupe_keys.add(dedupe_key)
             self._tasks[task.task_id] = task
-            self._dedupe_index[(task.workspace_id, task.dedupe_key)] = task.task_id
+            self._dedupe_index[dedupe_key] = task.task_id
             self.load_diagnostics["loaded_tasks"] += 1
 
     def _save(self) -> None:

@@ -47,6 +47,11 @@ debugging of realtime behavior:
 The timeline response also embeds provider rollups so the same payload shows
 provider latency sample counts, average latency, and failure counts.
 
+`timeline_health_summary()` adds deterministic health flags to the same
+timeline payload. It reports warnings for open speech turns, open playback, and
+provider failures so operators can scan one response before inspecting the full
+event list.
+
 ## Provider Summary
 
 `provider_observability_summary()` aggregates provider latency samples and

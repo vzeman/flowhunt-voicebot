@@ -141,11 +141,14 @@ def build_timeline(events: list[VoicebotEvent]) -> dict[str, Any]:
                 "data": event.data,
             }
         )
+    audio = audio_observability_summary(events)
+    providers = provider_observability_summary(events)["providers"]
     return {
         "events": entries,
         "counts": category_counts,
-        "audio": audio_observability_summary(events),
-        "providers": provider_observability_summary(events)["providers"],
+        "audio": audio,
+        "providers": providers,
+        "health": timeline_health_summary(audio, providers),
         "first_event_id": entries[0]["id"] if entries else None,
         "last_event_id": entries[-1]["id"] if entries else None,
     }
@@ -206,6 +209,26 @@ def provider_observability_summary(events: list[VoicebotEvent]) -> dict[str, Any
             for provider, count in sorted(failures.items())
             if provider not in latencies
         }
+    }
+
+
+def timeline_health_summary(audio: dict[str, Any], providers: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    warnings: list[str] = []
+    if int(audio.get("open_speech_turns") or 0) > 0:
+        warnings.append("open speech turn")
+    if int(audio.get("open_playbacks") or 0) > 0:
+        warnings.append("open playback")
+    failed_providers = sorted(
+        provider
+        for provider, summary in providers.items()
+        if int(summary.get("failure_count") or 0) > 0
+    )
+    if failed_providers:
+        warnings.append(f"provider failures: {', '.join(failed_providers)}")
+    return {
+        "ok": not warnings,
+        "warnings": warnings,
+        "failed_providers": failed_providers,
     }
 
 

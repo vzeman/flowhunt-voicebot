@@ -57,7 +57,11 @@ def parse_args() -> argparse.Namespace:
             )
         ),
     )
-    parser.add_argument("--max-output-tokens", type=int, default=500)
+    parser.add_argument(
+        "--max-output-tokens",
+        type=int,
+        default=int(env_or_default("VOICEBOT_COMMUNICATION_AGENT_MAX_OUTPUT_TOKENS", "220")),
+    )
     return parser.parse_args()
 
 

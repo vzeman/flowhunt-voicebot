@@ -16,7 +16,7 @@ from local_command_agent import (
     claim_tasks,
     execute_tool_call,
     execute_tool_calls,
-    fast_tool_call,
+    fast_tool_calls,
     filter_voice_agent_tools,
     http_json,
     is_echo_answer,
@@ -72,12 +72,12 @@ def run_communication_agent(
             ttl_seconds = max(config.timeout * 2, 30.0)
             with ClaimRenewer(config.base_url, pending, owner, ttl_seconds):
                 latest = pending[-1]
-                deterministic_call = fast_tool_call(latest)
-                if deterministic_call:
-                    execute_tool_call(config.base_url, deterministic_call)
+                deterministic_calls = fast_tool_calls(latest)
+                if deterministic_calls:
+                    execute_tool_calls(config.base_url, deterministic_calls)
                     seen.add(latest["id"])
                     print(
-                        f"executed deterministic tool {deterministic_call['name']} for event {latest['id']}",
+                        f"executed {len(deterministic_calls)} deterministic tool(s) for event {latest['id']}",
                         flush=True,
                     )
                     claimed_pending = []

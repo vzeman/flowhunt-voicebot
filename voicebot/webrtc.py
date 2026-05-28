@@ -14,7 +14,7 @@ import numpy as np
 from scipy.io import wavfile
 
 from .audio import CALL_SAMPLE_RATE, STT_SAMPLE_RATE, resample_audio, rms
-from .calls import AgentResponse, DEFAULT_STT_PIPELINE, DEFAULT_TTS_PIPELINE, PlaybackBuffer
+from .calls import AgentResponse, DEFAULT_STT_PIPELINE, DEFAULT_TTS_PIPELINE, PlaybackBuffer, limit_spoken_response_text
 from .config import Settings
 from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, AudioOutputFrame, PlaybackFrame, TextFrame, TranscriptionFrame
@@ -237,11 +237,12 @@ class WebRTCCallSession:
             self._speech_jobs.put((turn_id, audio))
 
     def submit_agent_response(self, response: AgentResponse) -> VoicebotEvent:
+        text = limit_spoken_response_text(response.text, self.settings.max_reply_chars)
         self._record_agent_latency(response.response_to_event_id)
         event = self.events.append(
             self.call_id,
             "agent_response_received",
-            {"text": response.text, "response_to_event_id": response.response_to_event_id},
+            {"text": text, "response_to_event_id": response.response_to_event_id},
         )
         startup_response = self._is_startup_response(response.response_to_event_id)
         if self.recording_event.is_set() and not startup_response:
@@ -271,13 +272,14 @@ class WebRTCCallSession:
             )
             return event
 
+        tts_synthesis_started = time.monotonic()
         try:
             frames = asyncio.run(
                 self.tts_pipeline.push(
                     TextFrame(
                         "agent_response",
                         self.call_id,
-                        response.text,
+                        text,
                         data={"response_to_event_id": response.response_to_event_id},
                     )
                 )
@@ -289,6 +291,11 @@ class WebRTCCallSession:
                 {"error": str(exc), "response_to_event_id": response.response_to_event_id},
             )
             raise
+        self._record_metric(
+            "tts_synthesis_latency_seconds",
+            time.monotonic() - tts_synthesis_started,
+            {"response_to_event_id": response.response_to_event_id},
+        )
 
         audio_chunks: list[np.ndarray] = []
         duration = 0.0
@@ -297,7 +304,7 @@ class WebRTCCallSession:
                 self.events.append(
                     self.call_id,
                     "tts_started",
-                    {"text": response.text, "response_to_event_id": response.response_to_event_id},
+                    {"text": text, "response_to_event_id": response.response_to_event_id},
                 )
             elif isinstance(frame, PlaybackFrame) and frame.kind == "tts_finished":
                 duration = float(frame.data.get("duration", 0.0))

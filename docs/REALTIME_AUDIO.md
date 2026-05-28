@@ -74,6 +74,8 @@ the main self-audio suppression responsibility.
 - `stop_threshold`
 - `vad_start_ms`
 - `silence_ms`
+  - Default: `700`. This endpointing delay is intentionally below one second
+    so short phone turns are not held unnecessarily before STT starts.
 - `min_seconds`
 - `max_seconds`
 - `barge_in_threshold`

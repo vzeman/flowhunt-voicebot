@@ -407,7 +407,17 @@ def fast_tool_call(task: dict) -> dict | None:
         }
 
     if is_colleague_update_task(task):
-        return None
+        answer = colleague_update_answer(task)
+        if not answer:
+            return None
+        return {
+            "name": "say",
+            "arguments": {
+                "call_id": call_id,
+                "text": answer,
+                "response_to_event_id": event_id,
+            },
+        }
 
     if wants_hangup(normalized):
         return {
@@ -427,6 +437,38 @@ def fast_tool_call(task: dict) -> dict | None:
         }
 
     return None
+
+
+def colleague_update_answer(task: dict) -> str:
+    data = task.get("data", {})
+    reason = str(data.get("reason") or "")
+    if reason == "colleague_progress":
+        return _speech_limit(str(data.get("text") or "I am still checking that with a colleague."))
+    if reason != "colleague_result":
+        return ""
+
+    result = data.get("data") if isinstance(data.get("data"), dict) else {}
+    candidate = ""
+    if isinstance(result, dict):
+        candidate = str(result.get("summary") or result.get("content") or "")
+    if not candidate:
+        candidate = str(data.get("text") or "")
+        marker = "Result:"
+        if marker in candidate:
+            candidate = candidate.split(marker, 1)[1].strip()
+    if not candidate:
+        return ""
+    return _speech_limit(f"I checked with a colleague. {candidate}")
+
+
+def _speech_limit(text: str, max_chars: int = 900) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    if len(cleaned) <= max_chars:
+        return cleaned
+    truncated = cleaned[:max_chars].rsplit(".", 1)[0].strip()
+    if len(truncated) < max_chars * 0.5:
+        truncated = cleaned[:max_chars].rsplit(" ", 1)[0].strip()
+    return f"{truncated}."
 
 
 def wants_hangup(normalized_text: str) -> bool:

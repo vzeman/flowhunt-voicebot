@@ -7,7 +7,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agents"))
 
-from local_command_agent import fast_tool_call, needs_spoken_followup, remove_colleague_reentrant_tool_calls
+from local_command_agent import (
+    colleague_update_answer,
+    fast_tool_call,
+    needs_spoken_followup,
+    remove_colleague_reentrant_tool_calls,
+)
 
 
 class AgentCoordinationTests(unittest.TestCase):
@@ -44,7 +49,29 @@ class AgentCoordinationTests(unittest.TestCase):
             },
         }
 
-        self.assertIsNone(fast_tool_call(task))
+        call = fast_tool_call(task)
+
+        self.assertEqual(call["name"], "say")
+        self.assertEqual(call["arguments"]["response_to_event_id"], 10)
+        self.assertIn("LiveAgent IVR can transfer", call["arguments"]["text"])
+
+    def test_colleague_result_uses_clean_summary_for_fast_spoken_answer(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {
+                "reason": "colleague_result",
+                "text": "A colleague finished checking the caller request. Result: raw fallback",
+                "data": {"summary": "Connect the VoIP number first, then assign an IVR tree."},
+            },
+        }
+
+        answer = colleague_update_answer(task)
+
+        self.assertEqual(
+            answer,
+            "I checked with a colleague. Connect the VoIP number first, then assign an IVR tree.",
+        )
 
 
 if __name__ == "__main__":

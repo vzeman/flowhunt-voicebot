@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 from uuid import uuid4
 
+from .events import EventStore, VoicebotEvent
+from .execution_model import ExecutionScope
+
 
 SubagentProviderKind = Literal[
     "flowhunt_flow",
@@ -152,6 +155,22 @@ class SubagentTask:
             **self.result.clean_context(),
         }
 
+    def event_context(self) -> dict[str, Any]:
+        data = {
+            "task_id": self.task_id,
+            "status": self.status,
+            "provider": self.provider,
+            "request_event_id": self.request_event_id,
+            "external_task_id": self.external_task_id,
+            "dedupe_key": self.dedupe_key,
+            "progress": list(self.progress_messages),
+        }
+        if self.error:
+            data["error"] = self.error
+        if self.result is not None:
+            data["result"] = self.result.clean_context()
+        return {key: value for key, value in data.items() if value not in (None, "", [])}
+
 
 @runtime_checkable
 class SubagentProvider(Protocol):
@@ -261,8 +280,9 @@ class JsonSubagentTaskStore(SubagentTaskStore):
 
 
 class SubagentCoordinator:
-    def __init__(self, store: SubagentTaskStore | None = None) -> None:
+    def __init__(self, store: SubagentTaskStore | None = None, events: EventStore | None = None) -> None:
         self.store = store or SubagentTaskStore()
+        self.events = events
         self.providers: dict[SubagentProviderKind, SubagentProvider] = {}
 
     def register(self, provider: SubagentProvider) -> None:
@@ -271,14 +291,18 @@ class SubagentCoordinator:
     def request(self, request: SubagentTaskRequest) -> SubagentTask:
         task, created = self.store.get_or_create_requested(request)
         if not created:
+            self._emit_task_event("subagent_task_deduplicated", task)
             return task
+        self._emit_task_event("subagent_task_requested", task)
         provider = self._provider(request.provider)
         submitted = provider.submit(request)
         if submitted.workspace_id != request.workspace_id:
             raise ValueError("subagent provider returned task for a different workspace")
         if submitted.task_id != task.task_id:
             submitted = replace(submitted, task_id=task.task_id)
-        return self.store.update(submitted)
+        updated = self.store.update(submitted)
+        self._emit_task_event("subagent_task_updated", updated)
+        return updated
 
     def poll(self, task_id: str, workspace_id: str) -> SubagentTask:
         task = self.store.get(task_id, workspace_id)
@@ -289,7 +313,9 @@ class SubagentCoordinator:
         updated = self._provider(task.provider).poll(task)
         if updated.workspace_id != workspace_id:
             raise ValueError("subagent provider returned task for a different workspace")
-        return self.store.update(updated)
+        stored = self.store.update(updated)
+        self._emit_task_event("subagent_task_updated", stored)
+        return stored
 
     def cancel(self, task_id: str, workspace_id: str) -> SubagentTask:
         task = self.store.get(task_id, workspace_id)
@@ -298,13 +324,29 @@ class SubagentCoordinator:
         updated = self._provider(task.provider).cancel(task)
         if updated.workspace_id != workspace_id:
             raise ValueError("subagent provider returned task for a different workspace")
-        return self.store.update(updated)
+        stored = self.store.update(updated)
+        self._emit_task_event("subagent_task_cancelled", stored)
+        return stored
 
     def _provider(self, kind: SubagentProviderKind) -> SubagentProvider:
         provider = self.providers.get(kind)
         if provider is None:
             raise KeyError(f"subagent provider is not registered: {kind}")
         return provider
+
+    def _emit_task_event(self, event_type: str, task: SubagentTask) -> VoicebotEvent | None:
+        if self.events is None:
+            return None
+        return self.events.append_scoped(
+            ExecutionScope(
+                workspace_id=task.workspace_id,
+                voicebot_id=task.voicebot_id or "",
+                session_id=task.session_id,
+                call_id=task.session_id,
+            ),
+            event_type,
+            task.event_context(),
+        )
 
 
 class FlowHuntSubagentProvider:

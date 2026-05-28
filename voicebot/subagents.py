@@ -283,6 +283,14 @@ class SubagentTaskStore:
             raise KeyError(f"unknown subagent task: {task.task_id}")
         if existing.workspace_id != task.workspace_id:
             raise ValueError("cannot move subagent task across workspaces")
+        if existing.session_id != task.session_id:
+            raise ValueError("cannot move subagent task across sessions")
+        if existing.voicebot_id != task.voicebot_id:
+            raise ValueError("cannot move subagent task across voicebots")
+        if existing.provider != task.provider:
+            raise ValueError("cannot move subagent task across providers")
+        if existing.request_event_id != task.request_event_id:
+            raise ValueError("cannot move subagent task across request events")
         self._tasks[task.task_id] = task
         return task
 

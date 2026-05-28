@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 
 SUPPORTED_STT_PROVIDERS = {
@@ -284,6 +284,16 @@ class ProviderDescriptor:
             issues.append("capabilities modalities must match descriptor family")
         if any(not credential.strip() for credential in self.capabilities.required_credentials):
             issues.append("required credentials must not be blank")
+        if self.capabilities.latency_profile not in get_args(LatencyProfile):
+            issues.append("latency profile must be supported")
+        if any(not language.strip() for language in self.capabilities.languages):
+            issues.append("languages must not be blank")
+        if any(not metadata_key.strip() for metadata_key in self.capabilities.usage_metadata):
+            issues.append("usage metadata keys must not be blank")
+        if self.capabilities.output_audio_format is not None and not self.capabilities.output_audio_format.strip():
+            issues.append("output audio format must not be blank")
+        if any(not model.strip() for model in self.models):
+            issues.append("models must not be blank")
         return tuple(issues)
 
 

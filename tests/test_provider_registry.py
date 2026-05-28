@@ -71,6 +71,18 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertEqual(registry.resolve_stt_provider(Settings(stt_provider="default_stt"), workspace_route), "workspace-stt")
         self.assertEqual(registry.resolve_stt_provider(Settings(stt_provider="default_stt"), voicebot_route), "voicebot-stt")
 
+    def test_registry_rejects_route_to_unregistered_stt_adapter(self) -> None:
+        registry = ProviderRegistry()
+
+        with self.assertRaisesRegex(ValueError, "no adapter is registered"):
+            registry.route_stt("workspace-1", "voicebot-1", "deepgram")
+
+    def test_registry_rejects_route_to_unregistered_tts_adapter(self) -> None:
+        registry = ProviderRegistry()
+
+        with self.assertRaisesRegex(ValueError, "no adapter is registered"):
+            registry.route_tts("workspace-1", "voicebot-1", "elevenlabs")
+
 
 if __name__ == "__main__":
     unittest.main()

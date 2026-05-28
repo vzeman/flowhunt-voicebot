@@ -53,10 +53,10 @@ class ProviderRegistry:
         self.tts_descriptors[normalized] = descriptor or _default_tts_descriptor(normalized)
 
     def route_stt(self, workspace_id: str | None, voicebot_id: str | None, provider: str) -> None:
-        self.stt_routes[(workspace_id, voicebot_id)] = normalize_provider(provider)
+        self._route_provider(self.stt_routes, self.stt_factories, workspace_id, voicebot_id, provider, "STT")
 
     def route_tts(self, workspace_id: str | None, voicebot_id: str | None, provider: str) -> None:
-        self.tts_routes[(workspace_id, voicebot_id)] = normalize_provider(provider)
+        self._route_provider(self.tts_routes, self.tts_factories, workspace_id, voicebot_id, provider, "TTS")
 
     def build_stt(self, settings: Settings, route: CallRoute | None = None):
         provider = self.resolve_stt_provider(settings, route)
@@ -122,6 +122,20 @@ class ProviderRegistry:
                 if provider:
                     return provider
         return normalize_provider(default_provider)
+
+    def _route_provider(
+        self,
+        routes: dict[tuple[str | None, str | None], str],
+        factories: dict[str, ProviderFactory],
+        workspace_id: str | None,
+        voicebot_id: str | None,
+        provider: str,
+        family: str,
+    ) -> None:
+        normalized = normalize_provider(provider)
+        if normalized not in factories:
+            raise ValueError(f"Cannot route {family} provider '{normalized}' because no adapter is registered")
+        routes[(workspace_id, voicebot_id)] = normalized
 
 
 def default_provider_registry() -> ProviderRegistry:

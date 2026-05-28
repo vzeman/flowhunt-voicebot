@@ -103,3 +103,7 @@ an active call.
 The first implementation is in-memory. It defines the contract that durable
 storage will implement later so flow execution can survive worker restarts and
 scale across multiple runtime workers.
+
+For an existing call id, the store rejects attempts to move state across
+workspace, voicebot, or flow boundaries. Durable storage should preserve the
+same invariant when sessions are claimed by different workers.

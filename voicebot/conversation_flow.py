@@ -258,6 +258,13 @@ class ConversationSessionStateStore:
         self._sessions: dict[str, ConversationSessionState] = {}
 
     def save(self, session: ConversationSessionState) -> ConversationSessionState:
+        existing = self._sessions.get(session.call_id)
+        if existing is not None and existing.workspace_id != session.workspace_id:
+            raise ValueError("cannot move conversation session across workspaces")
+        if existing is not None and existing.voicebot_id != session.voicebot_id:
+            raise ValueError("cannot move conversation session across voicebots")
+        if existing is not None and existing.flow_id != session.flow_id:
+            raise ValueError("cannot move conversation session across flows")
         self._sessions[session.call_id] = session
         return session
 

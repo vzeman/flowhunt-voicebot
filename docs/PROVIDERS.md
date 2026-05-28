@@ -45,7 +45,10 @@ The registry now has route-aware provider resolution hooks:
 This is the first step toward selecting STT/TTS/agent providers per FlowHunt
 workspace and voicebot. The in-memory route table is intentionally small; it
 will be replaced by durable FlowHunt workspace configuration when the admin API
-is implemented.
+is implemented. Route bindings are validated when they are registered: a
+workspace/voicebot route must point at an adapter that is actually registered in
+the runtime, so bad configuration fails before a live call tries to build the
+provider.
 
 ## Current Adapters
 

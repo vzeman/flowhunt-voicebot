@@ -32,6 +32,15 @@ Unsupported actions return a failed `CallControlResult` with a reason and
 transport name. Runtime code should emit that result as a call-control event
 instead of throwing transport-specific errors into the agent loop.
 
+Capabilities are also exposed as a workspace-scoped catalog:
+
+`GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/transports`
+
+The response lists each known transport kind, whether that transport is
+implemented by this runtime, call-control actions, audio flags, concurrency
+support, and modality support. Control planes can use this before binding a
+voicebot to SIP, WebRTC, or future telephony providers.
+
 ## Routing
 
 Routing metadata uses FlowHunt workspace terminology:
@@ -58,4 +67,5 @@ it for lifecycle event payloads and session snapshots. SIP/Asterisk AudioSocket
 sessions also build descriptors when the AudioSocket UUID is received and use
 descriptor data for lifecycle events and snapshots. Workspace/voicebot routing
 for SIP still depends on moving trunk bindings behind workspace-scoped channel
-resolution.
+resolution. Transport capabilities are now discoverable through the shared API
+catalog, so clients do not need to infer support from live sessions.

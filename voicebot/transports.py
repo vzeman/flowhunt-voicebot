@@ -78,6 +78,18 @@ WEBRTC_CAPABILITIES = TransportCapabilities(
 )
 
 
+TRANSPORT_CAPABILITIES: dict[TransportKind, TransportCapabilities] = {
+    "asterisk_audiosocket": ASTERISK_AUDIOSOCKET_CAPABILITIES,
+    "webrtc": WEBRTC_CAPABILITIES,
+    "local": TransportCapabilities(),
+    "twilio": TransportCapabilities(),
+    "telnyx": TransportCapabilities(),
+    "vonage": TransportCapabilities(),
+    "livekit": WEBRTC_CAPABILITIES,
+    "daily": WEBRTC_CAPABILITIES,
+}
+
+
 @dataclass(frozen=True)
 class MediaSessionDescriptor:
     call_id: str
@@ -165,6 +177,30 @@ class StaticMediaTransport:
             ok=True,
             data={"transport": self.kind, **request.data},
         )
+
+
+def transport_capabilities_to_dict(capabilities: TransportCapabilities) -> dict[str, Any]:
+    return {
+        "call_control": sorted(capabilities.call_control),
+        "inbound_audio": capabilities.inbound_audio,
+        "outbound_audio": capabilities.outbound_audio,
+        "interruptible_playback": capabilities.interruptible_playback,
+        "concurrent_sessions": capabilities.concurrent_sessions,
+        "modalities": capabilities.modalities.to_dict(),
+    }
+
+
+def transport_catalog() -> dict[str, Any]:
+    return {
+        "transports": {
+            kind: {
+                "kind": kind,
+                "capabilities": transport_capabilities_to_dict(capabilities),
+                "implemented": kind in {"asterisk_audiosocket", "webrtc", "local"},
+            }
+            for kind, capabilities in sorted(TRANSPORT_CAPABILITIES.items())
+        }
+    }
 
 
 def _optional_str(value: Any) -> str | None:

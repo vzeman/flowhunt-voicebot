@@ -19,7 +19,7 @@ class ApiSurfaceTests(unittest.TestCase):
     def test_api_surface_covers_required_areas(self) -> None:
         grouped = api_surface_by_area()
 
-        for area in ("admin", "channel", "runtime", "session", "transcript", "task", "provider", "testing"):
+        for area in ("admin", "channel", "runtime", "session", "transcript", "task", "provider", "transport", "testing"):
             self.assertIn(area, grouped)
 
     def test_prototype_endpoints_are_identified(self) -> None:
@@ -41,6 +41,16 @@ class ApiSurfaceTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["endpoints"][0]["path"], "/webrtc/test")
+
+    def test_voicebot_transport_catalog_endpoint_exposes_capabilities(self) -> None:
+        response = self.build_client().get("/workspaces/workspace-1/voicebots/voicebot-1/transports")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["workspace_id"], "workspace-1")
+        self.assertEqual(payload["voicebot_id"], "voicebot-1")
+        self.assertIn("asterisk_audiosocket", payload["transports"])
+        self.assertIn("hangup", payload["transports"]["webrtc"]["capabilities"]["call_control"])
 
     def build_client(self) -> TestClient:
         app = create_app(

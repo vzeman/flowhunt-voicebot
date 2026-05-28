@@ -69,6 +69,39 @@ class MultimodalContext:
         }
 
 
+class MultimodalContextStore:
+    def __init__(self) -> None:
+        self._contexts: dict[str, MultimodalContext] = {}
+
+    def add_part(
+        self,
+        call_id: str,
+        part: MultimodalContent,
+        *,
+        workspace_id: str | None = None,
+        voicebot_id: str | None = None,
+        session_id: str | None = None,
+    ) -> MultimodalContext:
+        context = self._contexts.get(call_id) or MultimodalContext(
+            call_id=call_id,
+            workspace_id=workspace_id,
+            voicebot_id=voicebot_id,
+            session_id=session_id,
+        )
+        context = MultimodalContext(
+            call_id=call_id,
+            workspace_id=context.workspace_id or workspace_id,
+            voicebot_id=context.voicebot_id or voicebot_id,
+            session_id=context.session_id or session_id,
+            parts=(*context.parts, part),
+        )
+        self._contexts[call_id] = context
+        return context
+
+    def get(self, call_id: str) -> MultimodalContext:
+        return self._contexts.get(call_id) or MultimodalContext(call_id=call_id)
+
+
 @dataclass(frozen=True)
 class ModalityCapabilities:
     input: frozenset[Modality] = frozenset({"audio", "text"})

@@ -57,6 +57,7 @@ EventType = Literal[
     "bot_playback_finished",
     "metrics",
     "dtmf",
+    "multimodal_content_added",
     "transport_error",
     "system",
     "context_compacted",

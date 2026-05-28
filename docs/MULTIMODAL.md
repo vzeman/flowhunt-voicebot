@@ -31,6 +31,16 @@ Media/session orchestration should not know how a model consumes images or
 renders visual cards. It should move normalized content parts and let provider
 adapters translate them into provider-specific payloads.
 
+## Runtime API
+
+`GET /calls/{call_id}/multimodal` returns the accumulated normalized multimodal
+context for a call.
+
+`POST /calls/{call_id}/multimodal/parts` attaches one normalized part and emits
+`multimodal_content_added`. The endpoint stores references such as URI, MIME
+type, text, and metadata only; it does not fetch URLs or inspect external
+content.
+
 ## Future Work
 
 - WebRTC chat and visual card events

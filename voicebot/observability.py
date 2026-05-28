@@ -66,6 +66,7 @@ EVENT_CATEGORIES: dict[str, TimelineCategory] = {
     "call_control_requested": "control",
     "call_control_completed": "control",
     "dtmf": "control",
+    "multimodal_content_added": "agent",
     "transport_error": "transport",
     "metrics": "telemetry",
     "context_compacted": "system",

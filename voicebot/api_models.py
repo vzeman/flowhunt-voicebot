@@ -37,6 +37,18 @@ class ScalingWorkloadPlanRequest(BaseModel):
     agent_provider: str | None = None
 
 
+class MultimodalContentRequest(BaseModel):
+    modality: str
+    direction: str
+    mime_type: str | None = None
+    uri: str | None = None
+    text: str | None = None
+    workspace_id: str | None = None
+    voicebot_id: str | None = None
+    session_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class CallControlRequest(BaseModel):
     action: str
     target: str | None = None

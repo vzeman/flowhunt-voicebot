@@ -104,6 +104,12 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual([worker.worker_id for worker in expired], ["agent-1"])
         self.assertEqual(registry.snapshot(now + timedelta(seconds=12))["workers"], [])
 
+    def test_worker_registry_rejects_invalid_heartbeat_ttl(self) -> None:
+        with self.assertRaisesRegex(ValueError, "heartbeat_ttl_seconds"):
+            WorkerRegistry(heartbeat_ttl_seconds=0)
+        with self.assertRaisesRegex(ValueError, "heartbeat_ttl_seconds"):
+            WorkerRegistry(heartbeat_ttl_seconds=-1)
+
     def test_worker_registry_rejects_role_or_queue_moves(self) -> None:
         registry = WorkerRegistry(heartbeat_ttl_seconds=30)
         now = datetime(2026, 5, 28, tzinfo=UTC)

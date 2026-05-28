@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import tempfile
 import time
 import unittest
 
-from voicebot.agent_tasks import AgentTaskTracker
+from voicebot.agent_tasks import AgentTaskTracker, JsonAgentTaskTracker
 
 
 class AgentTaskTrackerTests(unittest.TestCase):
@@ -107,6 +108,32 @@ class AgentTaskTrackerTests(unittest.TestCase):
     def test_responded_event_retention_requires_positive_limit(self) -> None:
         with self.assertRaisesRegex(ValueError, "max_responded_event_ids must be at least 1"):
             AgentTaskTracker(max_responded_event_ids=0)
+
+    def test_json_tracker_persists_responded_events_and_claims(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/agent_tasks.json"
+            first = JsonAgentTaskTracker(path)
+            first.claim([1], "worker-1", 30)
+            first.mark_responded(2)
+
+            reloaded = JsonAgentTaskTracker(path)
+
+        self.assertEqual(reloaded.snapshot()["responded_event_ids"], [2])
+        self.assertFalse(reloaded.is_pending(1))
+        self.assertEqual(reloaded.task_state(1)["state"], "claimed")
+        self.assertEqual(reloaded.task_state(1)["owner"], "worker-1")
+
+    def test_json_tracker_drops_expired_claims_on_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/agent_tasks.json"
+            first = JsonAgentTaskTracker(path)
+            first.claim([1], "worker-1", 0.1)
+            time.sleep(0.12)
+
+            reloaded = JsonAgentTaskTracker(path)
+
+        self.assertTrue(reloaded.is_pending(1))
+        self.assertEqual(reloaded.snapshot()["claims"], {})
 
 
 if __name__ == "__main__":

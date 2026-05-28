@@ -6,7 +6,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from voicebot.agent_tasks import AgentTaskTracker
-from voicebot.api import WebSocketHub, create_app
+from voicebot.api import WebSocketHub, _seconds_between_timestamps, create_app
 from voicebot.calls import CallRegistry
 from voicebot.config import Settings
 from voicebot.events import EventStore
@@ -97,6 +97,17 @@ class FakeSubagentProvider:
 
 
 class ApiCallControlTests(unittest.TestCase):
+    def test_seconds_between_timestamps_handles_valid_invalid_and_reversed_values(self) -> None:
+        self.assertEqual(
+            _seconds_between_timestamps("2026-05-28T00:00:00+00:00", "2026-05-28T00:00:02.500000+00:00"),
+            2.5,
+        )
+        self.assertEqual(
+            _seconds_between_timestamps("2026-05-28T00:00:03Z", "2026-05-28T00:00:02Z"),
+            0.0,
+        )
+        self.assertIsNone(_seconds_between_timestamps("not-a-time", "2026-05-28T00:00:02Z"))
+
     def build_client(
         self,
         asterisk=None,

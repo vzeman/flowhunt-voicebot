@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, get_args
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -1255,8 +1256,25 @@ def create_app(
             },
         )
         await hub.broadcast(requested)
+        source_event_id = _optional_int(data.get("source_event_id"))
+        if source_event_id is not None and reason in {"colleague_result", "colleague_progress"}:
+            source_event = events.get_event(source_event_id)
+            elapsed = _seconds_between_timestamps(source_event.timestamp if source_event else "", requested.timestamp)
+            if elapsed is not None:
+                metric = events.append(
+                    call_id,
+                    "metrics",
+                    {
+                        "name": "colleague_result_to_agent_request_seconds",
+                        "value": elapsed,
+                        "source_event_id": source_event_id,
+                        "event_id": requested.id,
+                        "reason": reason,
+                    },
+                )
+                await hub.broadcast(metric)
 
-    async def notify_subagent_terminal_task(task: SubagentTask) -> None:
+    async def notify_subagent_terminal_task(task: SubagentTask, terminal_event: VoicebotEvent | None = None) -> None:
         if registry.get(task.session_id) is None:
             return
         if task.status == "completed":
@@ -1271,6 +1289,7 @@ def create_app(
                 provider=task.provider,
                 external_task_id=task.external_task_id,
                 ok=True,
+                source_event_id=terminal_event.id if terminal_event else None,
                 data=task.clean_result_context(),
             )
             return
@@ -1284,6 +1303,7 @@ def create_app(
                 provider=task.provider,
                 external_task_id=task.external_task_id,
                 ok=False,
+                source_event_id=terminal_event.id if terminal_event else None,
                 data=task.clean_result_context(),
             )
 
@@ -1295,11 +1315,16 @@ def create_app(
                 changed = await asyncio.to_thread(subagent_lifecycle.tick)
                 pending_broadcasts = list(subagent_terminal_events)
                 subagent_terminal_events.clear()
+                terminal_events_by_task_id = {
+                    str(event.data.get("task_id")): event
+                    for event in pending_broadcasts
+                    if event.data.get("task_id")
+                }
                 for event in pending_broadcasts:
                     await hub.broadcast(event)
                 for task in changed:
                     if task.is_terminal() and task.terminal_event_emitted_at:
-                        await notify_subagent_terminal_task(task)
+                        await notify_subagent_terminal_task(task, terminal_events_by_task_id.get(task.task_id))
             except Exception as exc:
                 events.append("system", "system", {"component": "subagent_lifecycle", "error": str(exc)})
             try:
@@ -1727,6 +1752,24 @@ def optional_int_value(value: Any, name: str, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail=f"{name} must be an integer") from None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _seconds_between_timestamps(start: Any, end: Any) -> float | None:
+    try:
+        started = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        ended = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return max(0.0, (ended - started).total_seconds())
 
 
 def validated_dtmf_digit(value: Any) -> str:

@@ -62,6 +62,11 @@ selected debug window.
 failure counts from events. The timeline response and existing metrics summary
 include this provider rollup.
 
+The runtime also emits `colleague_result_to_agent_request_seconds` when a
+terminal subagent result is handed back to the communication agent. Use this
+metric to separate FlowHunt/provider execution time from internal handoff
+latency before the caller hears the final answer.
+
 ## Conversation Evaluation
 
 `evaluate_conversation()` runs deterministic checks against an event sequence:

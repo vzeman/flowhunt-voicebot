@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
 import tempfile
 import unittest
 
@@ -72,6 +73,34 @@ class TaskLifecycleTests(unittest.TestCase):
         self.assertFalse(duplicate_created)
         self.assertEqual(duplicate.task_id, task.task_id)
         self.assertEqual(duplicate.external_task_id, "external-1")
+
+    def test_json_store_reports_load_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/tasks.json"
+            first = JsonSubagentTaskStore(path)
+            task, _created = first.get_or_create_requested(self.request())
+            with open(path, encoding="utf-8") as handle:
+                payload = json.loads(handle.read())
+            payload["tasks"].append({"task_id": "bad"})
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+
+            reloaded = JsonSubagentTaskStore(path)
+
+        self.assertEqual(reloaded.load_diagnostics["loaded_tasks"], 1)
+        self.assertEqual(reloaded.load_diagnostics["skipped_invalid_tasks"], 1)
+        self.assertEqual(reloaded.get(task.task_id).task_id, task.task_id)
+
+    def test_json_store_reports_malformed_json_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/tasks.json"
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("{bad json}")
+
+            reloaded = JsonSubagentTaskStore(path)
+
+        self.assertEqual(reloaded.load_diagnostics["skipped_malformed_json"], 1)
+        self.assertEqual(reloaded.list(), [])
 
     def test_lifecycle_runner_polls_due_task_with_backoff_and_emits_completion_once(self) -> None:
         provider = SequencedProvider(["running", "completed"])

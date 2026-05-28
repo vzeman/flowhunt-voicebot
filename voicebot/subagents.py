@@ -309,6 +309,11 @@ class SubagentTaskStore:
 class JsonSubagentTaskStore(SubagentTaskStore):
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
+        self.load_diagnostics: dict[str, int] = {
+            "loaded_tasks": 0,
+            "skipped_malformed_json": 0,
+            "skipped_invalid_tasks": 0,
+        }
         super().__init__()
         self._load()
 
@@ -329,11 +334,17 @@ class JsonSubagentTaskStore(SubagentTaskStore):
         try:
             raw = json.loads(self.path.read_text())
         except (OSError, json.JSONDecodeError):
+            self.load_diagnostics["skipped_malformed_json"] += 1
             return
         for item in raw.get("tasks", []):
-            task = subagent_task_from_dict(item)
+            try:
+                task = subagent_task_from_dict(item)
+            except (KeyError, TypeError, ValueError):
+                self.load_diagnostics["skipped_invalid_tasks"] += 1
+                continue
             self._tasks[task.task_id] = task
             self._dedupe_index[(task.workspace_id, task.dedupe_key)] = task.task_id
+            self.load_diagnostics["loaded_tasks"] += 1
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

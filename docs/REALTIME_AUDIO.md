@@ -37,6 +37,11 @@ Outputs:
 events. It includes decision, level, block duration, started/finished flags,
 barge-in interruption, turn duration, and optional session/turn identifiers.
 
+The SIP AudioSocket and WebRTC runtime loops emit `vad_decision` metrics for
+speech start and terminal turn decisions, plus `speech_duration_seconds` and
+`silence_duration_seconds` when a turn closes. This keeps live-call behavior
+debuggable without requiring packet-level audio logs.
+
 Decision values:
 
 - `ignored`: input was suppressed, usually bot playback echo.

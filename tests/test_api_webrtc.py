@@ -176,6 +176,34 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertEqual(snapshot["route"]["workspace_id"], "workspace-1")
         self.assertIn("hangup", snapshot["capabilities"]["call_control"])
 
+    def test_webrtc_vad_decisions_emit_runtime_metrics(self) -> None:
+        events = EventStore(max_context_events=20)
+        session = WebRTCCallSession(
+            call_id="webrtc-call-1",
+            session_id="session-1",
+            settings=Settings(
+                greet_on_connect=False,
+                start_threshold=0.1,
+                stop_threshold=0.05,
+                vad_start_ms=0,
+                silence_ms=10,
+                min_seconds=999.0,
+            ),
+            event_store=events,
+            stt=FakeSTT(),
+            tts=FakeTTS(),
+        )
+        self.addCleanup(session.stop)
+
+        session.process_audio_block(np.full(160, 0.4, dtype=np.float32))
+        session.process_audio_block(np.zeros(160, dtype=np.float32))
+
+        metrics = [event.data for event in events.list_events(call_id="webrtc-call-1") if event.type == "metrics"]
+        vad_decisions = [metric for metric in metrics if metric["name"] == "vad_decision"]
+        self.assertEqual([metric["decision"] for metric in vad_decisions], ["speech_started", "speech_too_short"])
+        self.assertEqual(vad_decisions[0]["transport"], "webrtc")
+        self.assertIn({"name": "silence_duration_seconds", "value": 0.01, "turn_id": 1}, metrics)
+
 
 if __name__ == "__main__":
     unittest.main()

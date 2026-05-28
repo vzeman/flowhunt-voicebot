@@ -94,6 +94,51 @@ class AudioChunkNormalizer:
 
 
 @dataclass
+class DebugAudioCapture:
+    enabled: bool
+    sample_rate: int
+    max_seconds: float = 30.0
+    _blocks: deque[np.ndarray] = field(default_factory=deque)
+    _samples: int = 0
+
+    def append(self, block: np.ndarray) -> None:
+        if not self.enabled:
+            return
+        samples = np.asarray(block, dtype=np.float32).reshape(-1)
+        if samples.size == 0:
+            return
+        self._blocks.append(samples.copy())
+        self._samples += int(samples.size)
+        self._trim()
+
+    def audio(self) -> np.ndarray:
+        if not self._blocks:
+            return np.zeros(0, dtype=np.float32)
+        return np.concatenate(list(self._blocks)).astype(np.float32, copy=False)
+
+    def clear(self) -> None:
+        self._blocks.clear()
+        self._samples = 0
+
+    def summary(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "sample_rate": self.sample_rate,
+            "samples": self._samples,
+            "duration_seconds": self._samples / self.sample_rate if self.sample_rate else 0.0,
+        }
+
+    def _trim(self) -> None:
+        max_samples = int(max(0.0, self.max_seconds) * self.sample_rate)
+        if max_samples <= 0:
+            self.clear()
+            return
+        while self._samples > max_samples and self._blocks:
+            removed = self._blocks.popleft()
+            self._samples -= int(removed.size)
+
+
+@dataclass
 class TurnDetectorState:
     is_recording: bool = False
     collected: list[np.ndarray] = field(default_factory=list)

@@ -71,6 +71,11 @@ This rule is intentionally simple for the first shared primitive. Future impleme
 
 These values should be resolved per voicebot/session once workspace-based configuration is implemented.
 
+`turn_detection_config_from_settings(settings, sample_rate)` maps the current
+runtime settings object into this shared config. Transport code should use this
+factory when constructing turn detectors so SIP, WebRTC, and future media
+ingress paths do not duplicate threshold and timing mapping.
+
 ## Chunk Normalization
 
 `AudioChunkNormalizer` handles transport-boundary normalization:

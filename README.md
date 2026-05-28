@@ -72,6 +72,8 @@ Workspace/voicebot-scoped provider configuration is documented in
 [docs/PROVIDER_CONFIG.md](docs/PROVIDER_CONFIG.md).
 The FlowHunt product API surface is documented in
 [docs/FLOWHUNT_API_SURFACE.md](docs/FLOWHUNT_API_SURFACE.md).
+Workspace-based multitenancy and channel resolution are documented in
+[docs/WORKSPACE_MODEL.md](docs/WORKSPACE_MODEL.md).
 
 ## Architecture Schema
 

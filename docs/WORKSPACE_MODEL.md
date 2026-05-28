@@ -1,0 +1,76 @@
+# Workspace-Based Multitenancy
+
+FlowHunt workspaces are the tenant boundary. The voicebot runtime must not
+introduce a separate `tenant_id` model.
+
+## Hierarchy
+
+```text
+Workspace
+  Voicebot
+    Channels
+      SIP trunks
+      phone numbers
+      WebRTC widgets
+    Runtime config
+      STT/TTS/agent providers
+      FlowHunt flow/project bindings
+      prompts, language, voice
+    Sessions
+      customer calls and browser sessions
+    Events, transcripts, external tasks
+```
+
+## Required Runtime Scope
+
+Runtime paths should carry:
+
+- `workspace_id`
+- `voicebot_id`
+- `session_id`
+
+`WorkspaceScope` models these identifiers. Events should include this scope when
+the channel or session route is known.
+
+## Channel Resolution
+
+Inbound traffic resolves through channel bindings:
+
+```text
+SIP trunk / phone number / WebRTC widget
+        |
+        v
+VoicebotChannelBinding
+        |
+        v
+workspace_id + voicebot_id
+        |
+        v
+create session_id
+```
+
+The first implementation provides an in-memory `ChannelResolver` contract. In
+FlowHunt production, channel bindings should live in workspace-scoped database
+tables.
+
+## Subagents
+
+Subagent and FlowHunt project/flow calls must run in the same `workspace_id` as
+the voicebot session. `require_same_workspace()` makes this invariant explicit.
+
+## Current Prototype Assumptions To Remove
+
+- Global `.env` provider choices instead of workspace/voicebot provider config
+- Local in-memory channel routing in some runtime paths
+- Local worker lease state for agent tasks
+- Local JSON stores for events and external task records
+- Prototype browser test endpoint outside workspace routing
+
+## Follow-Up Implementation Work
+
+- Persist `voicebots` and `voicebot_channels` in FlowHunt DB
+- Route SIP/WebRTC runtime sessions through channel bindings
+- Store active sessions, events, transcripts, and external tasks with
+  `workspace_id`, `voicebot_id`, and `session_id`
+- Enforce FlowHunt workspace permissions on admin APIs
+- Move task leases and active session locks to shared storage

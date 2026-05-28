@@ -5,11 +5,13 @@ import unittest
 from voicebot.execution_model import (
     ExecutionIds,
     ExecutionScope,
+    FrameOrderingKey,
     frame_category,
     frame_is_cancellation,
     frame_is_session_ordered,
     ids_from_frame,
     scope_from_frame,
+    sort_frames_for_session,
 )
 from voicebot.events import EventStore
 from voicebot.frames import ControlFrame, TextFrame, TranscriptionFrame
@@ -103,6 +105,27 @@ class ExecutionModelTests(unittest.TestCase):
     def test_cancellation_frames_are_identified(self) -> None:
         self.assertTrue(frame_is_cancellation(ControlFrame("cancel_tts", "call-1", reason="barge_in")))
         self.assertFalse(frame_is_cancellation(TextFrame("agent_response", "call-1", "ok")))
+
+    def test_frame_ordering_key_sorts_by_session_turn_timestamp_and_frame_id(self) -> None:
+        later = TranscriptionFrame(
+            "user_transcript",
+            "call-1",
+            2,
+            text="second",
+            data={"session_id": "session-1"},
+        )
+        earlier = TranscriptionFrame(
+            "user_transcript",
+            "call-1",
+            1,
+            text="first",
+            data={"session_id": "session-1"},
+        )
+
+        ordered = sort_frames_for_session([later, earlier])
+
+        self.assertEqual([frame.data["text"] for frame in ordered], ["first", "second"])
+        self.assertEqual(FrameOrderingKey.from_frame(earlier).to_data()["session_id"], "session-1")
 
 
 if __name__ == "__main__":

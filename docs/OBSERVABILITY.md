@@ -52,6 +52,10 @@ timeline payload. It reports warnings for open speech turns, open playback, and
 provider failures so operators can scan one response before inspecting the full
 event list.
 
+The timeline also reports `duration_seconds` when at least two event timestamps
+can be parsed. This is the elapsed time between the first and last event in the
+selected debug window.
+
 ## Provider Summary
 
 `provider_observability_summary()` aggregates provider latency samples and

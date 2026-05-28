@@ -1230,8 +1230,8 @@ Request:
 ### GET `/api/surface`
 
 Returns the FlowHunt API surface catalog grouped by area, plus a boolean showing
-whether all public endpoints are workspace-scoped, scope violations, and catalog
-integrity issues.
+whether all public endpoints are workspace-scoped, summary counts by area,
+visibility, and scope source, scope violations, and catalog integrity issues.
 
 ### GET `/api/surface/prototypes`
 

@@ -15,9 +15,10 @@ APIs and marks prototype-only endpoints.
 ## Surface Discovery
 
 `GET /api/surface` returns the grouped API surface catalog, whether all public
-endpoints are workspace-scoped, scope violations, and catalog integrity issues
-such as duplicate method/path specs or missing descriptions. Each endpoint
-declares `scope_source`:
+endpoints are workspace-scoped, catalog summary counts, scope violations, and
+catalog integrity issues such as duplicate method/path specs or missing
+descriptions. The summary includes counts by area, visibility, and scope source.
+Each endpoint declares `scope_source`:
 
 - `path`: workspace is in `/workspaces/{workspace_id}/...`
 - `payload`: workspace/voicebot route is resolved from request data

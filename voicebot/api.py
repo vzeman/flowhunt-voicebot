@@ -12,6 +12,7 @@ from .api_surface import (
     api_scope_violations,
     api_surface_by_area,
     api_surface_integrity_issues,
+    api_surface_summary,
     prototype_endpoints,
     public_endpoints_are_workspace_scoped,
 )
@@ -267,6 +268,7 @@ def create_app(
     @app.get("/api/surface")
     def api_surface() -> dict[str, Any]:
         return {
+            "summary": api_surface_summary(),
             "areas": api_surface_by_area(),
             "public_endpoints_are_workspace_scoped": public_endpoints_are_workspace_scoped(),
             "scope_violations": api_scope_violations(),

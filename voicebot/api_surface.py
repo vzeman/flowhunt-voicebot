@@ -65,6 +65,24 @@ def api_surface_by_area() -> dict[str, list[dict]]:
     return grouped
 
 
+def api_surface_summary() -> dict:
+    by_area: dict[str, int] = {}
+    by_visibility: dict[str, int] = {}
+    by_scope_source: dict[str, int] = {}
+
+    for endpoint in FLOWHUNT_API_SURFACE:
+        by_area[endpoint.area] = by_area.get(endpoint.area, 0) + 1
+        by_visibility[endpoint.visibility] = by_visibility.get(endpoint.visibility, 0) + 1
+        by_scope_source[endpoint.scope_source] = by_scope_source.get(endpoint.scope_source, 0) + 1
+
+    return {
+        "total": len(FLOWHUNT_API_SURFACE),
+        "by_area": dict(sorted(by_area.items())),
+        "by_visibility": dict(sorted(by_visibility.items())),
+        "by_scope_source": dict(sorted(by_scope_source.items())),
+    }
+
+
 def prototype_endpoints() -> list[dict]:
     return [api_endpoint_to_dict(endpoint) for endpoint in FLOWHUNT_API_SURFACE if endpoint.visibility == "prototype"]
 

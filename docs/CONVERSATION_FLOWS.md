@@ -59,13 +59,14 @@ Supported action types:
 - `hangup`
 - `set_data`
 
-The active runtime still uses the existing event-driven agent path. The next
-integration step is to translate these flow actions into existing events:
+`ConversationActionDispatcher` translates these flow actions into existing
+runtime events:
 
 - `speak` -> `agent_response_requested` or direct TTS response
 - `agent_request` -> communication agent task
 - `subagent_task` -> subagent framework task
 - `transfer` and `hangup` -> call-control tool events
+- `set_data` -> session data update returned to the caller
 
 ## Template Data
 

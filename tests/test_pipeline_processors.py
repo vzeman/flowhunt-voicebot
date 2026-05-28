@@ -187,7 +187,18 @@ class CoreProcessorTests(unittest.TestCase):
     def test_event_log_processor_persists_known_frame_events(self) -> None:
         events = EventStore(max_context_events=20)
         processor = EventLogProcessor(events)
-        frame = MetricsFrame("call-1", "stt_duration_seconds", 0.12, data={"turn_id": 1})
+        frame = MetricsFrame(
+            "call-1",
+            "stt_duration_seconds",
+            0.12,
+            trace_id="trace-1",
+            data={
+                "workspace_id": "workspace-1",
+                "voicebot_id": "voicebot-1",
+                "session_id": "session-1",
+                "turn_id": 1,
+            },
+        )
 
         output = processor.handle(frame, PipelineContext())
 
@@ -196,6 +207,12 @@ class CoreProcessorTests(unittest.TestCase):
         self.assertEqual(len(persisted), 1)
         self.assertEqual(persisted[0].type, "metrics")
         self.assertEqual(persisted[0].data["name"], "stt_duration_seconds")
+        self.assertEqual(persisted[0].data["workspace_id"], "workspace-1")
+        self.assertEqual(persisted[0].data["voicebot_id"], "voicebot-1")
+        self.assertEqual(persisted[0].data["session_id"], "session-1")
+        self.assertEqual(persisted[0].data["turn_id"], 1)
+        self.assertEqual(persisted[0].data["trace_id"], "trace-1")
+        self.assertEqual(persisted[0].data["frame_id"], frame.frame_id)
 
 
 class ProcessorRegistryTests(unittest.TestCase):

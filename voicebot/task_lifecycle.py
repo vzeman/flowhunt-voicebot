@@ -49,6 +49,8 @@ class SubagentTaskLifecycleRunner:
         self.session_active = session_active or (lambda _session_id: True)
 
     def schedule(self, task: SubagentTask, now: datetime | None = None) -> SubagentTask:
+        if task.is_terminal():
+            return self._mark_terminal(task)
         current = now or _now()
         deadline_at = task.deadline_at or _iso(current + timedelta(seconds=max(0.0, self.policy.timeout_seconds)))
         next_poll_at = task.next_poll_at or _iso(current + timedelta(seconds=max(0.0, self.policy.initial_interval_seconds)))

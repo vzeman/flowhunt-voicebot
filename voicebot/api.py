@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -24,6 +25,7 @@ from .calls import AgentResponse, CallRegistry
 from .config import Settings, redacted_settings
 from .event_catalog import event_catalog
 from .events import EventStore, VoicebotEvent, event_to_dict
+from .execution_model import ExecutionScope
 from .flowhunt import (
     FlowHuntClient,
     FlowHuntResult,
@@ -41,6 +43,8 @@ from .health import readiness_report
 from .metrics import summarize_metrics
 from .provider_catalog import provider_catalog
 from .sip_trunks import SipTrunk, SipTrunkStore
+from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
+from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
 from .tool_executor import AgentToolExecutor
 from .transcripts import TranscriptStore
 from .tools import tool_definitions_json_schema, tool_definitions_legacy
@@ -91,10 +95,61 @@ def create_app(
     settings: Settings | None = None,
     sip_trunks: SipTrunkStore | None = None,
     webrtc: WebRTCSessionManager | None = None,
+    subagent_coordinator: SubagentCoordinator | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="Flowhunt Voicebot", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if subagent_lifecycle is None:
+            yield
+            return
+        stop = asyncio.Event()
+        app.state.subagent_lifecycle_stop = stop
+        app.state.subagent_lifecycle_task = asyncio.create_task(run_subagent_lifecycle_loop(stop))
+        try:
+            yield
+        finally:
+            stop.set()
+            task = getattr(app.state, "subagent_lifecycle_task", None)
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    app = FastAPI(title="Flowhunt Voicebot", version="0.1.0", lifespan=lifespan)
     tool_executor = AgentToolExecutor()
     runtime_settings = settings or Settings()
+    subagent_terminal_events: list[VoicebotEvent] = []
+
+    def emit_subagent_terminal_event(event_type: TaskLifecycleEventType, task: SubagentTask) -> None:
+        event = events.append_scoped(
+            ExecutionScope(
+                workspace_id=task.workspace_id,
+                voicebot_id=task.voicebot_id or "",
+                session_id=task.session_id,
+                call_id=task.session_id,
+            ),
+            event_type,
+            task.event_context(),
+        )
+        subagent_terminal_events.append(event)
+
+    subagent_lifecycle = (
+        SubagentTaskLifecycleRunner(
+            subagent_coordinator,
+            policy=PollingPolicy(
+                initial_interval_seconds=runtime_settings.subagent_task_initial_poll_seconds,
+                max_interval_seconds=runtime_settings.subagent_task_max_poll_seconds,
+                timeout_seconds=runtime_settings.subagent_task_timeout_seconds,
+                max_attempts=runtime_settings.subagent_task_max_attempts,
+            ),
+            event_sink=emit_subagent_terminal_event,
+            session_active=lambda session_id: registry.get(session_id) is not None,
+        )
+        if subagent_coordinator is not None
+        else None
+    )
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -395,6 +450,13 @@ def create_app(
             "counts": counts,
             "active_calls": sorted(active_call_ids),
         }
+
+    @app.get("/subagent/tasks")
+    def subagent_tasks(workspace_id: str | None = None, session_id: str | None = None) -> dict[str, Any]:
+        if subagent_coordinator is None:
+            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
+        tasks = subagent_coordinator.store.list(workspace_id=workspace_id, session_id=session_id)
+        return {"tasks": [subagent_task_to_dict(task) for task in tasks]}
 
     @app.get("/agent/tools")
     def agent_tools() -> dict[str, Any]:
@@ -803,6 +865,33 @@ def create_app(
             },
         )
         await hub.broadcast(invoked)
+        if (
+            subagent_coordinator is not None
+            and subagent_lifecycle is not None
+            and runtime_settings.flowhunt_workspace_id
+            and "flowhunt_flow" in subagent_coordinator.providers
+        ):
+            task = subagent_coordinator.request(
+                SubagentTaskRequest(
+                    workspace_id=runtime_settings.flowhunt_workspace_id,
+                    session_id=call_id,
+                    request_event_id=invoked.id,
+                    provider="flowhunt_flow",
+                    input_text=message,
+                    dedupe_key=str(response_to_event_id or invoked.id),
+                    metadata={
+                        "flow_id": flow_id,
+                        "response_to_event_id": response_to_event_id,
+                    },
+                )
+            )
+            scheduled = subagent_lifecycle.schedule(task)
+            return {
+                "event": event_to_dict(invoked),
+                "task": subagent_task_to_dict(scheduled),
+                "ok": scheduled.status != "failed",
+                "message": "A FlowHunt colleague is working on the request.",
+            }
         client = FlowHuntClient(
             api_key=runtime_settings.flowhunt_api_key,
             workspace_id=runtime_settings.flowhunt_workspace_id,
@@ -923,6 +1012,57 @@ def create_app(
             },
         )
         await hub.broadcast(requested)
+
+    async def notify_subagent_terminal_task(task: SubagentTask) -> None:
+        if registry.get(task.session_id) is None:
+            return
+        if task.status == "completed":
+            result = task.result
+            message = result.content if result and result.content else result.summary if result else "The delegated task completed."
+            await request_communication_agent(
+                task.session_id,
+                "colleague_result",
+                f"A colleague finished checking the caller request. Result: {message}",
+                task.request_event_id,
+                subagent_task_id=task.task_id,
+                provider=task.provider,
+                external_task_id=task.external_task_id,
+                ok=True,
+                data=task.clean_result_context(),
+            )
+            return
+        if task.status in {"failed", "timed_out"}:
+            await request_communication_agent(
+                task.session_id,
+                "colleague_result",
+                f"A delegated colleague task could not finish: {task.error or task.status}.",
+                task.request_event_id,
+                subagent_task_id=task.task_id,
+                provider=task.provider,
+                external_task_id=task.external_task_id,
+                ok=False,
+                data=task.clean_result_context(),
+            )
+
+    async def run_subagent_lifecycle_loop(stop: asyncio.Event) -> None:
+        if subagent_lifecycle is None:
+            return
+        while not stop.is_set():
+            try:
+                changed = await asyncio.to_thread(subagent_lifecycle.tick)
+                pending_broadcasts = list(subagent_terminal_events)
+                subagent_terminal_events.clear()
+                for event in pending_broadcasts:
+                    await hub.broadcast(event)
+                for task in changed:
+                    if task.is_terminal() and task.terminal_event_emitted_at:
+                        await notify_subagent_terminal_task(task)
+            except Exception as exc:
+                events.append("system", "system", {"component": "subagent_lifecycle", "error": str(exc)})
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=max(0.2, runtime_settings.subagent_task_poll_loop_seconds))
+            except asyncio.TimeoutError:
+                pass
 
     async def run_flowhunt_issue_with_progress(
         client: FlowHuntClient,

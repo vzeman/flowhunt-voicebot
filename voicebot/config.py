@@ -118,6 +118,12 @@ class Settings:
     flowhunt_issue_background_wait_seconds: float = env_float("VOICEBOT_FLOWHUNT_ISSUE_BACKGROUND_WAIT_SECONDS", 600.0)
     flowhunt_flow_wait_seconds: float = env_float("VOICEBOT_FLOWHUNT_FLOW_WAIT_SECONDS", 0.0)
     flowhunt_flow_poll_interval_seconds: float = env_float("VOICEBOT_FLOWHUNT_FLOW_POLL_INTERVAL_SECONDS", 3.0)
+    subagent_task_store_path: str = os.getenv("VOICEBOT_SUBAGENT_TASK_STORE_PATH", "/data/subagent_tasks.json")
+    subagent_task_poll_loop_seconds: float = env_float("VOICEBOT_SUBAGENT_TASK_POLL_LOOP_SECONDS", 1.0)
+    subagent_task_initial_poll_seconds: float = env_float("VOICEBOT_SUBAGENT_TASK_INITIAL_POLL_SECONDS", 3.0)
+    subagent_task_max_poll_seconds: float = env_float("VOICEBOT_SUBAGENT_TASK_MAX_POLL_SECONDS", 30.0)
+    subagent_task_timeout_seconds: float = env_float("VOICEBOT_SUBAGENT_TASK_TIMEOUT_SECONDS", 600.0)
+    subagent_task_max_attempts: int = env_int("VOICEBOT_SUBAGENT_TASK_MAX_ATTEMPTS", 100)
 
     stt_pipeline: tuple[dict[str, Any], ...] = env_json_list(
         "VOICEBOT_STT_PIPELINE",

@@ -208,6 +208,33 @@ class SubagentTests(unittest.TestCase):
         self.assertEqual(provider["label"], "Custom internal worker")
         self.assertEqual(provider["required_metadata"], ["skill"])
 
+    def test_coordinator_validates_required_provider_metadata_before_submit(self) -> None:
+        provider = FakeProvider()
+        coordinator = SubagentCoordinator()
+        coordinator.register(
+            provider,
+            SubagentProviderDescriptor(
+                kind="internal_worker",
+                label="Custom internal worker",
+                required_metadata=("skill",),
+            ),
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires metadata: skill"):
+            coordinator.request(self.request())
+
+        request = SubagentTaskRequest(
+            workspace_id="workspace-1",
+            session_id="call-1",
+            request_event_id=11,
+            provider="internal_worker",
+            input_text="Use skill",
+            metadata={"skill": "research"},
+        )
+        coordinator.request(request)
+
+        self.assertEqual(provider.submitted, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

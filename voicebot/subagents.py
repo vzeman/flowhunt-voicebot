@@ -365,6 +365,7 @@ class SubagentCoordinator:
         return self.provider_descriptor(kind).supports_cancel
 
     def request(self, request: SubagentTaskRequest) -> SubagentTask:
+        self._validate_request_metadata(request)
         task, created = self.store.get_or_create_requested(request)
         if not created:
             self._emit_task_event("subagent_task_deduplicated", task)
@@ -409,6 +410,14 @@ class SubagentCoordinator:
         if provider is None:
             raise KeyError(f"subagent provider is not registered: {kind}")
         return provider
+
+    def _validate_request_metadata(self, request: SubagentTaskRequest) -> None:
+        descriptor = self.provider_descriptor(request.provider)
+        missing = [key for key in descriptor.required_metadata if not request.metadata.get(key)]
+        if missing:
+            raise ValueError(
+                f"subagent provider {request.provider} requires metadata: {', '.join(missing)}"
+            )
 
     def _emit_task_event(self, event_type: str, task: SubagentTask) -> VoicebotEvent | None:
         if self.events is None:

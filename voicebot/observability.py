@@ -145,6 +145,7 @@ def build_timeline(events: list[VoicebotEvent]) -> dict[str, Any]:
         "events": entries,
         "counts": category_counts,
         "audio": audio_observability_summary(events),
+        "providers": provider_observability_summary(events)["providers"],
         "first_event_id": entries[0]["id"] if entries else None,
         "last_event_id": entries[-1]["id"] if entries else None,
     }

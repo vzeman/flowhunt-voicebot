@@ -44,11 +44,14 @@ debugging of realtime behavior:
 - possible barge-ins
 - open speech/playback counters
 
+The timeline response also embeds provider rollups so the same payload shows
+provider latency sample counts, average latency, and failure counts.
+
 ## Provider Summary
 
 `provider_observability_summary()` aggregates provider latency samples and
-failure counts from events. The existing metrics summary now includes this
-provider rollup.
+failure counts from events. The timeline response and existing metrics summary
+include this provider rollup.
 
 ## Conversation Evaluation
 

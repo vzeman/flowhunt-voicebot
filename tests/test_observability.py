@@ -71,6 +71,7 @@ class ObservabilityTests(unittest.TestCase):
         events.append("call-1", "stt_started", {"turn_id": 1})
         events.append("call-1", "agent_response_received", {"text": "Hi"})
         events.append("call-1", "bot_playback_started", {})
+        events.append("call-1", "tts_failed", {"provider": "openai", "error": "bad request"})
 
         timeline = build_timeline(events.list_events(call_id="call-1"))
 
@@ -79,6 +80,7 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(timeline["counts"]["stt"], 1)
         self.assertEqual(timeline["counts"]["agent"], 1)
         self.assertEqual(timeline["counts"]["playback"], 1)
+        self.assertEqual(timeline["providers"]["openai"]["failure_count"], 1)
         self.assertEqual(timeline["audio"]["speech_turns_started"], 1)
         self.assertEqual(timeline["audio"]["open_speech_turns"], 1)
         self.assertEqual([entry["id"] for entry in timeline["events"]], sorted(entry["id"] for entry in timeline["events"]))

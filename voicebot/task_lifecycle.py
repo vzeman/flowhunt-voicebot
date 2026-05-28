@@ -89,6 +89,10 @@ class SubagentTaskLifecycleRunner:
         current = now or _now()
         changed: list[SubagentTask] = []
         for task in self.coordinator.store.pending():
+            invalid_schedule = self._invalid_schedule_error(task)
+            if invalid_schedule:
+                changed.append(self._mark_terminal(task.with_status("failed", error=invalid_schedule)))
+                continue
             if self._timed_out(task, current):
                 changed.append(self._mark_terminal(task.with_status("timed_out", error="subagent task timed out")))
                 continue
@@ -139,6 +143,9 @@ class SubagentTaskLifecycleRunner:
                 terminal_count += 1
                 continue
             pending_count += 1
+            if self._invalid_schedule_error(task):
+                overdue_count += 1
+                continue
             if self._is_due(task, current):
                 due_count += 1
             if self._timed_out(task, current):
@@ -208,6 +215,17 @@ class SubagentTaskLifecycleRunner:
 
     def _timed_out(self, task: SubagentTask, now: datetime) -> bool:
         return bool(task.deadline_at and _parse_time(task.deadline_at) <= now)
+
+    def _invalid_schedule_error(self, task: SubagentTask) -> str:
+        for field in ("next_poll_at", "deadline_at"):
+            value = getattr(task, field)
+            if not value:
+                continue
+            try:
+                _parse_time(value)
+            except ValueError:
+                return f"invalid subagent task schedule timestamp: {field}"
+        return ""
 
 
 def _now() -> datetime:

@@ -7,6 +7,7 @@ import unittest
 from voicebot.subagents import (
     JsonSubagentTaskStore,
     SubagentCoordinator,
+    SubagentProviderDescriptor,
     SubagentTask,
     SubagentTaskRequest,
     SubagentTaskResult,
@@ -22,6 +23,7 @@ class SequencedProvider:
         self.outcomes = outcomes or ["running", "completed"]
         self.raise_on_poll = raise_on_poll
         self.polls = 0
+        self.cancels = 0
 
     def submit(self, request: SubagentTaskRequest) -> SubagentTask:
         task, _created = SubagentTaskStore().get_or_create_requested(request)
@@ -37,6 +39,7 @@ class SequencedProvider:
         return task.with_status("running", progress_message="still working")
 
     def cancel(self, task: SubagentTask) -> SubagentTask:
+        self.cancels += 1
         return task.with_status("cancelled")
 
 
@@ -144,7 +147,8 @@ class TaskLifecycleTests(unittest.TestCase):
         self.assertEqual(events, ["subagent_task_late_completed"])
 
     def test_lifecycle_runner_cancels_pending_tasks_for_session(self) -> None:
-        coordinator = self.build_coordinator()
+        provider = SequencedProvider()
+        coordinator = self.build_coordinator(provider)
         events = []
         runner = SubagentTaskLifecycleRunner(
             coordinator,
@@ -156,6 +160,33 @@ class TaskLifecycleTests(unittest.TestCase):
 
         self.assertEqual(cancelled[0].task_id, task.task_id)
         self.assertEqual(cancelled[0].status, "cancelled")
+        self.assertEqual(provider.cancels, 1)
+        self.assertEqual(events, ["subagent_task_cancelled"])
+
+    def test_lifecycle_runner_does_not_call_provider_cancel_when_unsupported(self) -> None:
+        provider = SequencedProvider()
+        coordinator = SubagentCoordinator()
+        coordinator.register(
+            provider,
+            SubagentProviderDescriptor(
+                kind="internal_worker",
+                label="Non-cancellable worker",
+                supports_cancel=False,
+            ),
+        )
+        events = []
+        runner = SubagentTaskLifecycleRunner(
+            coordinator,
+            event_sink=lambda event_type, task: events.append(event_type),
+        )
+        task = coordinator.request(self.request())
+
+        cancelled = runner.cancel_session("call-1", "workspace-1")
+
+        self.assertEqual(cancelled[0].task_id, task.task_id)
+        self.assertEqual(cancelled[0].status, "cancelled")
+        self.assertEqual(provider.cancels, 0)
+        self.assertIn("does not support cancellation", cancelled[0].progress_messages[-1])
         self.assertEqual(events, ["subagent_task_cancelled"])
 
 

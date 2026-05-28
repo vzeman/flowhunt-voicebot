@@ -88,6 +88,9 @@ class MultimodalContextStore:
             voicebot_id=voicebot_id,
             session_id=session_id,
         )
+        _validate_context_scope("workspace_id", context.workspace_id, workspace_id)
+        _validate_context_scope("voicebot_id", context.voicebot_id, voicebot_id)
+        _validate_context_scope("session_id", context.session_id, session_id)
         context = MultimodalContext(
             call_id=call_id,
             workspace_id=context.workspace_id or workspace_id,
@@ -141,3 +144,8 @@ def validate_multimodal_content(
     if part.uri is None and part.text is None and not part.metadata:
         issues.append(MultimodalValidationIssue("content", "content must include text, uri, or metadata"))
     return tuple(issues)
+
+
+def _validate_context_scope(field: str, existing: str | None, incoming: str | None) -> None:
+    if existing and incoming and existing != incoming:
+        raise ValueError(f"cannot add multimodal content across {field}")

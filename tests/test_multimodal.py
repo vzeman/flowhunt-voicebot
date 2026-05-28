@@ -91,6 +91,23 @@ class MultimodalTests(unittest.TestCase):
         self.assertFalse(store.delete("call-1"))
         self.assertEqual(store.get("call-1").parts, ())
 
+    def test_context_store_rejects_cross_scope_parts_for_same_call(self) -> None:
+        store = MultimodalContextStore()
+        store.add_part(
+            "call-1",
+            MultimodalContent("chat", "input", text="hello"),
+            workspace_id="workspace-1",
+            voicebot_id="voicebot-1",
+            session_id="session-1",
+        )
+
+        with self.assertRaisesRegex(ValueError, "workspace_id"):
+            store.add_part("call-1", MultimodalContent("chat", "input", text="other"), workspace_id="workspace-2")
+        with self.assertRaisesRegex(ValueError, "voicebot_id"):
+            store.add_part("call-1", MultimodalContent("chat", "input", text="other"), voicebot_id="voicebot-2")
+        with self.assertRaisesRegex(ValueError, "session_id"):
+            store.add_part("call-1", MultimodalContent("chat", "input", text="other"), session_id="session-2")
+
     def test_multimodal_validation_checks_capabilities_and_content_shape(self) -> None:
         capabilities = ModalityCapabilities(input=frozenset({"audio"}), output=frozenset({"audio", "text"}))
 
@@ -145,6 +162,26 @@ class MultimodalTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"][0]["field"], "content")
+
+    def test_multimodal_api_rejects_cross_workspace_part_for_same_call(self) -> None:
+        client = self.build_client(EventStore(max_context_events=20))
+        first = {
+            "modality": "text",
+            "direction": "input",
+            "text": "hello",
+            "workspace_id": "workspace-1",
+        }
+        second = {
+            **first,
+            "text": "different workspace",
+            "workspace_id": "workspace-2",
+        }
+
+        self.assertEqual(client.post("/calls/call-1/multimodal/parts", json=first).status_code, 200)
+        response = client.post("/calls/call-1/multimodal/parts", json=second)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("workspace_id", response.json()["detail"])
 
     def build_client(self, events: EventStore) -> TestClient:
         app = create_app(

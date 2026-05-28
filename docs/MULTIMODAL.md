@@ -52,6 +52,11 @@ including the requirement that each part include `text`, `uri`, or metadata.
 when the runtime session ends, so long-running workers can release local
 references to multimodal content.
 
+Once a call context has workspace, voicebot, or session scope, later content for
+the same call must use the same scope. Mismatched workspace, voicebot, or
+session ids are rejected before the part is stored, preventing cross-workspace
+context leakage.
+
 ## Future Work
 
 - WebRTC chat and visual card events

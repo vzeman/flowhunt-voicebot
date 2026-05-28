@@ -10,9 +10,10 @@ from voicebot.audio import STT_SAMPLE_RATE
 from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
+from voicebot.config import Settings
 from voicebot.events import EventStore
 from voicebot.transcripts import TranscriptStore
-from voicebot.webrtc import audio_frame_to_call_audio
+from voicebot.webrtc import WebRTCCallSession, audio_frame_to_call_audio
 
 
 class FakeWebRTCManager:
@@ -61,6 +62,16 @@ class FakeSinglePlanePackedStereoAudioFrame:
 
     def to_ndarray(self):
         return np.ones((1, 960), dtype=np.int16) * 8192
+
+
+class FakeSTT:
+    def transcribe(self, audio, sample_rate=8000):
+        raise AssertionError("STT should not run in this test")
+
+
+class FakeTTS:
+    def synthesize(self, text: str):
+        raise AssertionError("TTS should not run in this test")
 
 
 class ApiWebRTCTests(unittest.TestCase):
@@ -138,6 +149,32 @@ class ApiWebRTCTests(unittest.TestCase):
 
         self.assertEqual(len(audio), 160)
         self.assertAlmostEqual(float(audio.mean()), 0.25, delta=0.02)
+
+    def test_webrtc_session_lifecycle_events_use_transport_descriptor_route(self) -> None:
+        events = EventStore(max_context_events=20)
+        session = WebRTCCallSession(
+            call_id="webrtc-call-1",
+            session_id="session-1",
+            settings=Settings(greet_on_connect=False),
+            event_store=events,
+            stt=FakeSTT(),
+            tts=FakeTTS(),
+            metadata={"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "source": "browser"},
+        )
+        self.addCleanup(session.stop)
+
+        session.start()
+        snapshot = session.snapshot()
+
+        lifecycle = events.list_events(call_id="webrtc-call-1")
+        self.assertEqual([event.type for event in lifecycle], ["call_started", "call_connected"])
+        self.assertEqual(lifecycle[0].data["transport"], "webrtc")
+        self.assertEqual(lifecycle[0].data["sample_rate"], STT_SAMPLE_RATE)
+        self.assertEqual(lifecycle[0].data["workspace_id"], "workspace-1")
+        self.assertEqual(lifecycle[0].data["voicebot_id"], "voicebot-1")
+        self.assertEqual(lifecycle[0].data["metadata"], {"source": "browser", "session_id": "session-1"})
+        self.assertEqual(snapshot["route"]["workspace_id"], "workspace-1")
+        self.assertIn("hangup", snapshot["capabilities"]["call_control"])
 
 
 if __name__ == "__main__":

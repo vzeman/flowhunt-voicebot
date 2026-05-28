@@ -20,6 +20,7 @@ from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, AudioOutputFrame, PlaybackFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
+from .transports import WEBRTC_CAPABILITIES, StaticMediaTransport
 
 try:
     from aiortc import MediaStreamTrack, RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
@@ -97,6 +98,11 @@ class WebRTCCallSession:
         self.stt = stt
         self.tts = tts
         self.metadata = metadata or {}
+        self.descriptor = StaticMediaTransport(
+            "webrtc",
+            WEBRTC_CAPABILITIES,
+            sample_rate=STT_SAMPLE_RATE,
+        ).describe_session(call_id, {"session_id": session_id, **self.metadata})
         self.processor_registry = processor_registry or default_processor_registry()
         processor_dependencies = ProcessorDependencies(events=event_store, stt=stt, tts=tts)
         self.stt_pipeline = PipelineRunner(
@@ -126,15 +132,16 @@ class WebRTCCallSession:
         self._speech_worker.start()
 
     def start(self) -> None:
+        lifecycle_data = {"session_id": self.session_id, **self.descriptor.lifecycle_event_data()}
         self.events.append(
             self.call_id,
             "call_started",
-            {"session_id": self.session_id, "transport": "webrtc", **self.metadata},
+            lifecycle_data,
         )
         connected = self.events.append(
             self.call_id,
             "call_connected",
-            {"session_id": self.session_id, "transport": "webrtc", **self.metadata},
+            lifecycle_data,
         )
         if self.settings.greet_on_connect:
             request = self.events.append(
@@ -377,6 +384,11 @@ class WebRTCCallSession:
             "playback_active": self.playback.is_active(),
             "stopped": self.stop_event.is_set(),
             "active_turn": self._current_turn(),
+            "route": self.descriptor.route.as_event_data(),
+            "capabilities": {
+                "call_control": sorted(self.descriptor.capabilities.call_control),
+                "modalities": self.descriptor.capabilities.modalities.to_dict(),
+            },
             "metadata": self.metadata,
         }
 
@@ -385,7 +397,7 @@ class WebRTCCallSession:
             return
         self.stop_event.set()
         self.connection_state = "closed"
-        self.events.append(self.call_id, "call_ended", {"transport": "webrtc", "session_id": self.session_id})
+        self.events.append(self.call_id, "call_ended", {"session_id": self.session_id, **self.descriptor.lifecycle_event_data()})
 
     def _speech_worker_loop(self) -> None:
         while not self.stop_event.is_set():

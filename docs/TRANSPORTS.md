@@ -52,3 +52,8 @@ The current implementation introduces the shared contract in
 descriptors at session creation and emit lifecycle events from those
 descriptors, then move transport-specific call-control execution behind the same
 result contract.
+
+WebRTC sessions now build a `MediaSessionDescriptor` at session creation and use
+it for lifecycle event payloads and session snapshots. SIP/Asterisk should be
+integrated the same way after channel routing is moved behind workspace-scoped
+bindings.

@@ -1,0 +1,76 @@
+# Realtime Audio Foundation
+
+This document describes the realtime audio foundation introduced for issue #81.
+
+The current SIP and WebRTC sessions still contain their existing media loops, but new work should move toward shared audio primitives from `voicebot.realtime_audio`.
+
+## Goals
+
+- Keep VAD and turn detection replaceable.
+- Make barge-in behavior deterministic.
+- Prevent bot playback audio from becoming user speech.
+- Keep audio decisions observable and testable without live calls.
+- Support SIP and WebRTC through the same turn detection semantics.
+
+## Turn Detection
+
+`TurnDetector` processes normalized float32 audio blocks and returns a `TurnDetectionResult`.
+
+Inputs:
+
+- audio block
+- sample rate
+- playback active flag
+- echo suppression flag
+
+Outputs:
+
+- decision
+- level
+- block duration
+- speech started flag
+- speech finished flag
+- playback interruption flag
+- completed turn audio
+
+Decision values:
+
+- `ignored`: input was suppressed, usually bot playback echo.
+- `silence`: below speech start threshold.
+- `pending_start`: possible speech, waiting for configured start duration.
+- `speech_started`: caller speech turn started.
+- `speech_continues`: active speech turn continues.
+- `speech_finished`: speech turn completed and is long enough for STT.
+- `speech_too_short`: speech ended but is below minimum duration.
+
+## Barge-In
+
+When playback is active:
+
+- audio below `barge_in_threshold` is treated as likely bot echo and ignored;
+- audio above `barge_in_threshold` can start a caller turn and should interrupt playback.
+
+This rule is intentionally simple for the first shared primitive. Future implementations can replace it with stronger echo cancellation or VAD models without changing the session pipeline contract.
+
+## Configuration
+
+`TurnDetectionConfig` contains:
+
+- `sample_rate`
+- `start_threshold`
+- `stop_threshold`
+- `vad_start_ms`
+- `silence_ms`
+- `min_seconds`
+- `max_seconds`
+- `barge_in_threshold`
+
+These values should be resolved per voicebot/session once workspace-based configuration is implemented.
+
+## Next Integration Steps
+
+1. Replace duplicated SIP and WebRTC VAD loops with `TurnDetector`.
+2. Emit metrics for every turn decision.
+3. Add a pluggable VAD provider interface.
+4. Add jitter buffer and audio normalization stages before turn detection.
+5. Add stronger echo suppression strategy for real deployments.

@@ -15,6 +15,7 @@ from .events import EventStore
 from .provider_registry import default_provider_registry
 from .sip_trunks import SipTrunkStore
 from .transcripts import TranscriptStore
+from .webrtc import WebRTCSessionManager
 
 
 def main() -> None:
@@ -47,7 +48,16 @@ def main() -> None:
     thread.start()
     print(f"AudioSocket listening on {settings.audiosocket_host}:{settings.audiosocket_port}")
 
-    app = create_app(events, registry, tracker, hub, transcripts, asterisk, settings, sip_trunks)
+    webrtc = WebRTCSessionManager(
+        settings,
+        events,
+        registry,
+        stt,
+        tts,
+        audiosocket_server.stt_pipeline_specs,
+        audiosocket_server.tts_pipeline_specs,
+    )
+    app = create_app(events, registry, tracker, hub, transcripts, asterisk, settings, sip_trunks, webrtc)
     uvicorn.run(app, host=settings.api_host, port=settings.api_port)
 
     audiosocket_server.shutdown()

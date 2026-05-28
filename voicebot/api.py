@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 
 from .agent_tasks import AgentTaskTracker
 from .api_models import (
@@ -16,12 +17,26 @@ from .api_models import (
     CompactContextRequest,
     PlaybackInterruptRequest,
     SipTrunkRequest,
+    WebRTCOfferRequest,
 )
 from .asterisk_control import AsteriskAMI, ControlResult
 from .calls import AgentResponse, CallRegistry
 from .config import Settings, redacted_settings
 from .event_catalog import event_catalog
 from .events import EventStore, VoicebotEvent, event_to_dict
+from .flowhunt import (
+    FlowHuntClient,
+    FlowHuntResult,
+    extract_flow_task_error,
+    extract_flow_task_result,
+    extract_issue_id,
+    extract_issue_result,
+    extract_issue_state,
+    extract_issue_updates,
+    extract_session_id,
+    is_flow_task_terminal,
+    is_terminal_issue_state,
+)
 from .health import readiness_report
 from .metrics import summarize_metrics
 from .provider_catalog import provider_catalog
@@ -29,6 +44,7 @@ from .sip_trunks import SipTrunk, SipTrunkStore
 from .tool_executor import AgentToolExecutor
 from .transcripts import TranscriptStore
 from .tools import tool_definitions_json_schema, tool_definitions_legacy
+from .webrtc import WebRTCSessionManager
 
 
 class WebSocketHub:
@@ -74,6 +90,7 @@ def create_app(
     asterisk: AsteriskAMI | None,
     settings: Settings | None = None,
     sip_trunks: SipTrunkStore | None = None,
+    webrtc: WebRTCSessionManager | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Flowhunt Voicebot", version="0.1.0")
     tool_executor = AgentToolExecutor()
@@ -109,6 +126,36 @@ def create_app(
     @app.get("/config")
     def config() -> dict[str, Any]:
         return {"settings": redacted_settings(runtime_settings)}
+
+    @app.get("/webrtc/sessions")
+    def list_webrtc_sessions() -> dict[str, Any]:
+        if webrtc is None:
+            raise HTTPException(status_code=503, detail="WebRTC transport is not configured")
+        return {"sessions": webrtc.snapshots()}
+
+    @app.post("/webrtc/sessions")
+    async def create_webrtc_session(request: WebRTCOfferRequest) -> dict[str, Any]:
+        if webrtc is None:
+            raise HTTPException(status_code=503, detail="WebRTC transport is not configured")
+        if request.type != "offer":
+            raise HTTPException(status_code=400, detail="WebRTC session type must be offer")
+        try:
+            return await webrtc.create_session(request.sdp, request.type, request.metadata)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+
+    @app.delete("/webrtc/sessions/{session_id}")
+    async def delete_webrtc_session(session_id: str) -> dict[str, Any]:
+        if webrtc is None:
+            raise HTTPException(status_code=503, detail="WebRTC transport is not configured")
+        closed = await webrtc.close_session(session_id)
+        if not closed:
+            raise HTTPException(status_code=404, detail=f"WebRTC session not found: {session_id}")
+        return {"closed": True, "session_id": session_id}
+
+    @app.get("/webrtc/test")
+    def webrtc_test_page() -> HTMLResponse:
+        return HTMLResponse(WEBRTC_TEST_PAGE)
 
     @app.get("/sip-trunks")
     def list_sip_trunks() -> dict[str, Any]:
@@ -369,16 +416,31 @@ def create_app(
         session = registry.get(call_id)
         if session is None:
             raise HTTPException(status_code=404, detail=f"Active call not found: {call_id}")
-        event = session.submit_agent_response(
-            AgentResponse(
-                call_id=call_id,
-                text=request.text,
-                response_to_event_id=request.response_to_event_id,
+        try:
+            event = await asyncio.to_thread(
+                session.submit_agent_response,
+                AgentResponse(
+                    call_id=call_id,
+                    text=request.text,
+                    response_to_event_id=request.response_to_event_id,
+                ),
             )
-        )
+        except Exception as exc:
+            tracker.mark_responded(request.response_to_event_id)
+            failed = events.append(
+                call_id,
+                "agent_response_dropped",
+                {
+                    "reason": "playback_failed",
+                    "error": str(exc),
+                    "response_to_event_id": request.response_to_event_id,
+                },
+            )
+            await hub.broadcast(failed)
+            return {"event": event_to_dict(failed), "ok": False}
         tracker.mark_responded(request.response_to_event_id)
         await hub.broadcast(event)
-        return {"event": event_to_dict(event)}
+        return {"event": event_to_dict(event), "ok": True}
 
     @app.get("/calls/{call_id}/transcript")
     def call_transcript(call_id: str, after: Any = 0, limit: Any = 200) -> dict[str, Any]:
@@ -414,6 +476,47 @@ def create_app(
     @app.post("/calls/{call_id}/control")
     async def call_control(call_id: str, request: CallControlRequest) -> dict[str, Any]:
         requested = events.append(call_id, "call_control_requested", request.model_dump())
+        active_session = registry.get(call_id)
+        active_snapshot = active_session.snapshot() if active_session is not None else None
+        transport = active_snapshot.get("transport") if isinstance(active_snapshot, dict) else None
+
+        if transport == "webrtc":
+            if request.action == "hangup":
+                closed = False
+                if webrtc is not None:
+                    closed = await webrtc.close_call(call_id)
+                elif active_session is not None:
+                    active_session.stop()
+                    registry.remove(call_id)
+                    closed = True
+                completed = events.append(
+                    call_id,
+                    "call_control_completed",
+                    {
+                        "action": request.action,
+                        "ok": closed,
+                        "message": "WebRTC call closed" if closed else "WebRTC call not found",
+                        "request_event_id": requested.id,
+                    },
+                )
+                tracker.mark_responded(request.response_to_event_id)
+                await hub.broadcast(completed)
+                return {"event": event_to_dict(completed)}
+
+            completed = events.append(
+                call_id,
+                "call_control_completed",
+                {
+                    "action": request.action,
+                    "ok": False,
+                    "message": f"{request.action} is not supported for WebRTC calls yet",
+                    "request_event_id": requested.id,
+                },
+            )
+            tracker.mark_responded(request.response_to_event_id)
+            await hub.broadcast(completed)
+            return {"event": event_to_dict(completed)}
+
         if asterisk is None:
             completed = events.append(
                 call_id,
@@ -429,54 +532,59 @@ def create_app(
             await hub.broadcast(completed)
             raise HTTPException(status_code=503, detail="Asterisk AMI control is not configured")
 
-        if request.action == "hangup":
-            result = asterisk.hangup(call_id)
-        elif request.action == "transfer" and request.target:
-            result = asterisk.transfer(call_id, validated_transfer_target(request.target))
-        elif request.action == "transfer":
-            completed = events.append(
-                call_id,
-                "call_control_completed",
-                {
-                    "action": request.action,
-                    "ok": False,
-                    "message": "transfer requires target",
-                    "request_event_id": requested.id,
-                },
-            )
-            tracker.mark_responded(request.response_to_event_id)
-            await hub.broadcast(completed)
-            raise HTTPException(status_code=400, detail="transfer requires target")
-        elif request.action == "send_dtmf" and request.digit:
-            result = asterisk.send_dtmf(call_id, validated_dtmf_digit(request.digit))
-        elif request.action == "send_dtmf":
-            completed = events.append(
-                call_id,
-                "call_control_completed",
-                {
-                    "action": request.action,
-                    "ok": False,
-                    "message": "send_dtmf requires digit",
-                    "request_event_id": requested.id,
-                },
-            )
-            tracker.mark_responded(request.response_to_event_id)
-            await hub.broadcast(completed)
-            raise HTTPException(status_code=400, detail="send_dtmf requires digit")
-        else:
-            completed = events.append(
-                call_id,
-                "call_control_completed",
-                {
-                    "action": request.action,
-                    "ok": False,
-                    "message": f"unsupported control action: {request.action}",
-                    "request_event_id": requested.id,
-                },
-            )
-            tracker.mark_responded(request.response_to_event_id)
-            await hub.broadcast(completed)
-            raise HTTPException(status_code=400, detail=f"unsupported control action: {request.action}")
+        try:
+            if request.action == "hangup":
+                result = asterisk.hangup(call_id)
+            elif request.action == "transfer" and request.target:
+                result = asterisk.transfer(call_id, validated_transfer_target(request.target))
+            elif request.action == "transfer":
+                completed = events.append(
+                    call_id,
+                    "call_control_completed",
+                    {
+                        "action": request.action,
+                        "ok": False,
+                        "message": "transfer requires target",
+                        "request_event_id": requested.id,
+                    },
+                )
+                tracker.mark_responded(request.response_to_event_id)
+                await hub.broadcast(completed)
+                raise HTTPException(status_code=400, detail="transfer requires target")
+            elif request.action == "send_dtmf" and request.digit:
+                result = asterisk.send_dtmf(call_id, validated_dtmf_digit(request.digit))
+            elif request.action == "send_dtmf":
+                completed = events.append(
+                    call_id,
+                    "call_control_completed",
+                    {
+                        "action": request.action,
+                        "ok": False,
+                        "message": "send_dtmf requires digit",
+                        "request_event_id": requested.id,
+                    },
+                )
+                tracker.mark_responded(request.response_to_event_id)
+                await hub.broadcast(completed)
+                raise HTTPException(status_code=400, detail="send_dtmf requires digit")
+            else:
+                completed = events.append(
+                    call_id,
+                    "call_control_completed",
+                    {
+                        "action": request.action,
+                        "ok": False,
+                        "message": f"unsupported control action: {request.action}",
+                        "request_event_id": requested.id,
+                    },
+                )
+                tracker.mark_responded(request.response_to_event_id)
+                await hub.broadcast(completed)
+                raise HTTPException(status_code=400, detail=f"unsupported control action: {request.action}")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            result = ControlResult(False, f"Asterisk AMI request failed: {exc}")
 
         completed = events.append(
             call_id,
@@ -583,6 +691,557 @@ def create_app(
             ),
         )
 
+    async def tool_create_flowhunt_project_issue(args: dict[str, Any]) -> dict[str, Any]:
+        call_id = require_arg(args, "call_id")
+        project_id = str(args.get("project_id") or runtime_settings.flowhunt_project_id)
+        title = str(require_arg(args, "title"))
+        description = str(require_arg(args, "description"))
+        response_to_event_id = args.get("response_to_event_id")
+        duplicate = existing_flowhunt_request(call_id, response_to_event_id)
+        if duplicate is not None:
+            tracker.mark_responded(response_to_event_id)
+            return {
+                "event": event_to_dict(duplicate),
+                "ok": True,
+                "message": "A FlowHunt colleague is already checking this request.",
+                "duplicate": True,
+            }
+        if looks_like_vague_colleague_issue(title, description):
+            return {
+                "ok": False,
+                "message": "The colleague issue was not created because the request is only a vague topic list. Ask the caller for the specific question first.",
+            }
+        if runtime_settings.flowhunt_complex_backend == "flow":
+            return await tool_invoke_flowhunt_flow({**args, "message": description})
+        await speak_tool_progress(
+            call_id,
+            "I will ask a colleague to check that and come back with the result.",
+        )
+        tracker.mark_responded(response_to_event_id)
+        requested = events.append(
+            call_id,
+            "flowhunt_issue_created",
+            {
+                "project_id": project_id,
+                "title": title,
+                "response_to_event_id": response_to_event_id,
+            },
+        )
+        await hub.broadcast(requested)
+        client = FlowHuntClient(
+            api_key=runtime_settings.flowhunt_api_key,
+            workspace_id=runtime_settings.flowhunt_workspace_id,
+            base_url=runtime_settings.flowhunt_base_url,
+            timeout=runtime_settings.flowhunt_timeout,
+        )
+        result = await run_flowhunt_issue_with_progress(
+            client,
+            project_id,
+            title,
+            description,
+            {"call_id": call_id, "response_to_event_id": response_to_event_id},
+            runtime_settings.flowhunt_issue_wait_seconds,
+            runtime_settings.flowhunt_issue_poll_interval_seconds,
+            runtime_settings.flowhunt_progress_update_seconds,
+            call_id,
+            response_to_event_id=response_to_event_id,
+        )
+        result_event_type = "flowhunt_issue_updated" if result.data.get("pending") else "flowhunt_issue_completed"
+        completed = events.append(
+            call_id,
+            result_event_type,
+            {
+                "ok": result.ok,
+                "message": result.message,
+                "project_id": project_id,
+                "request_event_id": requested.id,
+                "response_to_event_id": response_to_event_id,
+                "data": result.data,
+            },
+        )
+        await hub.broadcast(completed)
+        if result.data.get("pending") and result.data.get("issue_id"):
+            asyncio.create_task(
+                watch_flowhunt_issue_until_complete(
+                    client,
+                    project_id,
+                    str(result.data["issue_id"]),
+                    call_id,
+                    response_to_event_id,
+                    runtime_settings.flowhunt_issue_background_wait_seconds,
+                    runtime_settings.flowhunt_issue_poll_interval_seconds,
+                    runtime_settings.flowhunt_progress_update_seconds,
+                )
+            )
+        return {"event": event_to_dict(completed), "ok": result.ok, "message": result.message}
+
+    async def tool_invoke_flowhunt_flow(args: dict[str, Any]) -> dict[str, Any]:
+        call_id = require_arg(args, "call_id")
+        flow_id = str(args.get("flow_id") or runtime_settings.flowhunt_flow_id)
+        message = str(require_arg(args, "message"))
+        response_to_event_id = args.get("response_to_event_id")
+        duplicate = existing_flowhunt_request(call_id, response_to_event_id)
+        if duplicate is not None:
+            tracker.mark_responded(response_to_event_id)
+            return {
+                "event": event_to_dict(duplicate),
+                "ok": True,
+                "message": "A FlowHunt colleague is already checking this request.",
+                "duplicate": True,
+            }
+        await speak_tool_progress(
+            call_id,
+            "I will ask a FlowHunt colleague to check that and come back with the result.",
+        )
+        tracker.mark_responded(response_to_event_id)
+        invoked = events.append(
+            call_id,
+            "flowhunt_flow_invoked",
+            {
+                "flow_id": flow_id,
+                "response_to_event_id": response_to_event_id,
+            },
+        )
+        await hub.broadcast(invoked)
+        client = FlowHuntClient(
+            api_key=runtime_settings.flowhunt_api_key,
+            workspace_id=runtime_settings.flowhunt_workspace_id,
+            base_url=runtime_settings.flowhunt_base_url,
+            timeout=runtime_settings.flowhunt_timeout,
+        )
+        result = await asyncio.to_thread(
+            client.invoke_flow_and_wait,
+            flow_id,
+            message,
+            runtime_settings.flowhunt_flow_wait_seconds,
+            runtime_settings.flowhunt_flow_poll_interval_seconds,
+        )
+        result_event_type = "flowhunt_flow_updated" if result.data.get("pending") else "flowhunt_flow_completed"
+        completed = events.append(
+            call_id,
+            result_event_type,
+            {
+                "ok": result.ok,
+                "message": result.message,
+                "flow_id": flow_id,
+                "session_id": extract_session_id(result.data),
+                "request_event_id": invoked.id,
+                "response_to_event_id": response_to_event_id,
+                "data": result.data,
+            },
+        )
+        await hub.broadcast(completed)
+        if result.data.get("pending") and result.data.get("task_id"):
+            asyncio.create_task(
+                watch_flowhunt_flow_task_until_complete(
+                    client,
+                    flow_id,
+                    str(result.data["task_id"]),
+                    call_id,
+                    response_to_event_id,
+                    runtime_settings.flowhunt_issue_background_wait_seconds,
+                    runtime_settings.flowhunt_flow_poll_interval_seconds,
+                )
+            )
+        elif result.data.get("pending") and extract_session_id(result.data):
+            asyncio.create_task(
+                watch_flowhunt_flow_until_complete(
+                    client,
+                    str(extract_session_id(result.data)),
+                    call_id,
+                    response_to_event_id,
+                    flow_id,
+                    runtime_settings.flowhunt_issue_background_wait_seconds,
+                    runtime_settings.flowhunt_flow_poll_interval_seconds,
+                )
+            )
+        else:
+            await request_communication_agent(
+                call_id,
+                "colleague_result",
+                f"A FlowHunt colleague finished checking the caller request. Result: {result.message}",
+                response_to_event_id,
+                flow_id=flow_id,
+                session_id=extract_session_id(result.data),
+                ok=result.ok,
+                source_event_id=completed.id,
+                data=result.data,
+            )
+        return {"event": event_to_dict(completed), "ok": result.ok, "message": result.message}
+
+    def existing_flowhunt_request(call_id: str, response_to_event_id: Any) -> VoicebotEvent | None:
+        if response_to_event_id is None:
+            return None
+        try:
+            response_event_id = int(response_to_event_id)
+        except (TypeError, ValueError):
+            return None
+        for event in reversed(events.list_events(call_id=call_id, limit=1000)):
+            if event.type not in {
+                "flowhunt_flow_invoked",
+                "flowhunt_flow_updated",
+                "flowhunt_flow_completed",
+                "flowhunt_issue_created",
+                "flowhunt_issue_updated",
+                "flowhunt_issue_completed",
+            }:
+                continue
+            try:
+                event_response_id = int(event.data.get("response_to_event_id"))
+            except (TypeError, ValueError):
+                continue
+            if event_response_id == response_event_id:
+                return event
+        return None
+
+    async def speak_tool_progress(call_id: str, text: str) -> None:
+        session = registry.get(call_id)
+        if session is None:
+            return
+        try:
+            await asyncio.to_thread(session.submit_agent_response, AgentResponse(call_id=call_id, text=text))
+        except Exception as exc:
+            events.append(call_id, "agent_response_dropped", {"reason": "progress_playback_failed", "error": str(exc)})
+
+    async def request_communication_agent(
+        call_id: str,
+        reason: str,
+        text: str,
+        response_to_event_id: int | None,
+        **data: Any,
+    ) -> None:
+        if registry.get(call_id) is None:
+            return
+        requested = events.append(
+            call_id,
+            "agent_response_requested",
+            {
+                "reason": reason,
+                "text": text,
+                "response_to_event_id": response_to_event_id,
+                **data,
+            },
+        )
+        await hub.broadcast(requested)
+
+    async def run_flowhunt_issue_with_progress(
+        client: FlowHuntClient,
+        project_id: str,
+        title: str,
+        description: str,
+        metadata: dict[str, Any],
+        wait_seconds: float,
+        poll_interval_seconds: float,
+        progress_update_seconds: float,
+        call_id: str,
+        response_to_event_id: int | None = None,
+    ) -> FlowHuntResult:
+        created = await asyncio.to_thread(client.create_project_issue, project_id, title, description, metadata)
+        if not created.ok:
+            return created
+
+        issue_id = extract_issue_id(created.data.get("response")) or extract_issue_id(created.data)
+        if not issue_id:
+            return FlowHuntResult(True, created.message or "FlowHunt project issue was created.", created.data)
+
+        deadline = asyncio.get_running_loop().time() + max(0.0, wait_seconds)
+        next_progress = asyncio.get_running_loop().time() + max(1.0, progress_update_seconds)
+        latest = created
+        while asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(max(0.2, poll_interval_seconds))
+            latest = await asyncio.to_thread(client.get_project_issue, project_id, issue_id)
+            if not latest.ok:
+                return latest
+            response = latest.data.get("response")
+            state = extract_issue_state(response).lower()
+            if is_terminal_issue_state(state):
+                break
+            if extract_issue_result(response):
+                break
+            now = asyncio.get_running_loop().time()
+            if now >= next_progress:
+                update = extract_issue_updates(response)
+                state_text = extract_issue_state(response)
+                updated = events.append(
+                    call_id,
+                    "flowhunt_issue_updated",
+                    {
+                        "ok": True,
+                        "message": update or (f"Current status is {state_text}." if state_text else "Still in progress."),
+                        "project_id": project_id,
+                        "issue_id": issue_id,
+                        "response_to_event_id": response_to_event_id,
+                        "data": latest.data,
+                    },
+                )
+                await hub.broadcast(updated)
+                next_progress = now + max(1.0, progress_update_seconds)
+
+        response = latest.data.get("response")
+        result = extract_issue_result(response)
+        state = extract_issue_state(response)
+        update = extract_issue_updates(response)
+        if result:
+            return FlowHuntResult(True, result, latest.data)
+        if state and is_terminal_issue_state(state):
+            ok = state not in {"failed", "error", "cancelled", "canceled", "human_input_needed"}
+            message = update or f"The colleague task finished with status {state}."
+            return FlowHuntResult(ok, message, latest.data)
+        data = dict(latest.data)
+        data["pending"] = True
+        data["issue_id"] = issue_id
+        if update:
+            data["latest_update"] = update
+        if state:
+            if update:
+                return FlowHuntResult(True, f"The colleague is still working on it. Current status is {state}. Latest update: {update}", data)
+            return FlowHuntResult(True, f"The colleague is still working on it. Current status is {state}.", data)
+        if update:
+            return FlowHuntResult(True, f"The colleague is still working on it. Latest update: {update}", data)
+        return FlowHuntResult(True, "The colleague is still working on it. I will keep watching for the result.", data)
+
+    async def watch_flowhunt_issue_until_complete(
+        client: FlowHuntClient,
+        project_id: str,
+        issue_id: str,
+        call_id: str,
+        response_to_event_id: int | None,
+        wait_seconds: float,
+        poll_interval_seconds: float,
+        progress_update_seconds: float,
+    ) -> None:
+        deadline = asyncio.get_running_loop().time() + max(0.0, wait_seconds)
+        next_progress = asyncio.get_running_loop().time() + max(1.0, progress_update_seconds)
+        last_progress_message = ""
+        while asyncio.get_running_loop().time() < deadline:
+            if registry.get(call_id) is None:
+                return
+            await asyncio.sleep(max(0.2, poll_interval_seconds))
+            latest = await asyncio.to_thread(client.get_project_issue, project_id, issue_id)
+            if not latest.ok:
+                completed = events.append(
+                    call_id,
+                    "flowhunt_issue_completed",
+                    {
+                        "ok": False,
+                        "message": latest.message,
+                        "project_id": project_id,
+                        "issue_id": issue_id,
+                        "response_to_event_id": response_to_event_id,
+                        "data": latest.data,
+                    },
+                )
+                await hub.broadcast(completed)
+                await request_communication_agent(
+                    call_id,
+                    "colleague_result",
+                    f"A colleague task failed while checking the caller request: {latest.message}",
+                    response_to_event_id,
+                    project_id=project_id,
+                    issue_id=issue_id,
+                    ok=False,
+                    source_event_id=completed.id,
+                    data=latest.data,
+                )
+                return
+
+            response = latest.data.get("response")
+            result = extract_issue_result(response)
+            update = extract_issue_updates(response)
+            state = extract_issue_state(response).lower()
+            if result or is_terminal_issue_state(state):
+                message = result or update or f"The colleague task finished with status {state}."
+                completed = events.append(
+                    call_id,
+                    "flowhunt_issue_completed",
+                    {
+                        "ok": state not in {"failed", "error", "cancelled", "canceled", "human_input_needed"},
+                        "message": message,
+                        "project_id": project_id,
+                        "issue_id": issue_id,
+                        "response_to_event_id": response_to_event_id,
+                        "data": latest.data,
+                    },
+                )
+                await hub.broadcast(completed)
+                await request_communication_agent(
+                    call_id,
+                    "colleague_result",
+                    f"A colleague finished checking the caller request. Result: {message}",
+                    response_to_event_id,
+                    project_id=project_id,
+                    issue_id=issue_id,
+                    ok=state not in {"failed", "error", "cancelled", "canceled", "human_input_needed"},
+                    source_event_id=completed.id,
+                    data=latest.data,
+                )
+                return
+
+            now = asyncio.get_running_loop().time()
+            if now >= next_progress:
+                message = update or "The colleague task is still in progress."
+                if message == last_progress_message:
+                    next_progress = now + max(1.0, progress_update_seconds)
+                    continue
+                last_progress_message = message
+                updated = events.append(
+                    call_id,
+                    "flowhunt_issue_updated",
+                    {
+                        "ok": True,
+                        "message": message,
+                        "project_id": project_id,
+                        "issue_id": issue_id,
+                        "response_to_event_id": response_to_event_id,
+                        "data": latest.data,
+                    },
+                )
+                await hub.broadcast(updated)
+                await request_communication_agent(
+                    call_id,
+                    "colleague_progress",
+                    f"A colleague is still checking the caller request. Current update: {message}",
+                    response_to_event_id,
+                    project_id=project_id,
+                    issue_id=issue_id,
+                    source_event_id=updated.id,
+                    data=latest.data,
+                )
+                next_progress = now + max(1.0, progress_update_seconds)
+
+    async def watch_flowhunt_flow_until_complete(
+        client: FlowHuntClient,
+        session_id: str,
+        call_id: str,
+        response_to_event_id: int | None,
+        flow_id: str,
+        wait_seconds: float,
+        poll_interval_seconds: float,
+    ) -> None:
+        deadline = asyncio.get_running_loop().time() + max(0.0, wait_seconds)
+        from_timestamp = "0"
+        seen_event_ids: set[str] = set()
+        while asyncio.get_running_loop().time() < deadline:
+            if registry.get(call_id) is None:
+                return
+            await asyncio.sleep(max(0.2, poll_interval_seconds))
+            latest = await asyncio.to_thread(client.poll_flow_events, session_id, from_timestamp)
+            events_data = latest.data.get("events") if isinstance(latest.data, dict) else []
+            if isinstance(events_data, list):
+                new_events = []
+                for event_data in events_data:
+                    event_id = str(event_data.get("event_id") or "")
+                    if event_id and event_id in seen_event_ids:
+                        continue
+                    if event_id:
+                        seen_event_ids.add(event_id)
+                    new_events.append(event_data)
+                if new_events:
+                    from_timestamp = max(
+                        [
+                            str(event_data.get("created_at_timestamp") or event_data.get("created_at") or from_timestamp)
+                            for event_data in new_events
+                        ]
+                    )
+            if latest.ok and not latest.data.get("pending"):
+                completed = events.append(
+                    call_id,
+                    "flowhunt_flow_completed",
+                    {
+                        "ok": True,
+                        "message": latest.message,
+                        "flow_id": flow_id,
+                        "session_id": session_id,
+                        "response_to_event_id": response_to_event_id,
+                        "data": latest.data,
+                    },
+                )
+                await hub.broadcast(completed)
+                await request_communication_agent(
+                    call_id,
+                    "colleague_result",
+                    f"A FlowHunt colleague finished checking the caller request. Result: {latest.message}",
+                    response_to_event_id,
+                    flow_id=flow_id,
+                    session_id=session_id,
+                    ok=True,
+                    source_event_id=completed.id,
+                    data=latest.data,
+                )
+                return
+
+    async def watch_flowhunt_flow_task_until_complete(
+        client: FlowHuntClient,
+        flow_id: str,
+        task_id: str,
+        call_id: str,
+        response_to_event_id: int | None,
+        wait_seconds: float,
+        poll_interval_seconds: float,
+    ) -> None:
+        deadline = asyncio.get_running_loop().time() + max(0.0, wait_seconds)
+        while asyncio.get_running_loop().time() < deadline:
+            if registry.get(call_id) is None:
+                return
+            await asyncio.sleep(max(0.2, poll_interval_seconds))
+            latest = await asyncio.to_thread(client.get_flow_task, flow_id, task_id)
+            if not latest.ok:
+                completed = events.append(
+                    call_id,
+                    "flowhunt_flow_completed",
+                    {
+                        "ok": False,
+                        "message": latest.message,
+                        "flow_id": flow_id,
+                        "task_id": task_id,
+                        "response_to_event_id": response_to_event_id,
+                        "data": latest.data,
+                    },
+                )
+                await hub.broadcast(completed)
+                await request_communication_agent(
+                    call_id,
+                    "colleague_result",
+                    f"A FlowHunt colleague task failed while checking the caller request: {latest.message}",
+                    response_to_event_id,
+                    flow_id=flow_id,
+                    task_id=task_id,
+                    ok=False,
+                    source_event_id=completed.id,
+                    data=latest.data,
+                )
+                return
+            task = latest.data.get("response")
+            result = extract_flow_task_result(task)
+            if result or is_flow_task_terminal(task):
+                ok = bool(result)
+                message = result or extract_flow_task_error(task) or "FlowHunt flow finished without a result."
+                completed = events.append(
+                    call_id,
+                    "flowhunt_flow_completed",
+                    {
+                        "ok": ok,
+                        "message": message,
+                        "flow_id": flow_id,
+                        "task_id": task_id,
+                        "response_to_event_id": response_to_event_id,
+                        "data": latest.data,
+                    },
+                )
+                await hub.broadcast(completed)
+                await request_communication_agent(
+                    call_id,
+                    "colleague_result",
+                    f"A FlowHunt colleague finished checking the caller request. Result: {message}",
+                    response_to_event_id,
+                    flow_id=flow_id,
+                    task_id=task_id,
+                    ok=ok,
+                    source_event_id=completed.id,
+                    data=latest.data,
+                )
+                return
+
     def tool_get_transcript(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
         return call_transcript(
@@ -642,6 +1301,8 @@ def create_app(
     tool_executor.register("transfer_call", tool_transfer_call)
     tool_executor.register("send_dtmf", tool_send_dtmf)
     tool_executor.register("stop_playback", tool_stop_playback)
+    tool_executor.register("invoke_flowhunt_flow", tool_invoke_flowhunt_flow)
+    tool_executor.register("create_flowhunt_project_issue", tool_create_flowhunt_project_issue)
     tool_executor.register("list_transcripts", tool_list_transcripts)
     tool_executor.register("list_transcript_summaries", tool_list_transcript_summaries)
     tool_executor.register("get_transcript_stats", tool_get_transcript_stats)
@@ -701,3 +1362,144 @@ def validated_transfer_target(value: Any) -> str:
     if any(ord(char) < 32 or ord(char) == 127 for char in target):
         raise HTTPException(status_code=400, detail="transfer target must not contain control characters")
     return target
+
+
+def looks_like_vague_colleague_issue(title: str, description: str) -> bool:
+    text = f"{title}\n{description}".lower()
+    markers = (
+        "caller mentioned a range of topics",
+        "caller referenced multiple technologies",
+        "general support request",
+        "various technologies",
+        "may have questions or requests",
+        "need comprehensive support",
+    )
+    if not any(marker in text for marker in markers):
+        return False
+    concrete_markers = ("how ", "what ", "why ", "when ", "where ", "check ", "count ", "create ", "transfer ", "hang up")
+    return not any(marker in text for marker in concrete_markers)
+
+
+WEBRTC_TEST_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlowHunt Voicebot WebRTC Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 780px; line-height: 1.45; }
+    button { font: inherit; margin-right: .5rem; padding: .45rem .75rem; }
+    pre { background: #111; color: #eee; padding: 1rem; overflow: auto; min-height: 12rem; }
+  </style>
+</head>
+<body>
+  <h1>FlowHunt Voicebot WebRTC Test</h1>
+  <p>Click Start, allow microphone access, then speak. The bot audio is played by the browser.</p>
+  <button id="start">Start call</button>
+  <button id="stop" disabled>Stop call</button>
+  <audio id="remote" autoplay playsinline controls></audio>
+  <pre id="log"></pre>
+  <script>
+    const startButton = document.getElementById("start");
+    const stopButton = document.getElementById("stop");
+    const remoteAudio = document.getElementById("remote");
+    const logNode = document.getElementById("log");
+    let pc = null;
+    let sessionId = null;
+    let localStream = null;
+
+    function log(message) {
+      logNode.textContent += `${new Date().toISOString()} ${message}\\n`;
+      logNode.scrollTop = logNode.scrollHeight;
+    }
+
+    startButton.onclick = async () => {
+      startButton.disabled = true;
+      try {
+        pc = new RTCPeerConnection({iceServers: [{urls: "stun:stun.l.google.com:19302"}]});
+        pc.onconnectionstatechange = () => log(`connectionState=${pc.connectionState}`);
+        pc.ontrack = (event) => {
+          log(`received remote ${event.track.kind} track`);
+          remoteAudio.srcObject = event.streams[0] || new MediaStream([event.track]);
+        };
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: {ideal: 1},
+            sampleRate: {ideal: 48000},
+            sampleSize: {ideal: 16},
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            latency: {ideal: 0.02}
+          }
+        });
+        for (const track of localStream.getAudioTracks()) {
+          track.contentHint = "speech";
+          log(`local audio settings=${JSON.stringify(track.getSettings())}`);
+          pc.addTrack(track, localStream);
+        }
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await new Promise((resolve) => {
+          if (pc.iceGatheringState === "complete") {
+            resolve();
+            return;
+          }
+          pc.onicegatheringstatechange = () => {
+            if (pc.iceGatheringState === "complete") resolve();
+          };
+        });
+        const response = await fetch("/webrtc/sessions", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            sdp: pc.localDescription.sdp,
+            type: pc.localDescription.type,
+            metadata: {client: "browser-test"}
+          })
+        });
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        const payload = await response.json();
+        sessionId = payload.session_id;
+        await pc.setRemoteDescription(payload.answer);
+        stopButton.disabled = false;
+        log(`started session=${sessionId} call=${payload.call_id}`);
+      } catch (error) {
+        log(`error: ${error}`);
+        await stopCall();
+        startButton.disabled = false;
+      }
+    };
+
+    stopButton.onclick = async () => {
+      await stopCall();
+      startButton.disabled = false;
+    };
+
+    async function stopCall() {
+      stopButton.disabled = true;
+      if (sessionId) {
+        try {
+          await fetch(`/webrtc/sessions/${sessionId}`, {method: "DELETE"});
+        } catch (error) {
+          log(`delete failed: ${error}`);
+        }
+      }
+      sessionId = null;
+      if (localStream) {
+        for (const track of localStream.getTracks()) track.stop();
+      }
+      localStream = null;
+      if (pc) {
+        pc.close();
+      }
+      pc = null;
+      remoteAudio.srcObject = null;
+      log("stopped");
+    }
+  </script>
+</body>
+</html>
+"""

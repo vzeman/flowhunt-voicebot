@@ -44,11 +44,14 @@ class FakeTranscriptionResult:
 class FakeStreamingSTT:
     def __init__(self, results: list[FakeTranscriptionResult]) -> None:
         self.results = results
+        self.calls = []
 
-    def transcribe(self, call_audio):
+    def transcribe(self, call_audio, sample_rate=8000):
+        self.calls.append((call_audio, sample_rate))
         return self.results[-1]
 
-    def transcribe_stream(self, call_audio):
+    def transcribe_stream(self, call_audio, sample_rate=8000):
+        self.calls.append((call_audio, sample_rate))
         return iter(self.results)
 
 
@@ -131,6 +134,7 @@ class CoreProcessorTests(unittest.TestCase):
         self.assertEqual(output[3].text, "hello")
         self.assertEqual(output[3].data["turn_id"], 7)
         self.assertEqual(output[3].trace_id, "trace-1")
+        self.assertEqual(stt.calls[0][1], 8000)
 
     def test_stt_processor_emits_empty_when_stream_has_no_final_text(self) -> None:
         processor = STTProcessor(FakeStreamingSTT([FakeTranscriptionResult("", is_final=True, reason="silence")]))

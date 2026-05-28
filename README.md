@@ -46,17 +46,38 @@ The runtime is split into replaceable parts:
   transfer the call, send DTMF, stop playback, or read call transcripts through
   HTTP tool endpoints.
 
+The canonical execution model and frame taxonomy used for the next architecture
+iteration are documented in [docs/EXECUTION_MODEL.md](docs/EXECUTION_MODEL.md).
+The first shared realtime audio turn-detection primitive is documented in
+[docs/REALTIME_AUDIO.md](docs/REALTIME_AUDIO.md).
+The transport/media contract for SIP, WebRTC, and future call providers is
+documented in [docs/TRANSPORTS.md](docs/TRANSPORTS.md).
+The provider capability model is documented in
+[docs/PROVIDERS.md](docs/PROVIDERS.md).
+Conversation flow definitions for freeform and structured voicebots are
+documented in [docs/CONVERSATION_FLOWS.md](docs/CONVERSATION_FLOWS.md).
+The generic subagent/external task framework is documented in
+[docs/SUBAGENTS.md](docs/SUBAGENTS.md).
+Async task lifecycle, polling, and durable provider task references are
+documented in [docs/TASK_LIFECYCLE.md](docs/TASK_LIFECYCLE.md).
+Durable event/task/transcript state contracts are documented in
+[docs/DURABLE_STATE.md](docs/DURABLE_STATE.md).
+Observability, tracing, timeline, and regression evaluation primitives are
+documented in [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
+
 ## Architecture Schema
 
 ```mermaid
 flowchart LR
     Caller[Caller phone] -->|SIP/RTP| Trunk[SIP trunk]
+    Browser[Browser WebRTC client] -->|SDP over HTTP + SRTP audio| API
     Trunk -->|REGISTER / INVITE / RTP| Asterisk[Asterisk container<br/>PJSIP + RTP + AMI]
     Asterisk -->|AudioSocket audio| AudioSocket[voicebot AudioSocket server]
     AudioSocket --> Session[Per-call session]
 
     subgraph Voicebot[voicebot container]
         AudioSocket
+        WebRTC[WebRTC session manager]
         Session
         VAD[VAD and turn detector]
         STT[STT provider adapter<br/>Whisper / OpenAI / compatible]
@@ -68,6 +89,7 @@ flowchart LR
         API[HTTP and WebSocket API]
 
         Session --> VAD
+        WebRTC --> Session
         VAD -->|speech turn| STT
         STT -->|user_transcript| Events
         Events --> Store
@@ -88,6 +110,8 @@ flowchart LR
     Tools -->|AMI actions| Asterisk
     API -->|response text| TTS
     AudioSocket -->|generated audio| Asterisk
+    Playback -->|remote audio track| WebRTC
+    API -->|SDP answer| Browser
     Asterisk -->|RTP| Trunk
     Trunk -->|audio| Caller
 ```
@@ -124,6 +148,12 @@ flowchart LR
 10. **Call end**: when the call disconnects, voicebot emits `call_ended`, closes
     the session, and leaves the full transcript available through the transcript
     API.
+
+For browser calls, the WebRTC flow starts with `POST /webrtc/sessions` instead
+of a SIP INVITE. The browser sends an SDP offer, voicebot creates a WebRTC peer
+connection, receives microphone audio directly, and sends synthesized bot audio
+back as a remote audio track. After media reaches the call session, WebRTC uses
+the same VAD, STT, event, agent, TTS, playback, and transcript path as SIP.
 
 ## Event-Driven Agent Contract
 
@@ -222,6 +252,40 @@ curl -X DELETE http://127.0.0.1:8080/sip-trunks/customer-1
 API responses redact passwords. The generated Asterisk include contains the
 actual SIP passwords and must live only on private runtime storage.
 
+## Browser WebRTC Calls
+
+The voicebot API can also accept direct browser WebRTC calls without SIP or
+Asterisk media. This is useful for web apps, local testing, and product demos.
+
+Start the stack:
+
+```bash
+docker compose up -d --build voicebot openai-agent
+```
+
+Open the built-in browser test page:
+
+```text
+http://127.0.0.1:8080/webrtc/test
+```
+
+Click **Start call**, allow microphone access, and speak. Browser echo
+cancellation is enabled by the test page, and synthesized bot audio plays
+through the page's audio element.
+
+Useful debug endpoints:
+
+```bash
+curl http://127.0.0.1:8080/webrtc/sessions
+curl http://127.0.0.1:8080/calls
+curl 'http://127.0.0.1:8080/events?limit=50'
+```
+
+For a custom frontend, create an `RTCPeerConnection`, add a microphone audio
+track, create an SDP offer, and send it to `POST /webrtc/sessions`. Set the
+returned `answer` as the remote description. See [docs/API.md](docs/API.md) for
+the endpoint contract.
+
 ## Agent API
 
 The voicebot core does not decide what to say. It emits events and waits for an
@@ -286,7 +350,13 @@ VOICEBOT_STT_PROVIDER=openai
 VOICEBOT_STT_API_KEY=
 VOICEBOT_STT_BASE_URL=
 VOICEBOT_STT_MODEL=
-VOICEBOT_OPENAI_STT_MODEL=whisper-1
+VOICEBOT_OPENAI_STT_MODEL=gpt-4o-transcribe
+VOICEBOT_LANGUAGE=en
+VOICEBOT_STT_PROMPT=
+VOICEBOT_START_THRESHOLD=0.020
+VOICEBOT_STOP_THRESHOLD=0.010
+VOICEBOT_SILENCE_MS=1200
+VOICEBOT_MIN_SECONDS=0.8
 VOICEBOT_TTS_PROVIDER=openai
 VOICEBOT_TTS_API_KEY=
 VOICEBOT_TTS_BASE_URL=
@@ -310,7 +380,11 @@ already have another `OPENAI_API_KEY` exported in the shell, unset it or start
 Compose from a clean shell so the project-local `.env` value is used.
 
 OpenAI model names are configurable so the same runtime can switch back to local
-Whisper/Supertonic or use newer OpenAI models without code changes.
+Whisper/Supertonic or use newer OpenAI models without code changes. For OpenAI
+STT, `VOICEBOT_LANGUAGE` pins the expected input language and
+`VOICEBOT_STT_PROMPT` can give the transcription model domain vocabulary that is
+commonly heard on calls. Keep it empty unless you have a measured need; prompts
+can leak into transcriptions when the input audio is unclear.
 
 Provider names:
 

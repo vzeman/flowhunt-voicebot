@@ -48,6 +48,26 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.agent_task_responded_event_retention, 25)
         self.assertEqual(result["agent_task_responded_event_retention"], 25)
 
+    def test_voice_defaults_prefer_openai_stt_quality(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings()
+
+        self.assertEqual(settings.language, "en")
+        self.assertEqual(settings.start_threshold, 0.020)
+        self.assertEqual(settings.stop_threshold, 0.010)
+        self.assertEqual(settings.silence_ms, 1200)
+        self.assertEqual(settings.min_seconds, 0.8)
+        self.assertEqual(settings.deferred_response_wait_seconds, 30.0)
+        self.assertEqual(settings.debug_audio_dir, "/data/debug-audio")
+        self.assertTrue(settings.tts_cache_enabled)
+        self.assertEqual(settings.tts_cache_dir, "/data/tts-cache")
+
+    def test_debug_audio_capture_can_be_configured(self) -> None:
+        settings = Settings(debug_audio_capture=False, debug_audio_dir="/tmp/debug-audio")
+
+        self.assertFalse(settings.debug_audio_capture)
+        self.assertEqual(settings.debug_audio_dir, "/tmp/debug-audio")
+
 
 if __name__ == "__main__":
     unittest.main()

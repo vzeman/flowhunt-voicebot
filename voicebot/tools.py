@@ -10,6 +10,8 @@ ToolName = Literal[
     "transfer_call",
     "send_dtmf",
     "stop_playback",
+    "invoke_flowhunt_flow",
+    "create_flowhunt_project_issue",
     "list_transcripts",
     "list_transcript_summaries",
     "get_transcript_stats",
@@ -131,6 +133,47 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             ToolArgument(
                 "reason",
                 "Optional reason for stopping playback.",
+                required=False,
+                schema={"type": ["string", "null"]},
+            ),
+            ToolArgument(
+                "response_to_event_id",
+                "Optional event ID this answers.",
+                required=False,
+                schema={"type": ["integer", "null"]},
+            ),
+        ),
+    ),
+    ToolDefinition(
+        "invoke_flowhunt_flow",
+        "Invoke a configured FlowHunt Flow for a complex caller request and wait briefly for the response.",
+        (
+            ToolArgument("call_id", "Active call ID."),
+            ToolArgument("message", "Caller request and relevant context to send to the FlowHunt Flow."),
+            ToolArgument(
+                "flow_id",
+                "Optional FlowHunt Flow ID. Defaults to VOICEBOT_FLOWHUNT_FLOW_ID.",
+                required=False,
+                schema={"type": ["string", "null"]},
+            ),
+            ToolArgument(
+                "response_to_event_id",
+                "Optional event ID this answers.",
+                required=False,
+                schema={"type": ["integer", "null"]},
+            ),
+        ),
+    ),
+    ToolDefinition(
+        "create_flowhunt_project_issue",
+        "Create a FlowHunt AI Project issue for a complex caller request and wait briefly for the agent-team result.",
+        (
+            ToolArgument("call_id", "Active call ID."),
+            ToolArgument("title", "Short issue title."),
+            ToolArgument("description", "Caller request and relevant context for the FlowHunt AI Project."),
+            ToolArgument(
+                "project_id",
+                "Optional FlowHunt AI Project ID. Defaults to VOICEBOT_FLOWHUNT_PROJECT_ID.",
                 required=False,
                 schema={"type": ["string", "null"]},
             ),

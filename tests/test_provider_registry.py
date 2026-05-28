@@ -4,6 +4,7 @@ import unittest
 
 from voicebot.config import Settings
 from voicebot.provider_registry import ProviderRegistry, default_provider_registry
+from voicebot.transports import CallRoute
 
 
 class ProviderRegistryTests(unittest.TestCase):
@@ -42,6 +43,33 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertIn("openai", registry.stt_factories)
         self.assertIn("supertonic", registry.tts_factories)
         self.assertIn("openai", registry.tts_factories)
+
+    def test_registry_tracks_provider_capabilities(self) -> None:
+        registry = default_provider_registry()
+
+        stt = registry.describe_stt("openai")
+        tts = registry.describe_tts("supertonic")
+
+        self.assertIsNotNone(stt)
+        self.assertEqual(stt.provider, "openai")
+        self.assertTrue(stt.capabilities.supports("stt"))
+        self.assertEqual(stt.capabilities.latency_profile, "interactive")
+        self.assertIsNotNone(tts)
+        self.assertEqual(tts.capabilities.output_audio_format, "pcm_f32_8000")
+
+    def test_registry_resolves_provider_by_workspace_and_voicebot_route(self) -> None:
+        registry = ProviderRegistry()
+        registry.register_stt("default_stt", lambda settings: {"provider": settings.stt_provider})
+        registry.register_stt("workspace_stt", lambda settings: {"provider": "workspace"})
+        registry.register_stt("voicebot_stt", lambda settings: {"provider": "voicebot"})
+        registry.route_stt("workspace-1", None, "workspace_stt")
+        registry.route_stt("workspace-1", "voicebot-1", "voicebot_stt")
+
+        workspace_route = CallRoute(workspace_id="workspace-1", voicebot_id="other")
+        voicebot_route = CallRoute(workspace_id="workspace-1", voicebot_id="voicebot-1")
+
+        self.assertEqual(registry.resolve_stt_provider(Settings(stt_provider="default_stt"), workspace_route), "workspace-stt")
+        self.assertEqual(registry.resolve_stt_provider(Settings(stt_provider="default_stt"), voicebot_route), "voicebot-stt")
 
 
 if __name__ == "__main__":

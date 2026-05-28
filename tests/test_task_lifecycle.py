@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+import tempfile
+import unittest
+
+from voicebot.subagents import (
+    JsonSubagentTaskStore,
+    SubagentCoordinator,
+    SubagentTask,
+    SubagentTaskRequest,
+    SubagentTaskResult,
+    SubagentTaskStore,
+)
+from voicebot.task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner
+
+
+class SequencedProvider:
+    kind = "internal_worker"
+
+    def __init__(self, outcomes: list[str] | None = None, raise_on_poll: bool = False) -> None:
+        self.outcomes = outcomes or ["running", "completed"]
+        self.raise_on_poll = raise_on_poll
+        self.polls = 0
+
+    def submit(self, request: SubagentTaskRequest) -> SubagentTask:
+        task, _created = SubagentTaskStore().get_or_create_requested(request)
+        return task.with_status("running", external_task_id="external-1")
+
+    def poll(self, task: SubagentTask) -> SubagentTask:
+        self.polls += 1
+        if self.raise_on_poll:
+            raise RuntimeError("provider unavailable")
+        outcome = self.outcomes[min(self.polls - 1, len(self.outcomes) - 1)]
+        if outcome == "completed":
+            return task.with_status("completed", result=SubagentTaskResult(summary="done"))
+        return task.with_status("running", progress_message="still working")
+
+    def cancel(self, task: SubagentTask) -> SubagentTask:
+        return task.with_status("cancelled")
+
+
+class TaskLifecycleTests(unittest.TestCase):
+    def build_coordinator(self, provider: SequencedProvider | None = None) -> SubagentCoordinator:
+        coordinator = SubagentCoordinator()
+        coordinator.register(provider or SequencedProvider())
+        return coordinator
+
+    def request(self) -> SubagentTaskRequest:
+        return SubagentTaskRequest(
+            workspace_id="workspace-1",
+            session_id="call-1",
+            request_event_id=10,
+            provider="internal_worker",
+            input_text="check this",
+        )
+
+    def test_json_store_persists_external_task_ids_and_dedupe_index(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/tasks.json"
+            store = JsonSubagentTaskStore(path)
+            task, created = store.get_or_create_requested(self.request())
+            store.update(task.with_status("running", external_task_id="external-1"))
+
+            reloaded = JsonSubagentTaskStore(path)
+            duplicate, duplicate_created = reloaded.get_or_create_requested(self.request())
+
+        self.assertTrue(created)
+        self.assertFalse(duplicate_created)
+        self.assertEqual(duplicate.task_id, task.task_id)
+        self.assertEqual(duplicate.external_task_id, "external-1")
+
+    def test_lifecycle_runner_polls_due_task_with_backoff_and_emits_completion_once(self) -> None:
+        provider = SequencedProvider(["running", "completed"])
+        coordinator = self.build_coordinator(provider)
+        events = []
+        runner = SubagentTaskLifecycleRunner(
+            coordinator,
+            policy=PollingPolicy(initial_interval_seconds=3, max_interval_seconds=10, timeout_seconds=60),
+            event_sink=lambda event_type, task: events.append((event_type, task.task_id)),
+        )
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        task = runner.schedule(coordinator.request(self.request()), now)
+
+        first = runner.tick(now + timedelta(seconds=3))[0]
+        second = runner.tick(now + timedelta(seconds=9))[0]
+        runner.tick(now + timedelta(seconds=12))
+
+        self.assertEqual(first.status, "running")
+        self.assertEqual(first.attempts, 1)
+        self.assertEqual(second.status, "completed")
+        self.assertEqual(events, [("subagent_task_completed", second.task_id)])
+        self.assertIsNotNone(coordinator.store.get(second.task_id).terminal_event_emitted_at)
+
+    def test_lifecycle_runner_retries_provider_errors_until_max_attempts(self) -> None:
+        coordinator = self.build_coordinator(SequencedProvider(raise_on_poll=True))
+        events = []
+        runner = SubagentTaskLifecycleRunner(
+            coordinator,
+            policy=PollingPolicy(initial_interval_seconds=1, max_interval_seconds=2, timeout_seconds=60, max_attempts=2),
+            event_sink=lambda event_type, task: events.append((event_type, task.error)),
+        )
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        runner.schedule(coordinator.request(self.request()), now)
+
+        retrying = runner.tick(now + timedelta(seconds=1))[0]
+        failed = runner.tick(now + timedelta(seconds=3))[0]
+
+        self.assertEqual(retrying.status, "running")
+        self.assertIn("provider polling failed", retrying.error)
+        self.assertEqual(failed.status, "failed")
+        self.assertEqual(events[0][0], "subagent_task_failed")
+
+    def test_lifecycle_runner_times_out_due_tasks(self) -> None:
+        coordinator = self.build_coordinator(SequencedProvider(["running"]))
+        events = []
+        runner = SubagentTaskLifecycleRunner(
+            coordinator,
+            policy=PollingPolicy(initial_interval_seconds=1, timeout_seconds=5),
+            event_sink=lambda event_type, task: events.append(event_type),
+        )
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        runner.schedule(coordinator.request(self.request()), now)
+
+        timed_out = runner.tick(now + timedelta(seconds=6))[0]
+
+        self.assertEqual(timed_out.status, "timed_out")
+        self.assertEqual(events, ["subagent_task_timed_out"])
+
+    def test_lifecycle_runner_marks_late_completion_after_session_end(self) -> None:
+        coordinator = self.build_coordinator(SequencedProvider(["completed"]))
+        events = []
+        runner = SubagentTaskLifecycleRunner(
+            coordinator,
+            policy=PollingPolicy(initial_interval_seconds=1, timeout_seconds=60),
+            event_sink=lambda event_type, task: events.append(event_type),
+            session_active=lambda session_id: False,
+        )
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        runner.schedule(coordinator.request(self.request()), now)
+
+        runner.tick(now + timedelta(seconds=1))
+
+        self.assertEqual(events, ["subagent_task_late_completed"])
+
+    def test_lifecycle_runner_cancels_pending_tasks_for_session(self) -> None:
+        coordinator = self.build_coordinator()
+        events = []
+        runner = SubagentTaskLifecycleRunner(
+            coordinator,
+            event_sink=lambda event_type, task: events.append(event_type),
+        )
+        task = coordinator.request(self.request())
+
+        cancelled = runner.cancel_session("call-1", "workspace-1")
+
+        self.assertEqual(cancelled[0].task_id, task.task_id)
+        self.assertEqual(cancelled[0].status, "cancelled")
+        self.assertEqual(events, ["subagent_task_cancelled"])
+
+
+if __name__ == "__main__":
+    unittest.main()

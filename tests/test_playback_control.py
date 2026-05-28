@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import socket
+import threading
+import time
 import unittest
 
 import numpy as np
@@ -8,10 +10,11 @@ from fastapi.testclient import TestClient
 
 from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
-from voicebot.calls import CallRegistry, CallSession
+from voicebot.calls import AgentResponse, CallRegistry, CallSession
 from voicebot.config import Settings
 from voicebot.events import EventStore
 from voicebot.transcripts import TranscriptStore
+from voicebot.webrtc import WebRTCCallSession
 
 
 class FakeSTT:
@@ -90,6 +93,77 @@ class PlaybackControlTests(unittest.TestCase):
         finally:
             left.close()
             right.close()
+
+    def test_startup_response_survives_startup_vad_until_recording_clears(self) -> None:
+        events = EventStore(max_context_events=20)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"reason": "call_connected"})
+            session._remember_response_generation(request.id)
+            session._protect_startup_response(request.id)
+            session.recording_event.set()
+            session._mark_interrupted("startup_noise")
+
+            session.submit_agent_response(
+                AgentResponse("call-1", "Hello, how can I help?", response_to_event_id=request.id)
+            )
+            silent_packet, started, finished = session.next_playback_packet(80)
+
+            self.assertFalse(started)
+            self.assertFalse(finished)
+            self.assertTrue(session.playback.is_active())
+            self.assertEqual(float(np.max(np.abs(silent_packet))), 0.0)
+            self.assertNotIn(
+                "agent_response_dropped",
+                [event.type for event in events.list_events(call_id="call-1")],
+            )
+
+            session.recording_event.clear()
+            packet, started, _finished = session.next_playback_packet(80)
+
+            self.assertTrue(started)
+            self.assertEqual(len(packet), 80)
+        finally:
+            session.stop()
+
+    def test_colleague_result_waits_for_current_speech_turn(self) -> None:
+        events = EventStore(max_context_events=30)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(deferred_response_wait_seconds=1.0),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"reason": "colleague_result"})
+            session.recording_event.set()
+
+            def clear_recording() -> None:
+                time.sleep(0.05)
+                session.recording_event.clear()
+
+            threading.Thread(target=clear_recording, daemon=True).start()
+
+            session.submit_agent_response(
+                AgentResponse("call-1", "The answer is 1,950 pages.", response_to_event_id=request.id)
+            )
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertIn("agent_response_deferred", event_types)
+            self.assertIn("agent_response_queued", event_types)
+            self.assertNotIn("agent_response_dropped", event_types)
+            self.assertTrue(session.playback.is_active())
+        finally:
+            session.stop()
 
 
 if __name__ == "__main__":

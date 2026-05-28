@@ -15,8 +15,8 @@ from voicebot.transcripts import TranscriptStore
 class MetricsTests(unittest.TestCase):
     def test_summarize_metrics_groups_numeric_metric_events(self) -> None:
         events = EventStore(max_context_events=20)
-        events.append("call-1", "metrics", {"name": "stt_duration_seconds", "value": 0.2})
-        latest = events.append("call-1", "metrics", {"name": "stt_duration_seconds", "value": 0.4})
+        events.append("call-1", "metrics", {"name": "stt_duration_seconds", "value": 0.2, "provider": "openai"})
+        latest = events.append("call-1", "metrics", {"name": "stt_duration_seconds", "value": 0.4, "provider": "openai"})
         events.append("call-1", "metrics", {"name": "ignored", "value": "not-number"})
 
         summary = summarize_metrics(events.list_events(call_id="call-1"))
@@ -27,6 +27,7 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metric["max"], 0.4)
         self.assertEqual(metric["avg"], 0.30000000000000004)
         self.assertEqual(metric["latest"]["event_id"], latest.id)
+        self.assertEqual(summary["providers"]["openai"]["latency_count"], 2)
 
     def test_metrics_endpoint_filters_by_call_id(self) -> None:
         events = EventStore(max_context_events=20)

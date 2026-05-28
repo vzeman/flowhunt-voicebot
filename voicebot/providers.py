@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
+from typing import Any, Literal
 
 
 SUPPORTED_STT_PROVIDERS = {
@@ -204,6 +205,68 @@ OPENAI_COMPATIBLE_BASE_URLS = {
 class ProviderCredentials:
     api_key: str
     base_url: str
+
+
+ProviderModality = Literal[
+    "stt",
+    "streaming_stt",
+    "tts",
+    "streaming_tts",
+    "agent",
+    "speech_to_speech",
+    "embeddings",
+]
+
+LatencyProfile = Literal["realtime", "interactive", "batch", "unknown"]
+
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    modalities: frozenset[ProviderModality]
+    streaming: bool = False
+    languages: tuple[str, ...] = ()
+    required_credentials: tuple[str, ...] = ()
+    latency_profile: LatencyProfile = "unknown"
+    interruption_support: bool = False
+    output_audio_format: str | None = None
+    usage_metadata: tuple[str, ...] = ()
+    native_tools: bool = False
+
+    def supports(self, modality: ProviderModality) -> bool:
+        return modality in self.modalities
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "modalities": sorted(self.modalities),
+            "streaming": self.streaming,
+            "languages": list(self.languages),
+            "required_credentials": list(self.required_credentials),
+            "latency_profile": self.latency_profile,
+            "interruption_support": self.interruption_support,
+            "output_audio_format": self.output_audio_format,
+            "usage_metadata": list(self.usage_metadata),
+            "native_tools": self.native_tools,
+        }
+
+
+@dataclass(frozen=True)
+class ProviderDescriptor:
+    provider: str
+    family: Literal["stt", "tts", "agent", "speech_to_speech", "embeddings"]
+    adapter: Literal["native", "openai_compatible", "chat_compatible", "declared_only"]
+    capabilities: ProviderCapabilities
+    models: tuple[str, ...] = ()
+    config: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "family": self.family,
+            "adapter": self.adapter,
+            "capabilities": self.capabilities.to_dict(),
+            "models": list(self.models),
+            "config": self.config,
+        }
 
 
 def normalize_provider(value: str) -> str:

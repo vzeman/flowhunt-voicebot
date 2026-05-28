@@ -1,6 +1,8 @@
 numpy
 openai
 anthropic
+flowhunt
+aiortc
 openai-whisper
 fastapi
 pydantic

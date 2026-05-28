@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import Any
 
 from .events import VoicebotEvent
+from .observability import provider_observability_summary
 
 
 def summarize_metrics(events: list[VoicebotEvent]) -> dict[str, Any]:
@@ -33,5 +34,6 @@ def summarize_metrics(events: list[VoicebotEvent]) -> dict[str, Any]:
                 "latest": latest[name],
             }
             for name, values in sorted(grouped.items())
-        }
+        },
+        "providers": provider_observability_summary(events)["providers"],
     }

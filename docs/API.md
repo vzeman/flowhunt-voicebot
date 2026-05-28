@@ -117,8 +117,9 @@ Response:
     },
     "event_catalog": {
       "ok": true,
-      "message": "event catalog covers all declared event types",
-      "missing_event_types": []
+      "message": "event catalog is valid",
+      "missing_event_types": [],
+      "integrity_issues": []
     }
   }
 }
@@ -725,9 +726,12 @@ Response:
   "events": [
     {
       "type": "call_started",
+      "category": "call_lifecycle",
+      "agent_visible": true,
       "description": "..."
     }
-  ]
+  ],
+  "integrity_issues": []
 }
 ```
 

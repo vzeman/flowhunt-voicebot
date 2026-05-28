@@ -32,6 +32,11 @@ Unsupported actions return a failed `CallControlResult` with a reason and
 transport name. Runtime code should emit that result as a call-control event
 instead of throwing transport-specific errors into the agent loop.
 
+`CallControlRequest.as_event_data()` and `CallControlResult.as_event_data()`
+provide normalized event payloads for `call_control_requested` and
+`call_control_completed`. Runtime integrations should use these helpers so SIP,
+WebRTC, and future transports report success/failure in the same shape.
+
 Capabilities are also exposed as a workspace-scoped catalog:
 
 `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/transports`

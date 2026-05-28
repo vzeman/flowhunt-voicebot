@@ -24,6 +24,11 @@ New runtime code should prefer `EventStore.append_scoped()`. It combines
 consistently carry workspace, voicebot, session, trace, turn, request, response,
 and external task identifiers.
 
+Use `ExecutionScope.same_session()` when deciding whether a response,
+cancellation, or playback/control frame belongs to the same conversation. The
+comparison requires matching workspace, voicebot, and session identifiers; it
+does not rely on transport-specific `call_id` equality.
+
 Pipeline-generated events use the same path through `EventLogProcessor`, which
 extracts scope and correlation identifiers from frames before persisting events.
 This keeps events emitted by processors aligned with events emitted directly by

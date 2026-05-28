@@ -49,6 +49,16 @@ class ExecutionScope:
             raise ValueError("session_id is required")
         return self
 
+    def same_session(self, other: "ExecutionScope") -> bool:
+        return (
+            bool(self.workspace_id)
+            and bool(self.voicebot_id)
+            and bool(self.session_id)
+            and self.workspace_id == other.workspace_id
+            and self.voicebot_id == other.voicebot_id
+            and self.session_id == other.session_id
+        )
+
 
 @dataclass(frozen=True)
 class ExecutionIds:

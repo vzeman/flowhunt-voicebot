@@ -50,7 +50,8 @@ provider latency sample counts, average latency, and failure counts.
 `timeline_health_summary()` adds deterministic health flags to the same
 timeline payload. It reports warnings for open speech turns, open playback, and
 provider failures so operators can scan one response before inspecting the full
-event list.
+event list. It also warns when the slowest end-of-speech to playback latency is
+above five seconds and reports `slowest_response_latency_seconds`.
 
 The timeline also reports `duration_seconds` when at least two event timestamps
 can be parsed. This is the elapsed time between the first and last event in the

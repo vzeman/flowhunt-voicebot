@@ -10,6 +10,9 @@ The voicebot service now creates a subagent coordinator at startup, registers
 FlowHunt providers from runtime configuration, and runs a lifespan-managed task
 poller. Agent tool calls can submit FlowHunt flow work through the generic
 subagent task store instead of relying on per-request background watchers.
+`SubagentTaskLifecycleRunner.schedule_pending()` can schedule every non-terminal
+stored task, optionally filtered by workspace/session, so restarted workers can
+restore poll deadlines before entering the normal tick loop.
 
 Completed, failed, timed-out, cancelled, and late-completed tasks produce
 workspace-scoped subagent events. If the call is still active, completed and

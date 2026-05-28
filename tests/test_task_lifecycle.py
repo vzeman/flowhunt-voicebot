@@ -95,6 +95,30 @@ class TaskLifecycleTests(unittest.TestCase):
         self.assertEqual(events, [("subagent_task_completed", second.task_id)])
         self.assertIsNotNone(coordinator.store.get(second.task_id).terminal_event_emitted_at)
 
+    def test_lifecycle_runner_can_schedule_pending_tasks_after_restart(self) -> None:
+        coordinator = self.build_coordinator(SequencedProvider(["running"]))
+        runner = SubagentTaskLifecycleRunner(
+            coordinator,
+            policy=PollingPolicy(initial_interval_seconds=3, timeout_seconds=60),
+        )
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        first = coordinator.request(self.request())
+        second = coordinator.request(
+            SubagentTaskRequest(
+                workspace_id="workspace-2",
+                session_id="call-2",
+                request_event_id=11,
+                provider="internal_worker",
+                input_text="check another",
+            )
+        )
+
+        scheduled = runner.schedule_pending(workspace_id="workspace-1", now=now)
+
+        self.assertEqual([task.task_id for task in scheduled], [first.task_id])
+        self.assertIsNotNone(coordinator.store.get(first.task_id).next_poll_at)
+        self.assertIsNone(coordinator.store.get(second.task_id).next_poll_at)
+
     def test_lifecycle_runner_retries_provider_errors_until_max_attempts(self) -> None:
         coordinator = self.build_coordinator(SequencedProvider(raise_on_poll=True))
         events = []

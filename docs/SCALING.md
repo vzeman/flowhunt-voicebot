@@ -22,8 +22,9 @@ and limits are explicit and testable.
 `WorkerRegistry` models runtime presence for these roles. Workers heartbeat with
 `worker_id`, role, queue, optional workspace/voicebot affinity, capacity, and
 status. The registry can list active workers by role/workspace, mark a worker as
-draining, remove a worker, and expire stale heartbeats. The first implementation
-is in-memory; production should back it with Redis or FlowHunt shared state.
+draining, remove a worker, expire stale heartbeats, and summarize active worker
+capacity by role. The first implementation is in-memory; production should back
+it with Redis or FlowHunt shared state.
 
 ## Routing
 

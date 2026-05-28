@@ -96,6 +96,34 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual([worker.worker_id for worker in expired], ["agent-1"])
         self.assertEqual(registry.snapshot(now + timedelta(seconds=12))["workers"], [])
 
+    def test_worker_registry_reports_active_capacity_by_role(self) -> None:
+        registry = WorkerRegistry(heartbeat_ttl_seconds=30)
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        registry.heartbeat(
+            WorkerInstance("stt-global", "stt_worker", "voicebot.stt", capacity=5),
+            now,
+        )
+        registry.heartbeat(
+            WorkerInstance("stt-workspace", "stt_worker", "voicebot.stt", workspace_id="workspace-1", capacity=3),
+            now,
+        )
+        registry.heartbeat(
+            WorkerInstance("agent-workspace", "agent_worker", "voicebot.agent", workspace_id="workspace-1", capacity=2),
+            now,
+        )
+        registry.heartbeat(
+            WorkerInstance("tts-other", "tts_worker", "voicebot.tts", workspace_id="workspace-2", capacity=9),
+            now,
+        )
+
+        summary = registry.capacity_summary(workspace_id="workspace-1", now=now)
+
+        self.assertEqual(summary["total_workers"], 3)
+        self.assertEqual(summary["total_capacity"], 10)
+        self.assertEqual(summary["roles"]["stt_worker"], {"workers": 2, "capacity": 8})
+        self.assertEqual(summary["roles"]["agent_worker"], {"workers": 1, "capacity": 2})
+        self.assertNotIn("tts_worker", summary["roles"])
+
     def test_scaling_topology_endpoint_returns_runtime_topology(self) -> None:
         client = self.build_client()
 

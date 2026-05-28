@@ -26,10 +26,12 @@ secrets are validation errors before enabling a voicebot/channel.
 
 `validate_provider_config()` checks:
 
+- provider choice family matches the config slot
 - provider is registered for the family
 - required credentials have a secret reference
 - secret references belong to the same workspace as the voicebot config
 - fallback provider exists
+- fallback provider is different from the primary provider
 - fallback providers that require credentials have a usable secret reference
 
 Validation should run when saving provider config and before enabling a channel.

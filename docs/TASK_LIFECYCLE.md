@@ -54,6 +54,11 @@ Polling uses the registered subagent provider only. For FlowHunt flows, that
 means the official invoke task protocol: submit once, store the task id, then
 poll by `flow_id + task_id`.
 
+Session cancellation honors the registered provider descriptor. If a provider
+does not support cancellation, the runner does not call provider `cancel()`; it
+marks the task terminal with a progress diagnostic so operations can see why no
+remote cancellation was attempted.
+
 ## Terminal Events
 
 Terminal task events are emitted exactly once:

@@ -358,6 +358,12 @@ class SubagentCoordinator:
             }
         }
 
+    def provider_descriptor(self, kind: SubagentProviderKind) -> SubagentProviderDescriptor:
+        return self.provider_descriptors[kind]
+
+    def supports_cancel(self, kind: SubagentProviderKind) -> bool:
+        return self.provider_descriptor(kind).supports_cancel
+
     def request(self, request: SubagentTaskRequest) -> SubagentTask:
         task, created = self.store.get_or_create_requested(request)
         if not created:

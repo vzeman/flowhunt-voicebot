@@ -75,7 +75,19 @@ class SubagentTaskLifecycleRunner:
         for task in self.coordinator.store.list(workspace_id=workspace_id, session_id=session_id):
             if task.is_terminal():
                 continue
-            cancelled.append(self._mark_terminal(self.coordinator.cancel(task.task_id, workspace_id)))
+            if self.coordinator.supports_cancel(task.provider):
+                cancelled.append(self._mark_terminal(self.coordinator.cancel(task.task_id, workspace_id)))
+                continue
+            cancelled.append(
+                self._mark_terminal(
+                    self.coordinator.store.update(
+                        task.with_status(
+                            "cancelled",
+                            progress_message="Session ended before completion; provider does not support cancellation.",
+                        )
+                    )
+                )
+            )
         return cancelled
 
     def _poll_due_task(self, task: SubagentTask, now: datetime) -> SubagentTask:

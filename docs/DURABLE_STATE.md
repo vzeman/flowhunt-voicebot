@@ -48,8 +48,10 @@ reports corruption statistics. It remains the call transcript surface.
 `JsonSubagentTaskStore` persists delegated subagent tasks, including provider
 task ids, status, retry state, deadline, and terminal-event emission markers.
 It exposes `load_diagnostics` with loaded task count plus skipped malformed JSON
-and invalid task rows, so delegated task recovery can continue while local
-storage corruption remains visible.
+invalid task rows, duplicate task ids, and duplicate workspace/dedupe keys, so
+delegated task recovery can continue while local storage corruption remains
+visible. Duplicate rows use first-row-wins behavior to keep restart recovery
+deterministic and avoid silently moving dedupe indexes to later corrupt rows.
 
 ## Agent Task Leases
 

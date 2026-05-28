@@ -13,6 +13,7 @@ from voicebot.subagents import (
     SubagentTaskRequest,
     SubagentTaskResult,
     SubagentTaskStore,
+    subagent_task_to_dict,
 )
 from voicebot.task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner
 
@@ -89,7 +90,38 @@ class TaskLifecycleTests(unittest.TestCase):
 
         self.assertEqual(reloaded.load_diagnostics["loaded_tasks"], 1)
         self.assertEqual(reloaded.load_diagnostics["skipped_invalid_tasks"], 1)
+        self.assertEqual(reloaded.load_diagnostics["skipped_duplicate_task_ids"], 0)
+        self.assertEqual(reloaded.load_diagnostics["skipped_duplicate_dedupe_keys"], 0)
         self.assertEqual(reloaded.get(task.task_id).task_id, task.task_id)
+
+    def test_json_store_skips_duplicate_task_ids_and_dedupe_keys_on_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/tasks.json"
+            store = JsonSubagentTaskStore(path)
+            original, _created = store.get_or_create_requested(self.request())
+            duplicate_id = {
+                **subagent_task_to_dict(original),
+                "dedupe_key": "different-dedupe-key",
+                "input_text": "duplicate task id",
+            }
+            duplicate_dedupe = {
+                **subagent_task_to_dict(original),
+                "task_id": "different-task-id",
+                "input_text": "duplicate dedupe key",
+            }
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump({"version": 1, "tasks": [subagent_task_to_dict(original), duplicate_id, duplicate_dedupe]}, handle)
+
+            reloaded = JsonSubagentTaskStore(path)
+            duplicate, created = reloaded.get_or_create_requested(self.request())
+
+        self.assertFalse(created)
+        self.assertEqual(duplicate.task_id, original.task_id)
+        self.assertEqual(duplicate.input_text, "check this")
+        self.assertIsNone(reloaded.get("different-task-id"))
+        self.assertEqual(reloaded.load_diagnostics["loaded_tasks"], 1)
+        self.assertEqual(reloaded.load_diagnostics["skipped_duplicate_task_ids"], 1)
+        self.assertEqual(reloaded.load_diagnostics["skipped_duplicate_dedupe_keys"], 1)
 
     def test_json_store_reports_malformed_json_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -47,6 +47,9 @@ converted into a caller-facing result.
 
 This is a first durable implementation. Production storage should move to the
 FlowHunt database, but the protocol is now explicit and restart-safe.
+On reload, duplicate task ids and duplicate workspace/dedupe keys are skipped
+with diagnostics. The first valid row wins, which preserves deterministic
+deduplication after a corrupted or partially rewritten local task file.
 
 ## Polling Policy
 

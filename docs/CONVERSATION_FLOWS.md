@@ -29,6 +29,8 @@ requires every saved definition to include `workspace_id`, supports voicebot
 specific flows and workspace defaults, and validates state references before a
 flow can be used by a live session. Validation checks the initial state and all
 transition target states so broken guided flows fail before callers enter them.
+It also validates action shape: speak/agent requests need text, subagent tasks
+need text and a provider, and transfer actions need a target.
 
 ## States
 

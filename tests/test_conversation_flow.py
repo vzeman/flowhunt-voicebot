@@ -150,6 +150,49 @@ class ConversationFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown state 'missing'"):
             ConversationFlowStore().save(definition)
 
+    def test_malformed_actions_fail_early(self) -> None:
+        malformed_definitions = [
+            ConversationFlowDefinition(
+                flow_id="missing-speak",
+                workspace_id="workspace-1",
+                voicebot_id="voicebot-1",
+                mode="structured",
+                initial_state="start",
+                states={"start": ConversationStateDefinition("start", entry_actions=(ConversationAction("speak"),))},
+            ),
+            ConversationFlowDefinition(
+                flow_id="missing-transfer-target",
+                workspace_id="workspace-1",
+                voicebot_id="voicebot-1",
+                mode="structured",
+                initial_state="start",
+                states={"start": ConversationStateDefinition("start", entry_actions=(ConversationAction("transfer"),))},
+            ),
+            ConversationFlowDefinition(
+                flow_id="missing-subagent-provider",
+                workspace_id="workspace-1",
+                voicebot_id="voicebot-1",
+                mode="structured",
+                initial_state="start",
+                states={
+                    "start": ConversationStateDefinition(
+                        "start",
+                        transitions=(
+                            ConversationTransition(
+                                on="user_transcript",
+                                action=ConversationAction("subagent_task", text="Check this"),
+                            ),
+                        ),
+                    )
+                },
+            ),
+        ]
+
+        for definition in malformed_definitions:
+            with self.subTest(flow_id=definition.flow_id):
+                with self.assertRaisesRegex(ValueError, "conversation action"):
+                    ConversationFlowStore().save(definition)
+
     def test_flow_store_requires_workspace_scoped_definitions(self) -> None:
         store = ConversationFlowStore()
 

@@ -143,9 +143,15 @@ def validate_provider_config(
         required = descriptor.capabilities.required_credentials
         if required and choice.secret_ref is None:
             issues.append(ProviderValidationIssue(family, provider, "provider requires a secret reference"))
+        if choice.secret_ref is not None and choice.secret_ref.workspace_id != config.workspace_id:
+            issues.append(ProviderValidationIssue(family, provider, "secret reference belongs to a different workspace"))
         fallback = choice.normalized_fallback()
-        if fallback and fallback not in descriptors.get(family, {}):
-            issues.append(ProviderValidationIssue(family, fallback, "fallback provider is not registered"))
+        if fallback:
+            fallback_descriptor = descriptors.get(family, {}).get(fallback)
+            if fallback_descriptor is None:
+                issues.append(ProviderValidationIssue(family, fallback, "fallback provider is not registered"))
+            elif fallback_descriptor.capabilities.required_credentials and choice.secret_ref is None:
+                issues.append(ProviderValidationIssue(family, fallback, "fallback provider requires a secret reference"))
     return issues
 
 

@@ -74,6 +74,38 @@ class ProviderConfigTests(unittest.TestCase):
 
         self.assertIn(("stt", "not-real", "provider is not registered"), [(i.family, i.provider, i.message) for i in issues])
 
+    def test_validation_reports_cross_workspace_secret_reference(self) -> None:
+        config = VoicebotProviderConfig(
+            workspace_id="workspace-1",
+            voicebot_id="voicebot-1",
+            stt=ProviderChoice("stt", "openai", secret_ref=SecretReference("openai", "workspace-2")),
+            tts=ProviderChoice("tts", "supertonic"),
+            agent=ProviderChoice("agent", "openai-responses", secret_ref=SecretReference("openai", "workspace-1")),
+        )
+
+        issues = validate_provider_config(config, self.descriptors())
+
+        self.assertIn(
+            ("stt", "openai", "secret reference belongs to a different workspace"),
+            [(issue.family, issue.provider, issue.message) for issue in issues],
+        )
+
+    def test_validation_reports_fallback_missing_required_secret(self) -> None:
+        config = VoicebotProviderConfig(
+            workspace_id="workspace-1",
+            voicebot_id="voicebot-1",
+            stt=ProviderChoice("stt", "whisper", fallback_provider="openai"),
+            tts=ProviderChoice("tts", "supertonic"),
+            agent=ProviderChoice("agent", "anthropic", secret_ref=SecretReference("anthropic", "workspace-1")),
+        )
+
+        issues = validate_provider_config(config, self.descriptors())
+
+        self.assertIn(
+            ("stt", "openai", "fallback provider requires a secret reference"),
+            [(issue.family, issue.provider, issue.message) for issue in issues],
+        )
+
     def test_selection_plan_normalizes_providers_models_and_fallbacks(self) -> None:
         plan = provider_selection_plan(self.config())
 

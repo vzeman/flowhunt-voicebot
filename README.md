@@ -68,6 +68,8 @@ Horizontal scaling and worker deployment topology are documented in
 [docs/SCALING.md](docs/SCALING.md).
 Multimodal extension points are documented in
 [docs/MULTIMODAL.md](docs/MULTIMODAL.md).
+Workspace/voicebot-scoped provider configuration is documented in
+[docs/PROVIDER_CONFIG.md](docs/PROVIDER_CONFIG.md).
 
 ## Architecture Schema
 

@@ -102,6 +102,14 @@ class AudioChunkNormalizer:
     target_rate: int
     channels: int = 1
 
+    def __post_init__(self) -> None:
+        if self.source_rate <= 0:
+            raise ValueError("source_rate must be greater than 0")
+        if self.target_rate <= 0:
+            raise ValueError("target_rate must be greater than 0")
+        if self.channels <= 0:
+            raise ValueError("channels must be greater than 0")
+
     def normalize(self, block: np.ndarray) -> np.ndarray:
         samples = np.asarray(block)
         if samples.ndim > 1:

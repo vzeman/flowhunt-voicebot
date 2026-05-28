@@ -90,6 +90,7 @@ ingress paths do not duplicate threshold and timing mapping.
 - oversized float values scaled down from PCM-like ranges
 - mono/stereo downmixing
 - sample-rate conversion
+- validation of source rate, target rate, and channel count
 
 Transport code should normalize audio before feeding it into the turn detector
 so SIP, WebRTC, and future providers share the same VAD behavior.

@@ -274,6 +274,18 @@ class ProviderDescriptor:
             "config": self.config,
         }
 
+    def validation_issues(self) -> tuple[str, ...]:
+        issues: list[str] = []
+        if normalize_provider(self.provider) != self.provider:
+            issues.append("provider must be normalized")
+        if not self.capabilities.modalities:
+            issues.append("capabilities must declare at least one modality")
+        if not _descriptor_family_matches_modalities(self.family, self.capabilities.modalities):
+            issues.append("capabilities modalities must match descriptor family")
+        if any(not credential.strip() for credential in self.capabilities.required_credentials):
+            issues.append("required credentials must not be blank")
+        return tuple(issues)
+
 
 def normalize_provider(value: str) -> str:
     return value.strip().lower().replace("_", "-")
@@ -303,3 +315,17 @@ def unsupported_provider_message(kind: str, provider: str, supported: set[str], 
         f"Unsupported {kind} provider adapter for '{provider}'. "
         f"Known {kind} provider names are: {provider_list}. {adapter_hint}"
     )
+
+
+def _descriptor_family_matches_modalities(
+    family: Literal["stt", "tts", "agent", "speech_to_speech", "embeddings"],
+    modalities: frozenset[ProviderModality],
+) -> bool:
+    required_by_family = {
+        "stt": {"stt", "streaming_stt"},
+        "tts": {"tts", "streaming_tts"},
+        "agent": {"agent", "chat"},
+        "speech_to_speech": {"speech_to_speech"},
+        "embeddings": {"embeddings"},
+    }
+    return bool(modalities.intersection(required_by_family[family]))

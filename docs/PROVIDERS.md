@@ -62,6 +62,10 @@ Future adapters should add a descriptor before adding factory code, so pipeline
 selection can reason about streaming, latency, credentials, output formats, and
 tool support consistently.
 
+`ProviderDescriptor.validation_issues()` checks descriptor metadata before a new
+provider enters the catalog. It catches unnormalized provider ids, missing
+modalities, family/modality mismatches, and blank credential names.
+
 The standalone communication-agent runtime registry in `agents/` follows the
 same descriptor contract. `AgentProviderRegistry.describe()` and
 `AgentProviderRegistry.catalog()` expose `ProviderDescriptor` metadata for

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 
@@ -24,6 +25,29 @@ class DurableEventTests(unittest.TestCase):
 
         self.assertEqual([event.id for event in events], [first.id, second.id, third.id])
         self.assertEqual(third.id, second.id + 1)
+
+    def test_json_event_store_reports_load_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/events.jsonl"
+            valid_event = {
+                "id": 1,
+                "call_id": "call-1",
+                "type": "call_started",
+                "timestamp": "2026-05-28T00:00:00+00:00",
+                "data": {"workspace_id": "workspace-1"},
+            }
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(valid_event) + "\n")
+                handle.write("\n")
+                handle.write("{bad json}\n")
+                handle.write(json.dumps({"id": "bad"}) + "\n")
+
+            store = JsonEventStore(path, max_context_events=100)
+
+        self.assertEqual(store.load_diagnostics["loaded_events"], 1)
+        self.assertEqual(store.load_diagnostics["skipped_blank_lines"], 1)
+        self.assertEqual(store.load_diagnostics["skipped_malformed_json"], 1)
+        self.assertEqual(store.load_diagnostics["skipped_invalid_events"], 1)
 
     def test_event_store_filters_by_workspace_voicebot_and_session(self) -> None:
         store = EventStore(max_context_events=100)

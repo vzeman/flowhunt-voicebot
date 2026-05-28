@@ -217,6 +217,12 @@ class JsonEventStore(EventStore):
         transcript_store: TranscriptStore | None = None,
     ) -> None:
         self.path = Path(path)
+        self.load_diagnostics: dict[str, int] = {
+            "loaded_events": 0,
+            "skipped_blank_lines": 0,
+            "skipped_malformed_json": 0,
+            "skipped_invalid_events": 0,
+        }
         super().__init__(
             max_context_events=max_context_events,
             transcript_store=transcript_store,
@@ -232,18 +238,25 @@ class JsonEventStore(EventStore):
         if not self.path.exists():
             return []
         events: list[VoicebotEvent] = []
+        diagnostics = dict(self.load_diagnostics)
         with self.path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
+                    diagnostics["skipped_blank_lines"] += 1
                     continue
                 try:
                     payload = json.loads(line)
                 except json.JSONDecodeError:
+                    diagnostics["skipped_malformed_json"] += 1
                     continue
                 if isinstance(payload, dict):
                     event = event_from_dict(payload)
                     if event is not None:
                         events.append(event)
+                        diagnostics["loaded_events"] += 1
+                        continue
+                diagnostics["skipped_invalid_events"] += 1
+        self.load_diagnostics = diagnostics
         return events
 
     def _append_to_log(self, event: VoicebotEvent) -> None:

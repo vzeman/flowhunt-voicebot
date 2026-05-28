@@ -49,6 +49,25 @@ class MultimodalContentRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SecretReferenceRequest(BaseModel):
+    name: str
+    workspace_id: str | None = None
+
+
+class ProviderChoiceRequest(BaseModel):
+    provider: str
+    model: str | None = None
+    secret_ref: SecretReferenceRequest | None = None
+    fallback_provider: str | None = None
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class VoicebotProviderConfigRequest(BaseModel):
+    stt: ProviderChoiceRequest
+    tts: ProviderChoiceRequest
+    agent: ProviderChoiceRequest
+
+
 class CallControlRequest(BaseModel):
     action: str
     target: str | None = None

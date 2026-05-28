@@ -71,6 +71,63 @@ class ProviderSelectionPlan:
     models: dict[ProviderFamily, str]
 
 
+class ProviderConfigStore:
+    def __init__(self) -> None:
+        self._configs: dict[tuple[str, str], VoicebotProviderConfig] = {}
+
+    def save(self, config: VoicebotProviderConfig) -> VoicebotProviderConfig:
+        self._configs[(config.workspace_id, config.voicebot_id)] = config
+        return config
+
+    def get(self, workspace_id: str, voicebot_id: str) -> VoicebotProviderConfig | None:
+        return self._configs.get((workspace_id, voicebot_id))
+
+    def list(self, workspace_id: str | None = None) -> list[VoicebotProviderConfig]:
+        configs = self._configs.values()
+        if workspace_id is not None:
+            configs = [config for config in configs if config.workspace_id == workspace_id]
+        return sorted(configs, key=lambda config: (config.workspace_id, config.voicebot_id))
+
+
+def provider_config_to_dict(config: VoicebotProviderConfig) -> dict:
+    return {
+        "workspace_id": config.workspace_id,
+        "voicebot_id": config.voicebot_id,
+        "stt": provider_choice_to_dict(config.stt),
+        "tts": provider_choice_to_dict(config.tts),
+        "agent": provider_choice_to_dict(config.agent),
+    }
+
+
+def provider_choice_to_dict(choice: ProviderChoice) -> dict:
+    return {
+        "family": choice.family,
+        "provider": choice.provider,
+        "model": choice.model,
+        "secret_ref": secret_reference_to_dict(choice.secret_ref) if choice.secret_ref else None,
+        "fallback_provider": choice.fallback_provider,
+        "config": choice.config,
+    }
+
+
+def secret_reference_to_dict(secret: SecretReference) -> dict:
+    return {"name": secret.name, "workspace_id": secret.workspace_id}
+
+
+def validation_issue_to_dict(issue: ProviderValidationIssue) -> dict:
+    return {"family": issue.family, "provider": issue.provider, "message": issue.message}
+
+
+def selection_plan_to_dict(plan: ProviderSelectionPlan) -> dict:
+    return {
+        "workspace_id": plan.workspace_id,
+        "voicebot_id": plan.voicebot_id,
+        "providers": plan.providers,
+        "fallbacks": plan.fallbacks,
+        "models": plan.models,
+    }
+
+
 def validate_provider_config(
     config: VoicebotProviderConfig,
     descriptors: dict[ProviderFamily, dict[str, ProviderDescriptor]],

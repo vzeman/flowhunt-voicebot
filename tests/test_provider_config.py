@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import unittest
+from fastapi.testclient import TestClient
 
+from voicebot.agent_tasks import AgentTaskTracker
+from voicebot.api import WebSocketHub, create_app
+from voicebot.calls import CallRegistry
+from voicebot.events import EventStore
 from voicebot.provider_config import (
     ProviderChoice,
+    ProviderConfigStore,
     SecretReference,
     VoicebotProviderConfig,
     provider_selection_plan,
     validate_provider_config,
 )
 from voicebot.provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities
+from voicebot.transcripts import TranscriptStore
 
 
 class ProviderConfigTests(unittest.TestCase):
@@ -78,6 +85,79 @@ class ProviderConfigTests(unittest.TestCase):
     def test_secret_reference_requires_workspace_scope(self) -> None:
         with self.assertRaisesRegex(ValueError, "workspace_id"):
             SecretReference("openai", "")
+
+    def test_provider_config_store_saves_by_workspace_voicebot(self) -> None:
+        store = ProviderConfigStore()
+
+        store.save(self.config())
+
+        self.assertEqual(store.get("workspace-1", "voicebot-1"), self.config())
+        self.assertEqual([config.voicebot_id for config in store.list(workspace_id="workspace-1")], ["voicebot-1"])
+
+    def test_provider_config_api_validates_saves_and_reads_config(self) -> None:
+        client = self.build_client()
+
+        response = client.put(
+            "/workspaces/workspace-1/voicebots/voicebot-1/providers",
+            json={
+                "stt": {
+                    "provider": "openai",
+                    "model": "gpt-4o-transcribe",
+                    "secret_ref": {"name": "openai-main"},
+                    "fallback_provider": "whisper",
+                },
+                "tts": {
+                    "provider": "openai",
+                    "model": "gpt-4o-mini-tts",
+                    "secret_ref": {"name": "openai-main"},
+                    "fallback_provider": "supertonic",
+                },
+                "agent": {
+                    "provider": "openai-responses",
+                    "model": "gpt-4.1",
+                    "secret_ref": {"name": "openai-main"},
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["selection_plan"]["providers"]["agent"], "openai-responses")
+
+        read_response = client.get("/workspaces/workspace-1/voicebots/voicebot-1/providers")
+        self.assertEqual(read_response.status_code, 200)
+        self.assertEqual(read_response.json()["config"]["stt"]["secret_ref"]["workspace_id"], "workspace-1")
+
+    def test_provider_config_api_returns_validation_errors_without_saving(self) -> None:
+        client = self.build_client()
+
+        response = client.put(
+            "/workspaces/workspace-1/voicebots/voicebot-1/providers",
+            json={
+                "stt": {"provider": "openai"},
+                "tts": {"provider": "supertonic"},
+                "agent": {"provider": "openai-responses"},
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(
+            [(issue["family"], issue["provider"]) for issue in response.json()["validation"]],
+            [("stt", "openai"), ("agent", "openai-responses")],
+        )
+        self.assertEqual(client.get("/workspaces/workspace-1/voicebots/voicebot-1/providers").status_code, 404)
+
+    def build_client(self) -> TestClient:
+        app = create_app(
+            EventStore(max_context_events=20),
+            CallRegistry(),
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+        )
+        return TestClient(app)
 
 
 if __name__ == "__main__":

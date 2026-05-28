@@ -107,6 +107,8 @@ class WorkerInstance:
 
 class WorkerRegistry:
     def __init__(self, heartbeat_ttl_seconds: float = 30.0) -> None:
+        if heartbeat_ttl_seconds <= 0:
+            raise ValueError("heartbeat_ttl_seconds must be positive")
         self.heartbeat_ttl_seconds = heartbeat_ttl_seconds
         self._workers: dict[str, WorkerInstance] = {}
 

@@ -30,6 +30,10 @@ class ProviderChoice:
     fallback_provider: str | None = None
     config: dict = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if not self.provider.strip():
+            raise ValueError("provider is required")
+
     def normalized_provider(self) -> str:
         return normalize_provider(self.provider)
 

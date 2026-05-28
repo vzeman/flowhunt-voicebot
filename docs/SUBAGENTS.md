@@ -73,10 +73,20 @@ For FlowHunt flow execution, the adapter uses the invoke task protocol:
 ## Next Integration Step
 
 The current implementation is intentionally independent from HTTP routes and
-live calls. Next steps:
+live calls. `SubagentCoordinator` can now emit workspace-scoped lifecycle events
+when it is constructed with an `EventStore`:
+
+- `subagent_task_requested`
+- `subagent_task_deduplicated`
+- `subagent_task_updated`
+- `subagent_task_cancelled`
+
+Event payloads use `SubagentTask.event_context()`, which exposes clean task
+status/result context and excludes raw provider payloads.
+
+Next steps:
 
 - persist subagent tasks in durable storage
 - expose task APIs
 - connect communication agent tool calls to `SubagentCoordinator`
-- emit lifecycle events for task state changes
 - throttle progress updates so the voice agent does not repeat itself

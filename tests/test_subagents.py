@@ -11,6 +11,7 @@ from voicebot.subagents import (
     SubagentTaskResult,
     SubagentTaskStore,
 )
+from voicebot.events import EventStore
 
 
 class FakeProvider:
@@ -120,6 +121,45 @@ class SubagentTests(unittest.TestCase):
 
         self.assertEqual(first.task_id, second.task_id)
         self.assertEqual(provider.submitted, 1)
+
+    def test_coordinator_emits_workspace_scoped_lifecycle_events(self) -> None:
+        provider = FakeProvider()
+        events = EventStore(max_context_events=20)
+        coordinator = SubagentCoordinator(events=events)
+        coordinator.register(provider)
+
+        task = coordinator.request(self.request())
+        coordinator.request(self.request())
+        coordinator.poll(task.task_id, "workspace-1")
+
+        event_types = [event.type for event in events.list_events(call_id="call-1")]
+        self.assertEqual(
+            event_types,
+            [
+                "subagent_task_requested",
+                "subagent_task_updated",
+                "subagent_task_deduplicated",
+                "subagent_task_updated",
+            ],
+        )
+        first = events.list_events(call_id="call-1")[0]
+        self.assertEqual(first.data["workspace_id"], "workspace-1")
+        self.assertEqual(first.data["voicebot_id"], "voicebot-1")
+        self.assertEqual(first.data["session_id"], "call-1")
+        self.assertEqual(first.data["task_id"], task.task_id)
+        self.assertNotIn("provider_payload", str(first.data))
+
+    def test_task_event_context_exposes_clean_result_context_only(self) -> None:
+        provider = FakeProvider()
+        coordinator = SubagentCoordinator()
+        coordinator.register(provider)
+
+        task = coordinator.request(self.request())
+        completed = coordinator.poll(task.task_id, "workspace-1")
+
+        context = completed.event_context()
+        self.assertEqual(context["result"]["summary"], "The colleague found the answer.")
+        self.assertNotIn("provider_payload", context["result"])
 
     def test_flowhunt_provider_uses_flow_invoke_task_protocol(self) -> None:
         client = FakeFlowHuntClient()

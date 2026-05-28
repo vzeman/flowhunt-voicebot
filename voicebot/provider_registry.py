@@ -40,7 +40,7 @@ class ProviderRegistry:
     ) -> None:
         normalized = normalize_provider(provider)
         self.stt_factories[normalized] = factory
-        self.stt_descriptors[normalized] = descriptor or _default_stt_descriptor(normalized)
+        self.stt_descriptors[normalized] = _validate_descriptor(normalized, descriptor or _default_stt_descriptor(normalized))
 
     def register_tts(
         self,
@@ -50,7 +50,7 @@ class ProviderRegistry:
     ) -> None:
         normalized = normalize_provider(provider)
         self.tts_factories[normalized] = factory
-        self.tts_descriptors[normalized] = descriptor or _default_tts_descriptor(normalized)
+        self.tts_descriptors[normalized] = _validate_descriptor(normalized, descriptor or _default_tts_descriptor(normalized))
 
     def route_stt(self, workspace_id: str | None, voicebot_id: str | None, provider: str) -> None:
         self._route_provider(self.stt_routes, self.stt_factories, workspace_id, voicebot_id, provider, "STT")
@@ -196,6 +196,15 @@ def _build_openai_tts(settings: Settings):
             language=settings.language,
         ),
     )
+
+
+def _validate_descriptor(provider: str, descriptor: ProviderDescriptor) -> ProviderDescriptor:
+    issues = list(descriptor.validation_issues())
+    if descriptor.provider != provider:
+        issues.append("descriptor provider must match registered provider")
+    if issues:
+        raise ValueError(f"Invalid provider descriptor for '{provider}': {', '.join(issues)}")
+    return descriptor
 
 
 def _default_stt_descriptor(provider: str) -> ProviderDescriptor:

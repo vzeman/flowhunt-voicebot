@@ -252,4 +252,4 @@ class TurnDetector:
         return TurnDetectionResult("speech_finished", level, block_ms, finished=True, duration=duration, audio=audio)
 
     def should_ignore_for_playback(self, level: float, playback_active: bool) -> bool:
-        return playback_active and level < self.config.start_threshold
+        return playback_active and level < self.config.barge_in_threshold

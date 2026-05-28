@@ -85,6 +85,10 @@ duration must be positive; stop threshold cannot exceed start threshold; max
 turn duration cannot be shorter than the minimum; and barge-in threshold cannot
 be below the start threshold. Invalid values should fail startup or voicebot
 config activation instead of producing unstable turn detection.
+When playback is active, the detector ignores audio below `barge_in_threshold`
+instead of the lower speech start threshold. That keeps generated speech or
+speaker echo from retriggering the bot while still allowing a louder caller
+interruption to stop playback.
 
 These values should be resolved per voicebot/session once workspace-based configuration is implemented.
 

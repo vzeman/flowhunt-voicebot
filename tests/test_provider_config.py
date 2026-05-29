@@ -155,12 +155,27 @@ class ProviderConfigTests(unittest.TestCase):
         self.assertEqual(plan.models["agent"], "gpt-4.1")
 
     def test_secret_reference_requires_workspace_scope(self) -> None:
+        with self.assertRaisesRegex(ValueError, "name"):
+            SecretReference(" ", "workspace-1")
         with self.assertRaisesRegex(ValueError, "workspace_id"):
-            SecretReference("openai", "")
+            SecretReference("openai", " ")
 
-    def test_provider_choice_requires_provider_name(self) -> None:
+    def test_provider_choice_rejects_invalid_identity_fields(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported provider family"):
+            ProviderChoice("voice", "openai")
         with self.assertRaisesRegex(ValueError, "provider is required"):
             ProviderChoice("stt", "")
+        with self.assertRaisesRegex(ValueError, "model"):
+            ProviderChoice("stt", "openai", model=" ")
+        with self.assertRaisesRegex(ValueError, "fallback_provider"):
+            ProviderChoice("stt", "openai", fallback_provider=" ")
+
+    def test_provider_config_requires_workspace_and_voicebot_ids(self) -> None:
+        valid = self.config()
+        with self.assertRaisesRegex(ValueError, "workspace_id"):
+            VoicebotProviderConfig(" ", valid.voicebot_id, valid.stt, valid.tts, valid.agent)
+        with self.assertRaisesRegex(ValueError, "voicebot_id"):
+            VoicebotProviderConfig(valid.workspace_id, " ", valid.stt, valid.tts, valid.agent)
 
     def test_provider_config_store_saves_by_workspace_voicebot(self) -> None:
         store = ProviderConfigStore()

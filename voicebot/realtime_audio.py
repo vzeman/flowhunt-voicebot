@@ -77,6 +77,7 @@ class TurnDetectionResult:
     finished: bool = False
     interrupt_playback: bool = False
     duration: float = 0.0
+    silence_ms: int = 0
     audio: np.ndarray | None = None
 
     def metric_data(self, *, session_id: str = "", turn_id: int | None = None) -> dict:
@@ -88,6 +89,7 @@ class TurnDetectionResult:
             "finished": self.finished,
             "interrupt_playback": self.interrupt_playback,
             "duration": self.duration,
+            "silence_ms": self.silence_ms,
         }
         if session_id:
             data["session_id"] = session_id
@@ -347,10 +349,27 @@ class TurnDetector:
 
         audio = np.concatenate(self.state.collected) if self.state.collected else np.zeros(0, dtype=np.float32)
         duration = len(audio) / self.config.sample_rate if self.config.sample_rate else 0.0
+        silence_ms = self.state.silence_ms
         self.state.reset_recording()
         if duration < self.config.min_seconds:
-            return TurnDetectionResult("speech_too_short", level, block_ms, finished=True, duration=duration, audio=audio)
-        return TurnDetectionResult("speech_finished", level, block_ms, finished=True, duration=duration, audio=audio)
+            return TurnDetectionResult(
+                "speech_too_short",
+                level,
+                block_ms,
+                finished=True,
+                duration=duration,
+                silence_ms=silence_ms,
+                audio=audio,
+            )
+        return TurnDetectionResult(
+            "speech_finished",
+            level,
+            block_ms,
+            finished=True,
+            duration=duration,
+            silence_ms=silence_ms,
+            audio=audio,
+        )
 
     def should_ignore_for_playback(self, activity: VoiceActivity, playback_active: bool) -> bool:
         return playback_active and not activity.active

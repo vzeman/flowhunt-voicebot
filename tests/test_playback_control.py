@@ -285,7 +285,7 @@ class PlaybackControlTests(unittest.TestCase):
             "This is a long first sentence that should stay intact.",
         )
 
-    def test_webrtc_barge_in_uses_start_threshold_not_high_echo_threshold(self) -> None:
+    def test_webrtc_barge_in_ignores_audio_below_barge_in_threshold(self) -> None:
         events = EventStore(max_context_events=30)
         session = WebRTCCallSession(
             "call-1",
@@ -304,6 +304,33 @@ class PlaybackControlTests(unittest.TestCase):
             session.playback.enqueue(np.ones(1600, dtype=np.float32))
 
             session.process_audio_block(np.full(160, 0.05, dtype=np.float32))
+
+            self.assertFalse(session.recording_event.is_set())
+            self.assertTrue(session.playback.is_active())
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertNotIn("bot_playback_interrupted", event_types)
+        finally:
+            session.stop()
+
+    def test_webrtc_barge_in_interrupts_playback_above_barge_in_threshold(self) -> None:
+        events = EventStore(max_context_events=30)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(
+                greet_on_connect=False,
+                start_threshold=0.02,
+                barge_in_threshold=0.30,
+                vad_start_ms=0,
+            ),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            session.playback.enqueue(np.ones(1600, dtype=np.float32))
+
+            session.process_audio_block(np.full(160, 0.5, dtype=np.float32))
 
             self.assertTrue(session.recording_event.is_set())
             self.assertFalse(session.playback.is_active())

@@ -302,6 +302,7 @@ class ApiWebRTCTests(unittest.TestCase):
                 vad_start_ms=0,
                 silence_ms=10,
                 min_seconds=999.0,
+                max_seconds=1000.0,
             ),
             event_store=events,
             stt=FakeSTT(),

@@ -24,6 +24,10 @@ secrets are validation errors before enabling a voicebot/channel.
 
 ## Validation
 
+Provider config value objects reject blank workspace, voicebot, provider,
+secret, model, and fallback fields before validation reaches runtime provider
+descriptors.
+
 `validate_provider_config()` checks:
 
 - provider choices include a provider id

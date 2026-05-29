@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, get_args
 
 from .providers import ProviderDescriptor, normalize_provider
 
@@ -15,9 +15,9 @@ class SecretReference:
     workspace_id: str
 
     def __post_init__(self) -> None:
-        if not self.name:
+        if not self.name.strip():
             raise ValueError("secret reference name is required")
-        if not self.workspace_id:
+        if not self.workspace_id.strip():
             raise ValueError("secret reference workspace_id is required")
 
 
@@ -31,8 +31,14 @@ class ProviderChoice:
     config: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.family not in get_args(ProviderFamily):
+            raise ValueError(f"unsupported provider family: {self.family}")
         if not self.provider.strip():
             raise ValueError("provider is required")
+        if self.model is not None and not self.model.strip():
+            raise ValueError("model must not be blank")
+        if self.fallback_provider is not None and not self.fallback_provider.strip():
+            raise ValueError("fallback_provider must not be blank")
 
     def normalized_provider(self) -> str:
         return normalize_provider(self.provider)
@@ -50,9 +56,9 @@ class VoicebotProviderConfig:
     agent: ProviderChoice
 
     def __post_init__(self) -> None:
-        if not self.workspace_id:
+        if not self.workspace_id.strip():
             raise ValueError("workspace_id is required")
-        if not self.voicebot_id:
+        if not self.voicebot_id.strip():
             raise ValueError("voicebot_id is required")
 
     def choice(self, family: ProviderFamily) -> ProviderChoice:

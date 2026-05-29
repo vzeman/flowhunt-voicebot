@@ -25,6 +25,7 @@ from .audio import (
     rms,
     write_audiosocket_message,
 )
+from .call_state import CallStateStore
 from .config import Settings
 from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, AudioOutputFrame, PlaybackFrame, TextFrame, TranscriptionFrame
@@ -772,22 +773,28 @@ class CallSession:
 
 
 class CallRegistry:
-    def __init__(self) -> None:
+    def __init__(self, state_store: CallStateStore | None = None) -> None:
         self._lock = threading.Lock()
         self._calls: dict[str, CallSession] = {}
+        self.state_store = state_store or CallStateStore()
 
     def add(self, session: CallSession) -> None:
         with self._lock:
             self._calls[session.call_id] = session
+        self.state_store.upsert(session.snapshot())
 
     def replace_id(self, old_call_id: str, session: CallSession) -> None:
         with self._lock:
             self._calls.pop(old_call_id, None)
             self._calls[session.call_id] = session
+        if old_call_id != session.call_id:
+            self.state_store.end(old_call_id)
+        self.state_store.upsert(session.snapshot())
 
     def remove(self, call_id: str) -> None:
         with self._lock:
             self._calls.pop(call_id, None)
+        self.state_store.end(call_id)
 
     def get(self, call_id: str) -> CallSession | None:
         with self._lock:
@@ -802,9 +809,17 @@ class CallRegistry:
             session = self._calls.get(call_id)
         if session is None:
             return None
-        return session.snapshot()
+        snapshot = session.snapshot()
+        self.state_store.upsert(snapshot)
+        return snapshot
 
     def snapshots(self) -> list[dict]:
         with self._lock:
             sessions = list(self._calls.values())
-        return sorted((session.snapshot() for session in sessions), key=lambda item: item["call_id"])
+        snapshots = [session.snapshot() for session in sessions]
+        for snapshot in snapshots:
+            self.state_store.upsert(snapshot)
+        return sorted(snapshots, key=lambda item: item["call_id"])
+
+    def stored_snapshots(self, active_only: bool = False) -> list[dict]:
+        return list(self.state_store.list(active_only=active_only))

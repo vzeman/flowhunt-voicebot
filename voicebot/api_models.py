@@ -110,7 +110,7 @@ class PlaybackInterruptRequest(BaseModel):
 
 
 class AgentToolRequest(BaseModel):
-    arguments: dict[str, Any] = {}
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentTaskClaimRequest(BaseModel):

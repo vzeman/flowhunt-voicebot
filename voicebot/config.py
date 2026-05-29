@@ -96,6 +96,8 @@ class Settings:
     max_context_events: int = env_int("VOICEBOT_MAX_CONTEXT_EVENTS", 80)
     event_store_provider: str = os.getenv("VOICEBOT_EVENT_STORE_PROVIDER", "json").strip().lower()
     event_store_path: str = os.getenv("VOICEBOT_EVENT_STORE_PATH", "/data/events/events.jsonl")
+    agent_task_store_provider: str = os.getenv("VOICEBOT_AGENT_TASK_STORE_PROVIDER", "json").strip().lower()
+    agent_task_store_path: str = os.getenv("VOICEBOT_AGENT_TASK_STORE_PATH", "/data/agent_tasks.json")
     agent_task_responded_event_retention: int = env_int("VOICEBOT_AGENT_TASK_RESPONDED_EVENT_RETENTION", 10000)
     transcript_dir: str = os.getenv("VOICEBOT_TRANSCRIPT_DIR", "/data/transcripts")
     voicebot_session_store_provider: str = os.getenv("VOICEBOT_SESSION_STORE_PROVIDER", "json").strip().lower()

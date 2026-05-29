@@ -418,6 +418,46 @@ def create_app(
             raise HTTPException(status_code=404, detail="Channel not found")
         return {"channel": binding.as_dict(), "deleted": True}
 
+    @app.post("/workspaces/{workspace_id}/voicebots/{voicebot_id}/validate")
+    def validate_voicebot_runtime(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        issues: list[dict[str, Any]] = []
+        voicebot = voicebot_store.get(workspace_id, voicebot_id)
+        channels = channel_resolver.bindings_for_voicebot(workspace_id, voicebot_id)
+        config = provider_config_store.get(workspace_id, voicebot_id)
+        selection_plan = None
+
+        if voicebot is None:
+            issues.append({"area": "voicebot", "message": "voicebot record is missing"})
+        elif not voicebot.enabled:
+            issues.append({"area": "voicebot", "message": "voicebot is disabled"})
+
+        if not channels:
+            issues.append({"area": "channel", "message": "voicebot has no channel bindings"})
+        elif not any(channel.enabled for channel in channels):
+            issues.append({"area": "channel", "message": "voicebot has no enabled channel bindings"})
+
+        if config is None:
+            issues.append({"area": "provider", "message": "provider config is missing"})
+        else:
+            descriptors = {
+                "stt": provider_catalog_descriptors("stt"),
+                "tts": provider_catalog_descriptors("tts"),
+                "agent": provider_catalog_descriptors("agent"),
+            }
+            issues.extend({"area": "provider", **validation_issue_to_dict(issue)} for issue in validate_provider_config(config, descriptors))
+            if not any(issue["area"] == "provider" for issue in issues):
+                selection_plan = selection_plan_to_dict(provider_selection_plan(config))
+
+        return {
+            "ok": len(issues) == 0,
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "channel_count": len(channels),
+            "enabled_channel_count": len([channel for channel in channels if channel.enabled]),
+            "selection_plan": selection_plan,
+            "issues": issues,
+        }
+
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")
     def get_voicebot_provider_config(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
         config = provider_config_store.get(workspace_id, voicebot_id)

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
+from voicebot.api_models import AgentToolRequest
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.transcripts import TranscriptStore
@@ -63,6 +64,14 @@ class ApiLimitTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "limit must be an integer")
+
+    def test_agent_tool_request_uses_independent_default_arguments(self) -> None:
+        first = AgentToolRequest()
+        second = AgentToolRequest()
+
+        first.arguments["call_id"] = "call-1"
+
+        self.assertEqual(second.arguments, {})
 
 
 if __name__ == "__main__":

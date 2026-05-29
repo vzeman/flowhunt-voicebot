@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -94,6 +94,24 @@ class TurnDetectionResult:
         if turn_id is not None:
             data["turn_id"] = turn_id
         return data
+
+
+@dataclass(frozen=True)
+class VoiceActivity:
+    level: float
+    active: bool
+
+
+@runtime_checkable
+class VoiceActivityDetector(Protocol):
+    def detect(self, samples: np.ndarray, *, threshold: float) -> VoiceActivity:
+        ...
+
+
+class RmsVoiceActivityDetector:
+    def detect(self, samples: np.ndarray, *, threshold: float) -> VoiceActivity:
+        level = rms(samples)
+        return VoiceActivity(level=level, active=level >= threshold)
 
 
 @dataclass(frozen=True)
@@ -263,9 +281,15 @@ class TurnDetectorState:
 
 
 class TurnDetector:
-    def __init__(self, config: TurnDetectionConfig, state: TurnDetectorState | None = None) -> None:
+    def __init__(
+        self,
+        config: TurnDetectionConfig,
+        state: TurnDetectorState | None = None,
+        vad: VoiceActivityDetector | None = None,
+    ) -> None:
         self.config = config
         self.state = state or TurnDetectorState()
+        self.vad = vad or RmsVoiceActivityDetector()
 
     def process_block(
         self,
@@ -276,16 +300,18 @@ class TurnDetector:
     ) -> TurnDetectionResult:
         samples = block.astype(np.float32, copy=False).reshape(-1)
         block_ms = int(len(samples) / self.config.sample_rate * 1000) if self.config.sample_rate else 0
-        level = rms(samples)
+        active_threshold = self.config.barge_in_threshold if playback_active else self.config.start_threshold
+        activity = self.vad.detect(samples, threshold=active_threshold)
+        level = activity.level
 
         if samples.size == 0:
             return TurnDetectionResult("silence", level, block_ms)
 
         if not self.state.is_recording:
-            if echo_suppressed or self.should_ignore_for_playback(level, playback_active):
+            if echo_suppressed or self.should_ignore_for_playback(activity, playback_active):
                 self.state.reset_pending()
                 return TurnDetectionResult("ignored", level, block_ms)
-            if level < self.config.start_threshold:
+            if not activity.active:
                 self.state.reset_pending()
                 return TurnDetectionResult("silence", level, block_ms)
 
@@ -309,7 +335,8 @@ class TurnDetector:
 
         self.state.collected.append(samples)
         self.state.speech_ms += block_ms
-        if level < self.config.stop_threshold:
+        stop_activity = self.vad.detect(samples, threshold=self.config.stop_threshold)
+        if not stop_activity.active:
             self.state.silence_ms += block_ms
         else:
             self.state.silence_ms = 0
@@ -325,5 +352,5 @@ class TurnDetector:
             return TurnDetectionResult("speech_too_short", level, block_ms, finished=True, duration=duration, audio=audio)
         return TurnDetectionResult("speech_finished", level, block_ms, finished=True, duration=duration, audio=audio)
 
-    def should_ignore_for_playback(self, level: float, playback_active: bool) -> bool:
-        return playback_active and level < self.config.barge_in_threshold
+    def should_ignore_for_playback(self, activity: VoiceActivity, playback_active: bool) -> bool:
+        return playback_active and not activity.active

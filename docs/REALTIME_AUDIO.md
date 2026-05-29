@@ -15,6 +15,10 @@ The current SIP and WebRTC sessions still contain their existing media loops, bu
 ## Turn Detection
 
 `TurnDetector` processes normalized float32 audio blocks and returns a `TurnDetectionResult`.
+It uses a `VoiceActivityDetector` interface for level/activity decisions; the
+default implementation is `RmsVoiceActivityDetector`. A future model-based VAD
+can implement the same `detect(samples, threshold=...)` contract without
+changing endpointing, barge-in, or turn-completion logic.
 
 Inputs:
 

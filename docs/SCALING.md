@@ -73,6 +73,14 @@ shared infrastructure for production.
 `JsonWorkerQueueStore` persists this local lifecycle for restart recovery during
 development and single-node deployments.
 
+`GET /scaling/backpressure`, `POST /scaling/backpressure/acquire`, and
+`POST /scaling/backpressure/release` expose the local backpressure contract for
+separated workers. Requests carry `workspace_id`, `voicebot_id`, and optional
+`session_id` or `provider`. Provider requests use
+`workspace_id:voicebot_id:provider` as the rate-limit key; otherwise the
+workspace/voicebot/session partition key is used. The local max inflight value
+is configured with `VOICEBOT_SCALING_BACKPRESSURE_MAX_INFLIGHT`.
+
 Internal queue endpoints expose this lifecycle for early worker separation:
 
 - `GET /scaling/queue`
@@ -116,7 +124,9 @@ Backpressure must exist at multiple levels:
 
 `WorkspaceBackpressure` is the local contract for this accounting. It requires a
 positive inflight limit and non-blank keys, so invalid capacity controls fail
-before accepting or releasing work.
+before accepting or releasing work. The runtime API exposes acquire/release so
+workers can reject or delay work before calling STT, TTS, agent, or subagent
+providers.
 
 STT and TTS workers also need provider-aware limits because external APIs can
 rate-limit independently from workspace capacity.

@@ -28,6 +28,7 @@ from .api_models import (
     ConversationEvaluationRequest,
     MultimodalContentRequest,
     PlaybackInterruptRequest,
+    ScalingBackpressureRequest,
     ScalingWorkloadPlanRequest,
     SipTrunkRequest,
     VoicebotAdminPatchRequest,
@@ -91,6 +92,7 @@ from .scaling import (
     WorkerRegistry,
     WorkerRole,
     WorkloadProfile,
+    WorkspaceBackpressure,
     build_workload_plan,
     default_deployment_topology,
 )
@@ -194,6 +196,7 @@ def create_app(
     provider_config_store = provider_configs or ProviderConfigStore()
     scaling_workers = worker_registry or WorkerRegistry()
     scaling_queue = worker_queue or WorkerQueueStore()
+    scaling_backpressure = WorkspaceBackpressure(runtime_settings.scaling_backpressure_max_inflight)
     voicebot_store = voicebots or VoicebotStore()
     channel_resolver = channels or ChannelResolver()
     voicebot_session_store = voicebot_sessions or VoicebotSessionStore()
@@ -730,6 +733,28 @@ def create_app(
     def scaling_capacity(workspace_id: str | None = None, voicebot_id: str | None = None) -> dict[str, Any]:
         return scaling_workers.capacity_summary(workspace_id=workspace_id, voicebot_id=voicebot_id)
 
+    @app.get("/scaling/backpressure")
+    def scaling_backpressure_snapshot() -> dict[str, Any]:
+        return scaling_backpressure.snapshot()
+
+    @app.post("/scaling/backpressure/acquire")
+    def scaling_backpressure_acquire(request: ScalingBackpressureRequest) -> dict[str, Any]:
+        try:
+            key = backpressure_key_from_request(request)
+            acquired = scaling_backpressure.acquire(key)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"acquired": acquired, "key": key, **scaling_backpressure.snapshot()}
+
+    @app.post("/scaling/backpressure/release")
+    def scaling_backpressure_release(request: ScalingBackpressureRequest) -> dict[str, Any]:
+        try:
+            key = backpressure_key_from_request(request)
+            scaling_backpressure.release(key)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"released": True, "key": key, **scaling_backpressure.snapshot()}
+
     @app.get("/scaling/queue")
     def scaling_queue_snapshot() -> dict[str, Any]:
         return scaling_queue.snapshot()
@@ -807,6 +832,15 @@ def create_app(
         if family == "tts":
             return _tts_capabilities()
         return _agent_capabilities()
+
+    def backpressure_key_from_request(request: ScalingBackpressureRequest) -> str:
+        routing = RoutingKey(
+            workspace_id=request.workspace_id,
+            voicebot_id=request.voicebot_id,
+            session_id=request.session_id,
+            provider=request.provider,
+        )
+        return routing.provider_key() if request.provider else routing.partition_key()
 
     @app.get("/config")
     def config() -> dict[str, Any]:

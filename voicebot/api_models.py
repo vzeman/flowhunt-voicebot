@@ -37,6 +37,13 @@ class ScalingWorkloadPlanRequest(BaseModel):
     agent_provider: str | None = None
 
 
+class ScalingBackpressureRequest(BaseModel):
+    workspace_id: str
+    voicebot_id: str
+    session_id: str | None = None
+    provider: str | None = None
+
+
 class WorkerHeartbeatRequest(BaseModel):
     worker_id: str
     role: str

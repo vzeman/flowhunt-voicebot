@@ -316,6 +316,12 @@ class WorkspaceBackpressure:
             return
         self.inflight_by_key[key] = current - 1
 
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "max_inflight": self.max_inflight,
+            "inflight": dict(sorted(self.inflight_by_key.items())),
+        }
+
 
 @dataclass(frozen=True)
 class WorkerQueueEnvelope:

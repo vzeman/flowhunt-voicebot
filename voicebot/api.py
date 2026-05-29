@@ -102,6 +102,7 @@ from .transcripts import TranscriptStore
 from .transports import transport_catalog
 from .tools import tool_definitions_json_schema, tool_definitions_legacy
 from .webrtc import WebRTCSessionManager
+from .workspace_access import WorkspaceAccessPolicy, workspace_access_policy_from_settings
 from .workspace_model import ChannelResolver, VoicebotChannelBinding, VoicebotDefinition, VoicebotSessionStore, VoicebotStore
 
 _MODALITIES = set(get_args(Modality))
@@ -164,6 +165,7 @@ def create_app(
     voicebots: VoicebotStore | None = None,
     channels: ChannelResolver | None = None,
     voicebot_sessions: VoicebotSessionStore | None = None,
+    workspace_policy: WorkspaceAccessPolicy | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -195,7 +197,16 @@ def create_app(
     voicebot_store = voicebots or VoicebotStore()
     channel_resolver = channels or ChannelResolver()
     voicebot_session_store = voicebot_sessions or VoicebotSessionStore()
+    workspace_access_policy = workspace_policy or workspace_access_policy_from_settings(runtime_settings)
     subagent_terminal_events: list[VoicebotEvent] = []
+
+    def require_workspace_access(workspace_id: str) -> None:
+        try:
+            workspace_access_policy.require_workspace(workspace_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from None
 
     def emit_subagent_terminal_event(event_type: TaskLifecycleEventType, task: SubagentTask) -> None:
         event = events.append_scoped(
@@ -314,6 +325,7 @@ def create_app(
 
     @app.get("/workspaces/{workspace_id}/voicebots")
     def list_workspace_voicebots(workspace_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         return {
             "workspace_id": workspace_id,
             "voicebots": [voicebot.as_dict() for voicebot in voicebot_store.list(workspace_id)],
@@ -321,6 +333,7 @@ def create_app(
 
     @app.post("/workspaces/{workspace_id}/voicebots")
     def create_workspace_voicebot(workspace_id: str, request: VoicebotAdminRequest) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         try:
             voicebot = voicebot_store.create(
                 VoicebotDefinition(
@@ -337,6 +350,7 @@ def create_app(
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}")
     def get_workspace_voicebot(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         voicebot = voicebot_store.get(workspace_id, voicebot_id)
         if voicebot is None:
             raise HTTPException(status_code=404, detail="Voicebot not found")
@@ -348,6 +362,7 @@ def create_app(
         voicebot_id: str,
         request: VoicebotAdminPatchRequest,
     ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         try:
             voicebot = voicebot_store.patch(
                 workspace_id,
@@ -364,6 +379,7 @@ def create_app(
 
     @app.delete("/workspaces/{workspace_id}/voicebots/{voicebot_id}")
     def delete_workspace_voicebot(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         voicebot = voicebot_store.delete(workspace_id, voicebot_id)
         if voicebot is None:
             raise HTTPException(status_code=404, detail="Voicebot not found")
@@ -371,6 +387,7 @@ def create_app(
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels")
     def list_voicebot_channels(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         return {
             "workspace_id": workspace_id,
             "voicebot_id": voicebot_id,
@@ -385,6 +402,7 @@ def create_app(
         voicebot_id: str,
         request: VoicebotChannelRequest,
     ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         try:
             binding = VoicebotChannelBinding(
                 channel_id=request.channel_id,
@@ -402,6 +420,7 @@ def create_app(
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}")
     def get_voicebot_channel(workspace_id: str, voicebot_id: str, channel_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         binding = channel_resolver.get_channel(workspace_id, voicebot_id, channel_id)
         if binding is None:
             raise HTTPException(status_code=404, detail="Channel not found")
@@ -414,6 +433,7 @@ def create_app(
         channel_id: str,
         request: VoicebotChannelPatchRequest,
     ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         try:
             binding = channel_resolver.patch_channel(
                 workspace_id,
@@ -430,6 +450,7 @@ def create_app(
 
     @app.delete("/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}")
     def delete_voicebot_channel(workspace_id: str, voicebot_id: str, channel_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         binding = channel_resolver.unregister_voicebot_channel(workspace_id, voicebot_id, channel_id)
         if binding is None:
             raise HTTPException(status_code=404, detail="Channel not found")
@@ -437,6 +458,7 @@ def create_app(
 
     @app.post("/workspaces/{workspace_id}/voicebots/{voicebot_id}/validate")
     def validate_voicebot_runtime(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         issues: list[dict[str, Any]] = []
         voicebot = voicebot_store.get(workspace_id, voicebot_id)
         channels = channel_resolver.bindings_for_voicebot(workspace_id, voicebot_id)
@@ -481,6 +503,7 @@ def create_app(
         voicebot_id: str,
         active_only: bool = False,
     ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         sessions = voicebot_session_store.list(
             workspace_id=workspace_id,
             voicebot_id=voicebot_id,
@@ -494,6 +517,7 @@ def create_app(
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}")
     def get_voicebot_session(workspace_id: str, voicebot_id: str, session_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         session = voicebot_session_store.get(session_id, workspace_id=workspace_id)
         if session is None or session.voicebot_id != voicebot_id:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -507,6 +531,7 @@ def create_app(
         after: int = 0,
         limit: int = 200,
     ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         session = voicebot_session_store.get(session_id, workspace_id=workspace_id)
         if session is None or session.voicebot_id != voicebot_id:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -532,6 +557,7 @@ def create_app(
         after: int = 0,
         limit: int = 200,
     ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         session = voicebot_session_store.get(session_id, workspace_id=workspace_id)
         if session is None or session.voicebot_id != voicebot_id:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -550,6 +576,7 @@ def create_app(
         session_id: str | None = None,
         status: str | None = None,
     ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         if subagent_coordinator is None:
             raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
         tasks = [
@@ -567,6 +594,7 @@ def create_app(
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")
     def get_voicebot_provider_config(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         config = provider_config_store.get(workspace_id, voicebot_id)
         if config is None:
             raise HTTPException(status_code=404, detail="Provider config not found")
@@ -578,6 +606,7 @@ def create_app(
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/transports")
     def get_voicebot_transport_catalog(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         return {
             "workspace_id": workspace_id,
             "voicebot_id": voicebot_id,
@@ -590,6 +619,7 @@ def create_app(
         voicebot_id: str,
         request: VoicebotProviderConfigRequest,
     ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
         try:
             config = VoicebotProviderConfig(
                 workspace_id=workspace_id,

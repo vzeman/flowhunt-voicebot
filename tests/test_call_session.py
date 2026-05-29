@@ -112,6 +112,7 @@ class CallSessionPipelineTests(unittest.TestCase):
                     vad_start_ms=0,
                     silence_ms=10,
                     min_seconds=999.0,
+                    max_seconds=1000.0,
                     packet_ms=10,
                     audiosocket_jitter_target_delay_ms=0,
                 ),
@@ -195,6 +196,70 @@ class CallSessionPipelineTests(unittest.TestCase):
             self.assertEqual(
                 [event.type for event in events.list_events(call_id="call-1") if event.type == "user_speech_started"],
                 ["user_speech_started"],
+            )
+        finally:
+            left.close()
+            right.close()
+
+    def test_audiosocket_barge_in_ignores_audio_below_barge_in_threshold(self) -> None:
+        left, right = socket.socketpair()
+        events = EventStore(max_context_events=20)
+        try:
+            session = CallSession(
+                "call-1",
+                left,
+                Settings(
+                    greet_on_connect=False,
+                    start_threshold=0.02,
+                    barge_in_threshold=0.30,
+                    vad_start_ms=0,
+                    audiosocket_jitter_buffer_enabled=False,
+                ),
+                events,
+                FakeSTT(),
+                FakeTTS(),
+            )
+            session.playback.enqueue(np.ones(800, dtype=np.float32))
+
+            session.process_remote_audio_block(np.full(80, 0.05, dtype=np.float32))
+
+            self.assertFalse(session.recording_event.is_set())
+            self.assertTrue(session.playback.is_active())
+            self.assertNotIn(
+                "bot_playback_interrupted",
+                [event.type for event in events.list_events(call_id="call-1")],
+            )
+        finally:
+            left.close()
+            right.close()
+
+    def test_audiosocket_barge_in_interrupts_playback_above_barge_in_threshold(self) -> None:
+        left, right = socket.socketpair()
+        events = EventStore(max_context_events=20)
+        try:
+            session = CallSession(
+                "call-1",
+                left,
+                Settings(
+                    greet_on_connect=False,
+                    start_threshold=0.02,
+                    barge_in_threshold=0.30,
+                    vad_start_ms=0,
+                    audiosocket_jitter_buffer_enabled=False,
+                ),
+                events,
+                FakeSTT(),
+                FakeTTS(),
+            )
+            session.playback.enqueue(np.ones(800, dtype=np.float32))
+
+            session.process_remote_audio_block(np.full(80, 0.5, dtype=np.float32))
+
+            self.assertTrue(session.recording_event.is_set())
+            self.assertFalse(session.playback.is_active())
+            self.assertIn(
+                "bot_playback_interrupted",
+                [event.type for event in events.list_events(call_id="call-1")],
             )
         finally:
             left.close()

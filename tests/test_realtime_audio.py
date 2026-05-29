@@ -11,8 +11,10 @@ from voicebot.realtime_audio import (
     AudioJitterBuffer,
     DebugAudioCapture,
     JitterBufferConfig,
+    RmsVoiceActivityDetector,
     TurnDetectionConfig,
     TurnDetector,
+    VoiceActivity,
     turn_detection_config_from_settings,
 )
 
@@ -31,6 +33,33 @@ def config() -> TurnDetectionConfig:
 
 
 class RealtimeAudioTests(unittest.TestCase):
+    def test_rms_voice_activity_detector_reports_level_and_threshold_decision(self) -> None:
+        detector = RmsVoiceActivityDetector()
+
+        quiet = detector.detect(np.full(100, 0.1, dtype=np.float32), threshold=0.2)
+        loud = detector.detect(np.full(100, 0.3, dtype=np.float32), threshold=0.2)
+
+        self.assertFalse(quiet.active)
+        self.assertAlmostEqual(quiet.level, 0.1, places=6)
+        self.assertTrue(loud.active)
+        self.assertAlmostEqual(loud.level, 0.3, places=6)
+
+    def test_turn_detector_accepts_pluggable_vad(self) -> None:
+        class KeywordVad:
+            def detect(self, samples: np.ndarray, *, threshold: float) -> VoiceActivity:
+                _ = threshold
+                level = float(samples[0]) if samples.size else 0.0
+                return VoiceActivity(level=level, active=level == 7.0)
+
+        detector = TurnDetector(config(), vad=KeywordVad())
+
+        ignored = detector.process_block(np.full(100, 0.9, dtype=np.float32))
+        started = detector.process_block(np.full(100, 7.0, dtype=np.float32))
+
+        self.assertEqual(ignored.decision, "silence")
+        self.assertEqual(started.decision, "speech_started")
+        self.assertEqual(started.level, 7.0)
+
     def test_turn_detector_requires_configured_start_duration(self) -> None:
         detector = TurnDetector(config())
 

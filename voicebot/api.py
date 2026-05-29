@@ -89,7 +89,7 @@ from .transcripts import TranscriptStore
 from .transports import transport_catalog
 from .tools import tool_definitions_json_schema, tool_definitions_legacy
 from .webrtc import WebRTCSessionManager
-from .workspace_model import ChannelResolver, VoicebotChannelBinding, VoicebotDefinition, VoicebotStore
+from .workspace_model import ChannelResolver, VoicebotChannelBinding, VoicebotDefinition, VoicebotSessionStore, VoicebotStore
 
 _MODALITIES = set(get_args(Modality))
 _CONTENT_DIRECTIONS = set(get_args(ContentDirection))
@@ -149,6 +149,7 @@ def create_app(
     worker_registry: WorkerRegistry | None = None,
     voicebots: VoicebotStore | None = None,
     channels: ChannelResolver | None = None,
+    voicebot_sessions: VoicebotSessionStore | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -178,6 +179,7 @@ def create_app(
     scaling_workers = worker_registry or WorkerRegistry()
     voicebot_store = voicebots or VoicebotStore()
     channel_resolver = channels or ChannelResolver()
+    voicebot_session_store = voicebot_sessions or VoicebotSessionStore()
     subagent_terminal_events: list[VoicebotEvent] = []
 
     def emit_subagent_terminal_event(event_type: TaskLifecycleEventType, task: SubagentTask) -> None:
@@ -456,6 +458,74 @@ def create_app(
             "enabled_channel_count": len([channel for channel in channels if channel.enabled]),
             "selection_plan": selection_plan,
             "issues": issues,
+        }
+
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions")
+    def list_voicebot_sessions(
+        workspace_id: str,
+        voicebot_id: str,
+        active_only: bool = False,
+    ) -> dict[str, Any]:
+        sessions = voicebot_session_store.list(
+            workspace_id=workspace_id,
+            voicebot_id=voicebot_id,
+            active_only=active_only,
+        )
+        return {
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "sessions": [session.as_dict() for session in sessions],
+        }
+
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}")
+    def get_voicebot_session(workspace_id: str, voicebot_id: str, session_id: str) -> dict[str, Any]:
+        session = voicebot_session_store.get(session_id, workspace_id=workspace_id)
+        if session is None or session.voicebot_id != voicebot_id:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {"session": session.as_dict()}
+
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/timeline")
+    def get_voicebot_session_timeline(
+        workspace_id: str,
+        voicebot_id: str,
+        session_id: str,
+        after: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        session = voicebot_session_store.get(session_id, workspace_id=workspace_id)
+        if session is None or session.voicebot_id != voicebot_id:
+            raise HTTPException(status_code=404, detail="Session not found")
+        timeline = events.list_events(
+            after=after,
+            limit=validated_limit(limit),
+            workspace_id=workspace_id,
+            voicebot_id=voicebot_id,
+            session_id=session_id,
+        )
+        return {
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "session_id": session_id,
+            "events": [event_to_dict(event) for event in timeline],
+        }
+
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/transcript")
+    def get_voicebot_session_transcript(
+        workspace_id: str,
+        voicebot_id: str,
+        session_id: str,
+        after: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        session = voicebot_session_store.get(session_id, workspace_id=workspace_id)
+        if session is None or session.voicebot_id != voicebot_id:
+            raise HTTPException(status_code=404, detail="Session not found")
+        transcript = transcripts.read(session_id, after=after, limit=validated_limit(limit))
+        return {
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "session_id": session_id,
+            "events": transcript,
         }
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")

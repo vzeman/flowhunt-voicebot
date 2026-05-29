@@ -265,6 +265,27 @@ Request:
 
 Returns the saved provider config and normalized runtime selection plan.
 
+## Voicebot Sessions
+
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions`
+
+Lists session records for one voicebot. Set `active_only=true` to return only
+sessions whose status is still active.
+
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}`
+
+Returns one session record, scoped to the workspace and voicebot in the route.
+
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/timeline`
+
+Returns in-memory event timeline entries for the session. Query parameters:
+`after` skips already-seen event ids and `limit` defaults to 200.
+
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/transcript`
+
+Returns transcript events persisted for the session id. Query parameters:
+`after` skips already-seen event ids and `limit` defaults to 200.
+
 ## Calls
 
 ### GET `/calls`

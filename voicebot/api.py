@@ -251,6 +251,7 @@ def create_app(
                 "events": events,
                 "agent_tasks": tracker,
                 "call_states": registry.state_store,
+                "worker_registry": scaling_workers,
                 "voicebot_sessions": voicebot_session_store,
                 "worker_queue": scaling_queue,
                 **({"subagent_tasks": subagent_coordinator.store} if subagent_coordinator is not None else {}),

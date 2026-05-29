@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+import tempfile
 import unittest
 
 from fastapi.testclient import TestClient
@@ -12,6 +14,7 @@ from voicebot.events import EventStore
 from voicebot.scaling import (
     RoutingKey,
     JsonWorkerQueueStore,
+    JsonWorkerRegistry,
     WorkerInstance,
     WorkerQueueEnvelope,
     WorkerQueueStore,
@@ -21,6 +24,8 @@ from voicebot.scaling import (
     build_workload_plan,
     default_deployment_topology,
 )
+from voicebot.config import Settings
+from voicebot.runtime_storage import build_worker_registry
 from voicebot.transcripts import TranscriptStore
 
 
@@ -391,6 +396,57 @@ class ScalingTests(unittest.TestCase):
 
         self.assertEqual(summary["voicebot_id"], "voicebot-1")
         self.assertEqual(summary["roles"]["agent_worker"], {"workers": 2, "capacity": 6})
+
+    def test_json_worker_registry_persists_presence_and_drain_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workers.json"
+            now = datetime.now(UTC)
+            registry = JsonWorkerRegistry(path, heartbeat_ttl_seconds=60)
+            registry.heartbeat(WorkerInstance("agent-1", "agent_worker", "voicebot.agent", capacity=2), now)
+            registry.mark_draining("agent-1", now + timedelta(seconds=1))
+
+            reloaded = JsonWorkerRegistry(path, heartbeat_ttl_seconds=60)
+
+            self.assertEqual(reloaded.load_diagnostics["loaded_workers"], 1)
+            self.assertEqual(reloaded.snapshot(now + timedelta(seconds=2))["workers"][0]["status"], "draining")
+
+    def test_json_worker_registry_skips_invalid_duplicate_and_expired_workers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workers.json"
+            now = datetime.now(UTC)
+            expired = (now - timedelta(seconds=120)).isoformat()
+            current = now.isoformat()
+            path.write_text(
+                f"""
+                {{
+                  "workers": [
+                    {{"worker_id": "agent-1", "role": "agent_worker", "queue": "voicebot.agent", "last_heartbeat_at": "{current}"}},
+                    {{"worker_id": "agent-1", "role": "agent_worker", "queue": "voicebot.agent", "last_heartbeat_at": "{current}"}},
+                    {{"worker_id": "old-1", "role": "agent_worker", "queue": "voicebot.agent", "last_heartbeat_at": "{expired}"}},
+                    {{"worker_id": "bad-1", "role": "unknown", "queue": "voicebot.agent", "last_heartbeat_at": "{current}"}}
+                  ]
+                }}
+                """,
+                encoding="utf-8",
+            )
+
+            registry = JsonWorkerRegistry(path, heartbeat_ttl_seconds=60)
+
+            self.assertEqual([worker.worker_id for worker in registry.active(now=now)], ["agent-1"])
+            self.assertEqual(registry.load_diagnostics["loaded_workers"], 1)
+            self.assertEqual(registry.load_diagnostics["skipped_duplicate_worker_ids"], 1)
+            self.assertEqual(registry.load_diagnostics["skipped_expired_workers"], 1)
+            self.assertEqual(registry.load_diagnostics["skipped_invalid_workers"], 1)
+
+    def test_worker_registry_builder_supports_configured_providers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            json_registry = build_worker_registry(
+                Settings(worker_registry_store_provider="json", worker_registry_store_path=f"{tmp}/workers.json")
+            )
+            memory_registry = build_worker_registry(Settings(worker_registry_store_provider="memory"))
+
+        self.assertIsInstance(json_registry, JsonWorkerRegistry)
+        self.assertIsInstance(memory_registry, WorkerRegistry)
 
     def test_scaling_topology_endpoint_returns_runtime_topology(self) -> None:
         client = self.build_client()

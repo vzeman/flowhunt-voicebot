@@ -17,6 +17,7 @@ from .runtime_storage import (
     build_agent_task_tracker,
     build_call_state_store,
     build_event_store,
+    build_worker_registry,
     build_voicebot_session_store,
     build_worker_queue_store,
 )
@@ -34,6 +35,7 @@ def main() -> None:
     voicebot_sessions = build_voicebot_session_store(settings)
     registry = CallRegistry(build_call_state_store(settings))
     tracker = build_agent_task_tracker(settings)
+    worker_registry = build_worker_registry(settings)
     worker_queue = build_worker_queue_store(settings)
     sip_trunks = SipTrunkStore(settings.sip_trunk_registry_path, settings.sip_trunk_pjsip_include_path)
     subagents = build_subagent_coordinator(settings, events)
@@ -81,6 +83,7 @@ def main() -> None:
         webrtc,
         subagents,
         worker_queue=worker_queue,
+        worker_registry=worker_registry,
         voicebot_sessions=voicebot_sessions,
     )
     uvicorn.run(app, host=settings.api_host, port=settings.api_port)

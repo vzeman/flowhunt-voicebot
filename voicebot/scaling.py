@@ -216,6 +216,79 @@ class WorkerRegistry:
         }
 
 
+class JsonWorkerRegistry(WorkerRegistry):
+    def __init__(self, path: str | Path, heartbeat_ttl_seconds: float = 30.0) -> None:
+        self.path = Path(path)
+        self.load_diagnostics: dict[str, int] = {
+            "loaded_workers": 0,
+            "skipped_malformed_json": 0,
+            "skipped_invalid_workers": 0,
+            "skipped_duplicate_worker_ids": 0,
+            "skipped_expired_workers": 0,
+        }
+        super().__init__(heartbeat_ttl_seconds=heartbeat_ttl_seconds)
+        self._load()
+
+    def heartbeat(self, worker: WorkerInstance, now: datetime | None = None) -> WorkerInstance:
+        updated = super().heartbeat(worker, now=now)
+        self._save()
+        return updated
+
+    def mark_draining(self, worker_id: str, now: datetime | None = None) -> WorkerInstance:
+        worker = super().mark_draining(worker_id, now=now)
+        self._save()
+        return worker
+
+    def remove(self, worker_id: str) -> bool:
+        removed = super().remove(worker_id)
+        if removed:
+            self._save()
+        return removed
+
+    def expire(self, now: datetime | None = None) -> tuple[WorkerInstance, ...]:
+        expired = super().expire(now)
+        if expired:
+            self._save()
+        return expired
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            self.load_diagnostics["skipped_malformed_json"] += 1
+            return
+        seen: set[str] = set()
+        now = datetime.now(UTC)
+        for item in payload.get("workers", []):
+            try:
+                worker = worker_instance_from_dict(item)
+            except (KeyError, TypeError, ValueError):
+                self.load_diagnostics["skipped_invalid_workers"] += 1
+                continue
+            if worker.worker_id in seen:
+                self.load_diagnostics["skipped_duplicate_worker_ids"] += 1
+                continue
+            seen.add(worker.worker_id)
+            if _parse_time(worker.last_heartbeat_at) + timedelta(seconds=self.heartbeat_ttl_seconds) <= now:
+                self.load_diagnostics["skipped_expired_workers"] += 1
+                continue
+            self._workers[worker.worker_id] = worker
+            self.load_diagnostics["loaded_workers"] += 1
+
+    def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "heartbeat_ttl_seconds": self.heartbeat_ttl_seconds,
+            "workers": [worker.as_dict() for worker in sorted(self._workers.values(), key=lambda item: item.worker_id)],
+        }
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+        tmp.replace(self.path)
+
+
 @dataclass
 class WorkspaceBackpressure:
     max_inflight: int
@@ -541,6 +614,26 @@ def worker_queue_envelope_from_dict(data: dict[str, Any]) -> WorkerQueueEnvelope
         trace_id=_optional_str(data.get("trace_id")),
         created_at=str(data["created_at"]),
         attempt=int(data.get("attempt") or 0),
+    )
+
+
+def worker_instance_from_dict(data: dict[str, Any]) -> WorkerInstance:
+    role = str(data["role"])
+    if role not in get_args(WorkerRole):
+        raise ValueError(f"unsupported worker role: {role}")
+    status = str(data.get("status", "active"))
+    if status not in {"active", "draining"}:
+        raise ValueError(f"unsupported worker status: {status}")
+    _parse_time(str(data["last_heartbeat_at"]))
+    return WorkerInstance(
+        worker_id=str(data["worker_id"]),
+        role=role,  # type: ignore[arg-type]
+        queue=str(data["queue"]),
+        workspace_id=_optional_str(data.get("workspace_id")),
+        voicebot_id=_optional_str(data.get("voicebot_id")),
+        capacity=int(data.get("capacity") or 1),
+        status=status,  # type: ignore[arg-type]
+        last_heartbeat_at=str(data["last_heartbeat_at"]),
     )
 
 

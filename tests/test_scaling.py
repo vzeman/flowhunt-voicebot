@@ -52,6 +52,15 @@ class ScalingTests(unittest.TestCase):
         limiter.release("workspace-1")
         self.assertTrue(limiter.acquire("workspace-1"))
 
+    def test_backpressure_rejects_invalid_limits_and_keys(self) -> None:
+        with self.assertRaisesRegex(ValueError, "max_inflight"):
+            WorkspaceBackpressure(max_inflight=0)
+        limiter = WorkspaceBackpressure(max_inflight=1)
+        with self.assertRaisesRegex(ValueError, "backpressure key"):
+            limiter.acquire(" ")
+        with self.assertRaisesRegex(ValueError, "backpressure key"):
+            limiter.release("")
+
     def test_workload_plan_includes_partition_provider_keys_and_capacity_flags(self) -> None:
         plan = build_workload_plan(
             WorkloadProfile(

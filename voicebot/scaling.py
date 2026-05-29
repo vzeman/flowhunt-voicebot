@@ -201,7 +201,13 @@ class WorkspaceBackpressure:
     max_inflight: int
     inflight_by_key: dict[str, int] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if self.max_inflight < 1:
+            raise ValueError("max_inflight must be greater than or equal to 1")
+
     def acquire(self, key: str) -> bool:
+        if not key.strip():
+            raise ValueError("backpressure key is required")
         current = self.inflight_by_key.get(key, 0)
         if current >= self.max_inflight:
             return False
@@ -209,6 +215,8 @@ class WorkspaceBackpressure:
         return True
 
     def release(self, key: str) -> None:
+        if not key.strip():
+            raise ValueError("backpressure key is required")
         current = self.inflight_by_key.get(key, 0)
         if current <= 1:
             self.inflight_by_key.pop(key, None)

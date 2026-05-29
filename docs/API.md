@@ -272,6 +272,14 @@ Request:
 
 Returns the saved provider config and normalized runtime selection plan.
 
+## Transport Capabilities
+
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/transports`
+
+Returns SIP/WebRTC transport capabilities that the voicebot runtime can expose
+for a workspace voicebot, including supported call-control actions,
+modalities, sample-rate requirements, and playback interruption support.
+
 ## Voicebot Sessions
 
 ### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions`

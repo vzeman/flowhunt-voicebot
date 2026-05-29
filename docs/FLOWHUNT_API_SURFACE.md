@@ -68,6 +68,12 @@ Channel types include SIP trunk bindings and WebRTC widget/token bindings.
 
 Provider config uses secret references and must validate before channel enable.
 
+## Transport APIs
+
+- `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/transports`
+
+This returns runtime transport capabilities for SIP and WebRTC integrations.
+
 ## Runtime APIs
 
 - `POST /runtime/webrtc/sessions`

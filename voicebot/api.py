@@ -35,7 +35,10 @@ from .api_models import (
     VoicebotChannelPatchRequest,
     VoicebotChannelRequest,
     VoicebotProviderConfigRequest,
+    WorkerQueueClaimRequest,
+    WorkerQueueEnqueueRequest,
     WorkerHeartbeatRequest,
+    WorkerQueueItemRequest,
     WebRTCOfferRequest,
 )
 from .asterisk_control import AsteriskAMI, ControlResult
@@ -80,7 +83,17 @@ from .provider_config import (
     validate_provider_config,
     validation_issue_to_dict,
 )
-from .scaling import WorkerInstance, WorkerRegistry, WorkerRole, WorkloadProfile, build_workload_plan, default_deployment_topology
+from .scaling import (
+    RoutingKey,
+    WorkerInstance,
+    WorkerQueueEnvelope,
+    WorkerQueueStore,
+    WorkerRegistry,
+    WorkerRole,
+    WorkloadProfile,
+    build_workload_plan,
+    default_deployment_topology,
+)
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
@@ -147,6 +160,7 @@ def create_app(
     multimodal_contexts: MultimodalContextStore | None = None,
     provider_configs: ProviderConfigStore | None = None,
     worker_registry: WorkerRegistry | None = None,
+    worker_queue: WorkerQueueStore | None = None,
     voicebots: VoicebotStore | None = None,
     channels: ChannelResolver | None = None,
     voicebot_sessions: VoicebotSessionStore | None = None,
@@ -177,6 +191,7 @@ def create_app(
     multimodal_store = multimodal_contexts or MultimodalContextStore()
     provider_config_store = provider_configs or ProviderConfigStore()
     scaling_workers = worker_registry or WorkerRegistry()
+    scaling_queue = worker_queue or WorkerQueueStore()
     voicebot_store = voicebots or VoicebotStore()
     channel_resolver = channels or ChannelResolver()
     voicebot_session_store = voicebot_sessions or VoicebotSessionStore()
@@ -671,6 +686,61 @@ def create_app(
     @app.get("/scaling/capacity")
     def scaling_capacity(workspace_id: str | None = None, voicebot_id: str | None = None) -> dict[str, Any]:
         return scaling_workers.capacity_summary(workspace_id=workspace_id, voicebot_id=voicebot_id)
+
+    @app.get("/scaling/queue")
+    def scaling_queue_snapshot() -> dict[str, Any]:
+        return scaling_queue.snapshot()
+
+    @app.post("/scaling/queue/enqueue")
+    def scaling_queue_enqueue(request: WorkerQueueEnqueueRequest) -> dict[str, Any]:
+        try:
+            envelope = scaling_queue.enqueue(
+                WorkerQueueEnvelope(
+                    item_id=request.item_id,
+                    kind=request.kind,  # type: ignore[arg-type]
+                    routing=RoutingKey(
+                        workspace_id=request.routing.workspace_id,
+                        voicebot_id=request.routing.voicebot_id,
+                        session_id=request.routing.session_id,
+                        provider=request.routing.provider,
+                    ),
+                    queue=request.queue,
+                    payload=request.payload,
+                    trace_id=request.trace_id,
+                    created_at=request.created_at or datetime.now().astimezone().isoformat(),
+                    attempt=request.attempt,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"item": envelope.as_dict()}
+
+    @app.post("/scaling/queue/claim")
+    def scaling_queue_claim(request: WorkerQueueClaimRequest) -> dict[str, Any]:
+        try:
+            claimed = scaling_queue.claim(
+                request.queue,
+                request.owner,
+                limit=request.limit,
+                ttl_seconds=request.ttl_seconds,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"items": [item.as_dict() for item in claimed]}
+
+    @app.post("/scaling/queue/ack")
+    def scaling_queue_ack(request: WorkerQueueItemRequest) -> dict[str, Any]:
+        item = scaling_queue.ack(request.item_id, owner=request.owner)
+        if item is None:
+            raise HTTPException(status_code=404, detail="work item claim not found")
+        return {"item": item.as_dict(), "acked": True}
+
+    @app.post("/scaling/queue/release")
+    def scaling_queue_release(request: WorkerQueueItemRequest) -> dict[str, Any]:
+        item = scaling_queue.release(request.item_id, owner=request.owner)
+        if item is None:
+            raise HTTPException(status_code=404, detail="work item claim not found")
+        return {"item": item.as_dict(), "released": True}
 
     def provider_choice_from_request(family: str, request, workspace_id: str) -> ProviderChoice:
         secret_ref = None

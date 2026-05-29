@@ -94,6 +94,7 @@ voicebot.
 ## Internal And Prototype APIs
 
 - `/agent/tasks` is an internal worker lease API.
+- `/scaling/queue/*` is an internal worker queue lifecycle API.
 - `/webrtc/test` is a prototype local browser test app.
 
 These should not be exposed as public product endpoints.

@@ -110,6 +110,16 @@ ingress paths do not duplicate threshold and timing mapping.
 Transport code should normalize audio before feeding it into the turn detector
 so SIP, WebRTC, and future providers share the same VAD behavior.
 
+## Jitter Buffer
+
+`AudioJitterBuffer` is a transport-neutral buffer for normalized float32 audio
+blocks. `JitterBufferConfig` defines the sample rate, frame size, target delay,
+and maximum delay. The buffer waits until it has the target delay plus one frame
+before emitting fixed-size frames, trims oldest samples when the maximum delay is
+exceeded, and exposes buffered sample/duration diagnostics. This gives SIP,
+WebRTC, and future transports a shared primitive before turn detection without
+mixing jitter handling into agent or STT logic.
+
 ## Debug Capture
 
 `DebugAudioCapture` is a gated in-memory ring buffer for recent normalized audio
@@ -125,6 +135,6 @@ caller audio by default.
 1. Replace duplicated SIP and WebRTC VAD loops with `TurnDetector`.
 2. Emit metrics for every turn decision from `TurnDetectionResult.metric_data()`.
 3. Add a pluggable VAD provider interface.
-4. Add jitter buffer and audio normalization stages before turn detection.
+4. Wire jitter buffer and audio normalization stages into SIP/WebRTC media loops.
 5. Wire debug capture behind runtime/workspace configuration.
 6. Add stronger echo suppression strategy for real deployments.

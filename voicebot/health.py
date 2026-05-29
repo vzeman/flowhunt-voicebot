@@ -180,6 +180,8 @@ def compact_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         compact["pending_count"] = sum(len(items) for items in (snapshot.get("pending") or {}).values())
     if "claimed" in snapshot:
         compact["claimed_count"] = len(snapshot.get("claimed") or [])
+    if "leases" in snapshot:
+        compact["lease_count"] = len(snapshot.get("leases") or [])
     return compact or snapshot
 
 

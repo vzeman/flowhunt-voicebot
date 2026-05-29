@@ -5,6 +5,7 @@ from .config import Settings
 from .call_state import CallStateStore, JsonCallStateStore
 from .events import EventStore, JsonEventStore
 from .scaling import JsonWorkerQueueStore, JsonWorkerRegistry, WorkerQueueStore, WorkerRegistry
+from .session_leases import JsonSessionLeaseStore, SessionLeaseStore
 from .transcripts import TranscriptStore
 from .workspace_model import JsonVoicebotSessionStore, VoicebotSessionStore
 
@@ -23,6 +24,14 @@ def build_voicebot_session_store(settings: Settings) -> VoicebotSessionStore:
     if settings.voicebot_session_store_provider in {"memory", "inmemory", "in-memory"}:
         return VoicebotSessionStore()
     raise ValueError(f"Unsupported VOICEBOT_SESSION_STORE_PROVIDER: {settings.voicebot_session_store_provider}")
+
+
+def build_session_lease_store(settings: Settings) -> SessionLeaseStore:
+    if settings.session_lease_store_provider in {"json", "jsonl"}:
+        return JsonSessionLeaseStore(settings.session_lease_store_path)
+    if settings.session_lease_store_provider in {"memory", "inmemory", "in-memory"}:
+        return SessionLeaseStore()
+    raise ValueError(f"Unsupported VOICEBOT_SESSION_LEASE_STORE_PROVIDER: {settings.session_lease_store_provider}")
 
 
 def build_agent_task_tracker(settings: Settings) -> AgentTaskTracker:

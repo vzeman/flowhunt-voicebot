@@ -30,6 +30,8 @@ from .api_models import (
     PlaybackInterruptRequest,
     ScalingBackpressureRequest,
     ScalingWorkloadPlanRequest,
+    SessionLeaseReleaseRequest,
+    SessionLeaseRequest,
     SipTrunkRequest,
     VoicebotAdminPatchRequest,
     VoicebotAdminRequest,
@@ -96,6 +98,7 @@ from .scaling import (
     build_workload_plan,
     default_deployment_topology,
 )
+from .session_leases import SessionLeaseStore
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
@@ -167,6 +170,7 @@ def create_app(
     voicebots: VoicebotStore | None = None,
     channels: ChannelResolver | None = None,
     voicebot_sessions: VoicebotSessionStore | None = None,
+    session_leases: SessionLeaseStore | None = None,
     workspace_policy: WorkspaceAccessPolicy | None = None,
 ) -> FastAPI:
     @asynccontextmanager
@@ -200,6 +204,7 @@ def create_app(
     voicebot_store = voicebots or VoicebotStore()
     channel_resolver = channels or ChannelResolver()
     voicebot_session_store = voicebot_sessions or VoicebotSessionStore()
+    session_lease_store = session_leases or SessionLeaseStore()
     workspace_access_policy = workspace_policy or workspace_access_policy_from_settings(runtime_settings)
     subagent_terminal_events: list[VoicebotEvent] = []
 
@@ -254,6 +259,7 @@ def create_app(
                 "events": events,
                 "agent_tasks": tracker,
                 "call_states": registry.state_store,
+                "session_leases": session_lease_store,
                 "worker_registry": scaling_workers,
                 "voicebot_sessions": voicebot_session_store,
                 "worker_queue": scaling_queue,
@@ -736,6 +742,48 @@ def create_app(
     @app.get("/scaling/backpressure")
     def scaling_backpressure_snapshot() -> dict[str, Any]:
         return scaling_backpressure.snapshot()
+
+    @app.get("/scaling/session-leases")
+    def scaling_session_lease_snapshot(workspace_id: str | None = None, voicebot_id: str | None = None) -> dict[str, Any]:
+        return {"leases": [lease.as_dict() for lease in session_lease_store.list(workspace_id=workspace_id, voicebot_id=voicebot_id)]}
+
+    @app.post("/scaling/session-leases/acquire")
+    def scaling_session_lease_acquire(request: SessionLeaseRequest) -> dict[str, Any]:
+        try:
+            lease = session_lease_store.acquire(
+                request.workspace_id,
+                request.voicebot_id,
+                request.session_id,
+                request.owner,
+                request.ttl_seconds,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"acquired": lease is not None, "lease": lease.as_dict() if lease is not None else None}
+
+    @app.post("/scaling/session-leases/renew")
+    def scaling_session_lease_renew(request: SessionLeaseRequest) -> dict[str, Any]:
+        try:
+            lease = session_lease_store.renew(
+                request.workspace_id,
+                request.voicebot_id,
+                request.session_id,
+                request.owner,
+                request.ttl_seconds,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"renewed": lease is not None, "lease": lease.as_dict() if lease is not None else None}
+
+    @app.post("/scaling/session-leases/release")
+    def scaling_session_lease_release(request: SessionLeaseReleaseRequest) -> dict[str, Any]:
+        lease = session_lease_store.release(
+            request.workspace_id,
+            request.voicebot_id,
+            request.session_id,
+            owner=request.owner,
+        )
+        return {"released": lease is not None, "lease": lease.as_dict() if lease is not None else None}
 
     @app.post("/scaling/backpressure/acquire")
     def scaling_backpressure_acquire(request: ScalingBackpressureRequest) -> dict[str, Any]:

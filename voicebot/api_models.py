@@ -172,6 +172,21 @@ class PlaybackInterruptRequest(BaseModel):
     response_to_event_id: int | None = None
 
 
+class SessionLeaseRequest(BaseModel):
+    workspace_id: str
+    voicebot_id: str
+    session_id: str
+    owner: str
+    ttl_seconds: float = 30.0
+
+
+class SessionLeaseReleaseRequest(BaseModel):
+    workspace_id: str
+    voicebot_id: str
+    session_id: str
+    owner: str | None = None
+
+
 class AgentToolRequest(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 

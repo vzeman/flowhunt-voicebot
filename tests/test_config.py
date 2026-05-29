@@ -41,6 +41,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(result["agent_task_responded_event_retention"], 10000)
         self.assertEqual(result["call_state_store_provider"], "json")
         self.assertEqual(result["call_state_store_path"], "/data/call_states.json")
+        self.assertEqual(result["session_lease_store_provider"], "json")
+        self.assertEqual(result["session_lease_store_path"], "/data/session_leases.json")
         self.assertEqual(result["worker_registry_store_provider"], "json")
         self.assertEqual(result["worker_registry_store_path"], "/data/worker_registry.json")
         self.assertEqual(result["scaling_backpressure_max_inflight"], 100)

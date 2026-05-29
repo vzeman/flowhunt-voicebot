@@ -112,6 +112,8 @@ class Settings:
     transcript_dir: str = os.getenv("VOICEBOT_TRANSCRIPT_DIR", "/data/transcripts")
     voicebot_session_store_provider: str = os.getenv("VOICEBOT_SESSION_STORE_PROVIDER", "json").strip().lower()
     voicebot_session_store_path: str = os.getenv("VOICEBOT_SESSION_STORE_PATH", "/data/voicebot_sessions.json")
+    session_lease_store_provider: str = os.getenv("VOICEBOT_SESSION_LEASE_STORE_PROVIDER", "json").strip().lower()
+    session_lease_store_path: str = os.getenv("VOICEBOT_SESSION_LEASE_STORE_PATH", "/data/session_leases.json")
     sip_trunk_registry_path: str = os.getenv("VOICEBOT_SIP_TRUNK_REGISTRY_PATH", "/data/sip_trunks.json")
     sip_trunk_pjsip_include_path: str = os.getenv(
         "VOICEBOT_SIP_TRUNK_PJSIP_INCLUDE_PATH",

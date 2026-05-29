@@ -13,7 +13,7 @@ from .config import Settings
 from .events import EventStore
 from .flowhunt import FlowHuntClient
 from .provider_registry import default_provider_registry
-from .runtime_storage import build_agent_task_tracker, build_event_store, build_voicebot_session_store
+from .runtime_storage import build_agent_task_tracker, build_event_store, build_voicebot_session_store, build_worker_queue_store
 from .sip_trunks import SipTrunkStore
 from .subagents import FlowHuntSubagentProvider, JsonSubagentTaskStore, SubagentCoordinator
 from .transcripts import TranscriptStore
@@ -28,6 +28,7 @@ def main() -> None:
     voicebot_sessions = build_voicebot_session_store(settings)
     registry = CallRegistry()
     tracker = build_agent_task_tracker(settings)
+    worker_queue = build_worker_queue_store(settings)
     sip_trunks = SipTrunkStore(settings.sip_trunk_registry_path, settings.sip_trunk_pjsip_include_path)
     subagents = build_subagent_coordinator(settings, events)
     asterisk = (
@@ -73,6 +74,7 @@ def main() -> None:
         sip_trunks,
         webrtc,
         subagents,
+        worker_queue=worker_queue,
         voicebot_sessions=voicebot_sessions,
     )
     uvicorn.run(app, host=settings.api_host, port=settings.api_port)

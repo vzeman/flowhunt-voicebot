@@ -3,6 +3,7 @@ from __future__ import annotations
 from .agent_tasks import AgentTaskTracker, JsonAgentTaskTracker
 from .config import Settings
 from .events import EventStore, JsonEventStore
+from .scaling import JsonWorkerQueueStore, WorkerQueueStore
 from .transcripts import TranscriptStore
 from .workspace_model import JsonVoicebotSessionStore, VoicebotSessionStore
 
@@ -32,3 +33,11 @@ def build_agent_task_tracker(settings: Settings) -> AgentTaskTracker:
     if settings.agent_task_store_provider in {"memory", "inmemory", "in-memory"}:
         return AgentTaskTracker(settings.agent_task_responded_event_retention)
     raise ValueError(f"Unsupported VOICEBOT_AGENT_TASK_STORE_PROVIDER: {settings.agent_task_store_provider}")
+
+
+def build_worker_queue_store(settings: Settings) -> WorkerQueueStore:
+    if settings.worker_queue_store_provider in {"json", "jsonl"}:
+        return JsonWorkerQueueStore(settings.worker_queue_store_path)
+    if settings.worker_queue_store_provider in {"memory", "inmemory", "in-memory"}:
+        return WorkerQueueStore()
+    raise ValueError(f"Unsupported VOICEBOT_WORKER_QUEUE_STORE_PROVIDER: {settings.worker_queue_store_provider}")

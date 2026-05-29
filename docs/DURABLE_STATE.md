@@ -91,6 +91,24 @@ The runtime selects the agent task tracker with:
 Docker defaults to `json`, so communication-agent task responses and active
 claim leases survive local service restarts within their configured TTL.
 
+## Worker Queue
+
+`JsonWorkerQueueStore` persists the local worker queue lifecycle contract:
+
+- pending worker queue envelopes by queue name
+- active claims with owner and absolute expiration
+- expired claims requeued to pending on reload
+- load diagnostics for malformed JSON, invalid rows, and duplicate item ids
+
+The runtime selects the worker queue store with:
+
+- `VOICEBOT_WORKER_QUEUE_STORE_PROVIDER=json|memory`
+- `VOICEBOT_WORKER_QUEUE_STORE_PATH=/data/worker_queue.json`
+
+Docker defaults to `json`, so internal `/scaling/queue/*` work handoff survives
+local service restarts until production replaces it with Redis streams or
+FlowHunt shared queue infrastructure.
+
 ## Production Direction
 
 The JSON stores are implementation scaffolding. In FlowHunt production:

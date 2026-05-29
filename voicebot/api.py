@@ -32,6 +32,8 @@ from .api_models import (
     SipTrunkRequest,
     VoicebotAdminPatchRequest,
     VoicebotAdminRequest,
+    VoicebotChannelPatchRequest,
+    VoicebotChannelRequest,
     VoicebotProviderConfigRequest,
     WorkerHeartbeatRequest,
     WebRTCOfferRequest,
@@ -87,7 +89,7 @@ from .transcripts import TranscriptStore
 from .transports import transport_catalog
 from .tools import tool_definitions_json_schema, tool_definitions_legacy
 from .webrtc import WebRTCSessionManager
-from .workspace_model import VoicebotDefinition, VoicebotStore
+from .workspace_model import ChannelResolver, VoicebotChannelBinding, VoicebotDefinition, VoicebotStore
 
 _MODALITIES = set(get_args(Modality))
 _CONTENT_DIRECTIONS = set(get_args(ContentDirection))
@@ -146,6 +148,7 @@ def create_app(
     provider_configs: ProviderConfigStore | None = None,
     worker_registry: WorkerRegistry | None = None,
     voicebots: VoicebotStore | None = None,
+    channels: ChannelResolver | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -174,6 +177,7 @@ def create_app(
     provider_config_store = provider_configs or ProviderConfigStore()
     scaling_workers = worker_registry or WorkerRegistry()
     voicebot_store = voicebots or VoicebotStore()
+    channel_resolver = channels or ChannelResolver()
     subagent_terminal_events: list[VoicebotEvent] = []
 
     def emit_subagent_terminal_event(event_type: TaskLifecycleEventType, task: SubagentTask) -> None:
@@ -347,6 +351,72 @@ def create_app(
         if voicebot is None:
             raise HTTPException(status_code=404, detail="Voicebot not found")
         return {"voicebot": voicebot.as_dict(), "deleted": True}
+
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels")
+    def list_voicebot_channels(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        return {
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "channels": [
+                binding.as_dict() for binding in channel_resolver.bindings_for_voicebot(workspace_id, voicebot_id)
+            ],
+        }
+
+    @app.post("/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels")
+    def create_voicebot_channel(
+        workspace_id: str,
+        voicebot_id: str,
+        request: VoicebotChannelRequest,
+    ) -> dict[str, Any]:
+        try:
+            binding = VoicebotChannelBinding(
+                channel_id=request.channel_id,
+                kind=request.kind,  # type: ignore[arg-type]
+                workspace_id=workspace_id,
+                voicebot_id=voicebot_id,
+                external_id=request.external_id,
+                enabled=request.enabled,
+                metadata=request.metadata,
+            )
+            channel_resolver.register(binding)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"channel": binding.as_dict()}
+
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}")
+    def get_voicebot_channel(workspace_id: str, voicebot_id: str, channel_id: str) -> dict[str, Any]:
+        binding = channel_resolver.get_channel(workspace_id, voicebot_id, channel_id)
+        if binding is None:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        return {"channel": binding.as_dict()}
+
+    @app.patch("/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}")
+    def patch_voicebot_channel(
+        workspace_id: str,
+        voicebot_id: str,
+        channel_id: str,
+        request: VoicebotChannelPatchRequest,
+    ) -> dict[str, Any]:
+        try:
+            binding = channel_resolver.patch_channel(
+                workspace_id,
+                voicebot_id,
+                channel_id,
+                enabled=request.enabled,
+                metadata=request.metadata,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Channel not found") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"channel": binding.as_dict()}
+
+    @app.delete("/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}")
+    def delete_voicebot_channel(workspace_id: str, voicebot_id: str, channel_id: str) -> dict[str, Any]:
+        binding = channel_resolver.unregister_voicebot_channel(workspace_id, voicebot_id, channel_id)
+        if binding is None:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        return {"channel": binding.as_dict(), "deleted": True}
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")
     def get_voicebot_provider_config(workspace_id: str, voicebot_id: str) -> dict[str, Any]:

@@ -91,6 +91,19 @@ class VoicebotAdminPatchRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class VoicebotChannelRequest(BaseModel):
+    channel_id: str
+    kind: str
+    external_id: str
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class VoicebotChannelPatchRequest(BaseModel):
+    enabled: bool | None = None
+    metadata: dict[str, Any] | None = None
+
+
 class CallControlRequest(BaseModel):
     action: str
     target: str | None = None

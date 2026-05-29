@@ -136,6 +136,17 @@ class VoicebotChannelBinding:
     def scope(self) -> WorkspaceScope:
         return WorkspaceScope(self.workspace_id, self.voicebot_id)
 
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "channel_id": self.channel_id,
+            "kind": self.kind,
+            "workspace_id": self.workspace_id,
+            "voicebot_id": self.voicebot_id,
+            "external_id": self.external_id,
+            "enabled": self.enabled,
+            "metadata": self.metadata,
+        }
+
 
 class ChannelResolver:
     def __init__(self, bindings: list[VoicebotChannelBinding] | None = None) -> None:
@@ -168,6 +179,41 @@ class ChannelResolver:
                 return self._bindings.pop(key)
         return None
 
+    def get_channel(
+        self,
+        workspace_id: str,
+        voicebot_id: str,
+        channel_id: str,
+    ) -> VoicebotChannelBinding | None:
+        for binding in self._bindings.values():
+            if (
+                binding.workspace_id == workspace_id
+                and binding.voicebot_id == voicebot_id
+                and binding.channel_id == channel_id
+            ):
+                return binding
+        return None
+
+    def patch_channel(
+        self,
+        workspace_id: str,
+        voicebot_id: str,
+        channel_id: str,
+        *,
+        enabled: bool | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> VoicebotChannelBinding:
+        existing = self.get_channel(workspace_id, voicebot_id, channel_id)
+        if existing is None:
+            raise KeyError(f"channel not found: {channel_id}")
+        updated = replace(
+            existing,
+            enabled=existing.enabled if enabled is None else enabled,
+            metadata=existing.metadata if metadata is None else metadata,
+        )
+        self.register(updated)
+        return updated
+
     def resolve(self, kind: ChannelKind, external_id: str) -> WorkspaceScope | None:
         binding = self._bindings.get((kind, external_id))
         if binding is None or not binding.enabled:
@@ -179,6 +225,27 @@ class ChannelResolver:
             [binding for binding in self._bindings.values() if binding.workspace_id == workspace_id],
             key=lambda item: item.channel_id,
         )
+
+    def bindings_for_voicebot(self, workspace_id: str, voicebot_id: str) -> list[VoicebotChannelBinding]:
+        return sorted(
+            [
+                binding
+                for binding in self._bindings.values()
+                if binding.workspace_id == workspace_id and binding.voicebot_id == voicebot_id
+            ],
+            key=lambda item: item.channel_id,
+        )
+
+    def unregister_voicebot_channel(
+        self,
+        workspace_id: str,
+        voicebot_id: str,
+        channel_id: str,
+    ) -> VoicebotChannelBinding | None:
+        binding = self.get_channel(workspace_id, voicebot_id, channel_id)
+        if binding is None:
+            return None
+        return self.unregister_channel(channel_id)
 
 
 @dataclass(frozen=True)

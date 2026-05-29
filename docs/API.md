@@ -202,6 +202,42 @@ Updates mutable voicebot fields: `display_name`, `enabled`, and `metadata`.
 
 Deletes one voicebot record from the workspace.
 
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels`
+
+Lists SIP trunk, phone number, or WebRTC widget channel bindings assigned to
+one voicebot.
+
+### POST `/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels`
+
+Creates a channel binding and makes it available to the runtime channel
+resolver.
+
+Request:
+
+```json
+{
+  "channel_id": "support-sk-trunk",
+  "kind": "sip_trunk",
+  "external_id": "trunk-876",
+  "enabled": true,
+  "metadata": {"country": "sk"}
+}
+```
+
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}`
+
+Returns one channel binding.
+
+### PATCH `/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}`
+
+Updates mutable channel fields: `enabled` and `metadata`. Route identity fields
+are immutable in this prototype; create a replacement channel to change
+`kind`, `external_id`, workspace, or voicebot ownership.
+
+### DELETE `/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}`
+
+Deletes one channel binding and removes it from runtime resolution.
+
 ## Provider Configuration
 
 ### PUT `/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers`

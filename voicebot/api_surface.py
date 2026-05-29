@@ -56,6 +56,7 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("DELETE", "/workspaces/{workspace_id}/voicebots/{voicebot_id}", "admin", "public", description="Delete voicebot."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels", "channel", "public", description="List channels."),
     ApiEndpointSpec("POST", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels", "channel", "public", description="Create channel."),
+    ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}", "channel", "public", description="Read channel."),
     ApiEndpointSpec("PATCH", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}", "channel", "public", description="Update channel."),
     ApiEndpointSpec("DELETE", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}", "channel", "public", description="Delete channel."),
     ApiEndpointSpec("POST", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/validate", "admin", "public", description="Validate runtime config."),

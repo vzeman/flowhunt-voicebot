@@ -47,6 +47,36 @@ class WorkerHeartbeatRequest(BaseModel):
     status: str = "active"
 
 
+class WorkerQueueRoutingRequest(BaseModel):
+    workspace_id: str
+    voicebot_id: str
+    session_id: str | None = None
+    provider: str | None = None
+
+
+class WorkerQueueEnqueueRequest(BaseModel):
+    item_id: str
+    kind: str
+    routing: WorkerQueueRoutingRequest
+    queue: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    trace_id: str | None = None
+    created_at: str | None = None
+    attempt: int = 0
+
+
+class WorkerQueueClaimRequest(BaseModel):
+    queue: str
+    owner: str
+    limit: int = 1
+    ttl_seconds: float = 30.0
+
+
+class WorkerQueueItemRequest(BaseModel):
+    item_id: str
+    owner: str | None = None
+
+
 class MultimodalContentRequest(BaseModel):
     modality: str
     direction: str

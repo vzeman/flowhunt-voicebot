@@ -1336,12 +1336,57 @@ Records or refreshes a worker presence record.
 
 ### GET `/scaling/workers`
 
-Lists active workers. Optional query filters: `role`, `workspace_id`.
+Lists active workers. Optional query filters: `role`, `workspace_id`,
+`voicebot_id`.
 
 ### GET `/scaling/capacity`
 
 Summarizes active worker capacity by role. Optional query filter:
-`workspace_id`.
+`workspace_id`, `voicebot_id`.
+
+### GET `/scaling/queue`
+
+Returns local worker queue pending and claimed snapshots.
+
+### POST `/scaling/queue/enqueue`
+
+Enqueues a worker item in the local queue lifecycle store.
+
+```json
+{
+  "item_id": "item-1",
+  "kind": "agent_turn",
+  "routing": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "session_id": "session-1"},
+  "queue": "voicebot.agent",
+  "payload": {"event_id": 42},
+  "trace_id": "trace-1"
+}
+```
+
+### POST `/scaling/queue/claim`
+
+Claims pending worker items by queue.
+
+```json
+{
+  "queue": "voicebot.agent",
+  "owner": "agent-worker-1",
+  "limit": 1,
+  "ttl_seconds": 30
+}
+```
+
+### POST `/scaling/queue/ack`
+
+Acknowledges a claimed worker item after successful processing.
+
+```json
+{"item_id": "item-1", "owner": "agent-worker-1"}
+```
+
+### POST `/scaling/queue/release`
+
+Releases a claimed worker item back to pending.
 
 ### POST `/scaling/workers/{worker_id}/drain`
 

@@ -69,6 +69,14 @@ produce grouped pending/claimed snapshots. It is intentionally in-memory; the
 same lifecycle should move to Redis streams, a database queue, or FlowHunt
 shared infrastructure for production.
 
+Internal queue endpoints expose this lifecycle for early worker separation:
+
+- `GET /scaling/queue`
+- `POST /scaling/queue/enqueue`
+- `POST /scaling/queue/claim`
+- `POST /scaling/queue/ack`
+- `POST /scaling/queue/release`
+
 `POST /scaling/workers/heartbeat` records process-local worker presence for a
 worker id, role, queue, optional workspace/voicebot affinity, capacity, and
 status. `GET /scaling/workers` lists active workers and can filter by role,

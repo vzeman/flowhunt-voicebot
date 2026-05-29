@@ -398,6 +398,64 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("unsupported worker role", response.json()["detail"])
 
+    def test_scaling_queue_api_enqueues_claims_acks_and_releases_work(self) -> None:
+        client = self.build_client()
+
+        enqueue = client.post(
+            "/scaling/queue/enqueue",
+            json={
+                "item_id": "item-1",
+                "kind": "agent_turn",
+                "routing": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "session_id": "session-1"},
+                "queue": "voicebot.agent",
+                "payload": {"event_id": 42},
+            },
+        )
+        snapshot = client.get("/scaling/queue")
+        claim = client.post(
+            "/scaling/queue/claim",
+            json={"queue": "voicebot.agent", "owner": "worker-1", "ttl_seconds": 30},
+        )
+        wrong_ack = client.post("/scaling/queue/ack", json={"item_id": "item-1", "owner": "worker-2"})
+        release = client.post("/scaling/queue/release", json={"item_id": "item-1", "owner": "worker-1"})
+        reclaim = client.post(
+            "/scaling/queue/claim",
+            json={"queue": "voicebot.agent", "owner": "worker-1", "ttl_seconds": 30},
+        )
+        ack = client.post("/scaling/queue/ack", json={"item_id": "item-1", "owner": "worker-1"})
+
+        self.assertEqual(enqueue.status_code, 200)
+        self.assertEqual(enqueue.json()["item"]["routing"]["partition_key"], "workspace-1:voicebot-1:session-1")
+        self.assertEqual(snapshot.json()["pending"]["voicebot.agent"][0]["item_id"], "item-1")
+        self.assertEqual([item["item_id"] for item in claim.json()["items"]], ["item-1"])
+        self.assertEqual(claim.json()["items"][0]["attempt"], 1)
+        self.assertEqual(wrong_ack.status_code, 404)
+        self.assertTrue(release.json()["released"])
+        self.assertEqual(reclaim.json()["items"][0]["attempt"], 2)
+        self.assertTrue(ack.json()["acked"])
+
+    def test_scaling_queue_api_rejects_invalid_enqueue_and_claim_requests(self) -> None:
+        client = self.build_client()
+
+        invalid_enqueue = client.post(
+            "/scaling/queue/enqueue",
+            json={
+                "item_id": " ",
+                "kind": "agent_turn",
+                "routing": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"},
+                "queue": "voicebot.agent",
+            },
+        )
+        invalid_claim = client.post(
+            "/scaling/queue/claim",
+            json={"queue": "voicebot.agent", "owner": "worker-1", "limit": 0},
+        )
+
+        self.assertEqual(invalid_enqueue.status_code, 400)
+        self.assertIn("item_id", invalid_enqueue.json()["detail"])
+        self.assertEqual(invalid_claim.status_code, 400)
+        self.assertIn("limit", invalid_claim.json()["detail"])
+
     def build_client(self) -> TestClient:
         app = create_app(
             EventStore(max_context_events=20),

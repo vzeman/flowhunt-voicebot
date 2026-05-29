@@ -21,6 +21,7 @@ from .frames import AudioInputFrame, AudioOutputFrame, PlaybackFrame, TextFrame,
 from .pipeline import PipelineRunner
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
 from .transports import WEBRTC_CAPABILITIES, StaticMediaTransport
+from .workspace_model import VoicebotSessionRecord, VoicebotSessionStore
 
 try:
     from aiortc import MediaStreamTrack, RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
@@ -660,6 +661,7 @@ class WebRTCSessionManager:
         tts: "TTSProvider",
         stt_pipeline_specs: tuple[ProcessorSpec, ...],
         tts_pipeline_specs: tuple[ProcessorSpec, ...],
+        session_store: VoicebotSessionStore | None = None,
     ) -> None:
         self.settings = settings
         self.events = events
@@ -668,6 +670,7 @@ class WebRTCSessionManager:
         self.tts = tts
         self.stt_pipeline_specs = stt_pipeline_specs
         self.tts_pipeline_specs = tts_pipeline_specs
+        self.session_store = session_store
         self._lock = asyncio.Lock()
         self._sessions: dict[str, tuple[Any, WebRTCCallSession]] = {}
 
@@ -716,6 +719,7 @@ class WebRTCSessionManager:
         async with self._lock:
             self._sessions[session_id] = (pc, session)
         session.start()
+        self._persist_session_started(session)
         return {
             "session_id": session_id,
             "call_id": call_id,
@@ -732,6 +736,7 @@ class WebRTCSessionManager:
             return False
         pc, session = pair
         session.stop()
+        self._persist_session_ended(session)
         self.registry.remove(session.call_id)
         await pc.close()
         return True
@@ -764,6 +769,41 @@ class WebRTCSessionManager:
             return None
         servers = [RTCIceServer(urls=url) for url in self.settings.webrtc_stun_urls]
         return RTCConfiguration(iceServers=servers)
+
+    def _persist_session_started(self, session: WebRTCCallSession) -> None:
+        if self.session_store is None:
+            return
+        route = session.descriptor.route
+        if not route.workspace_id or not route.voicebot_id:
+            return
+        self.session_store.save(
+            VoicebotSessionRecord(
+                session_id=session.session_id,
+                workspace_id=route.workspace_id,
+                voicebot_id=route.voicebot_id,
+                channel_id=_optional_metadata_str(route.metadata.get("channel_id")),
+                external_session_id=session.call_id,
+                metadata={"transport": "webrtc", **route.metadata},
+            )
+        )
+
+    def _persist_session_ended(self, session: WebRTCCallSession) -> None:
+        if self.session_store is None:
+            return
+        route = session.descriptor.route
+        if not route.workspace_id:
+            return
+        try:
+            self.session_store.end(session.session_id, route.workspace_id)
+        except KeyError:
+            return
+
+
+def _optional_metadata_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 @dataclass

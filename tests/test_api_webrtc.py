@@ -13,7 +13,8 @@ from voicebot.calls import CallRegistry
 from voicebot.config import Settings
 from voicebot.events import EventStore
 from voicebot.transcripts import TranscriptStore
-from voicebot.webrtc import WebRTCCallSession, audio_frame_to_call_audio
+from voicebot.webrtc import WebRTCCallSession, WebRTCSessionManager, audio_frame_to_call_audio
+from voicebot.workspace_model import VoicebotSessionStore
 
 
 class FakeWebRTCManager:
@@ -131,6 +132,62 @@ class ApiWebRTCTests(unittest.TestCase):
         response = client.delete("/webrtc/sessions/missing")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_webrtc_manager_persists_routed_session_lifecycle(self) -> None:
+        events = EventStore(max_context_events=20)
+        store = VoicebotSessionStore()
+        manager = self._build_real_manager(events, store)
+        session = WebRTCCallSession(
+            call_id="webrtc-session-1",
+            session_id="session-1",
+            settings=Settings(),
+            event_store=events,
+            stt=FakeSTT(),
+            tts=FakeTTS(),
+            metadata={
+                "workspace_id": "workspace-1",
+                "voicebot_id": "voicebot-1",
+                "channel_id": "widget-1",
+            },
+        )
+
+        manager._persist_session_started(session)
+        manager._persist_session_ended(session)
+
+        persisted = store.get("session-1", workspace_id="workspace-1")
+        self.assertIsNotNone(persisted)
+        self.assertEqual(persisted.status if persisted else None, "ended")
+        self.assertEqual(persisted.channel_id if persisted else None, "widget-1")
+        self.assertEqual(persisted.external_session_id if persisted else None, "webrtc-session-1")
+
+    def test_webrtc_manager_skips_unrouted_session_persistence(self) -> None:
+        events = EventStore(max_context_events=20)
+        store = VoicebotSessionStore()
+        manager = self._build_real_manager(events, store)
+        session = WebRTCCallSession(
+            call_id="webrtc-session-1",
+            session_id="session-1",
+            settings=Settings(),
+            event_store=events,
+            stt=FakeSTT(),
+            tts=FakeTTS(),
+        )
+
+        manager._persist_session_started(session)
+
+        self.assertEqual(store.list(), ())
+
+    def _build_real_manager(self, events: EventStore, store: VoicebotSessionStore) -> WebRTCSessionManager:
+        return WebRTCSessionManager(
+            Settings(),
+            events,
+            CallRegistry(),
+            FakeSTT(),
+            FakeTTS(),
+            (),
+            (),
+            store,
+        )
 
     def test_webrtc_audio_is_resampled_to_stt_sample_rate(self) -> None:
         audio = audio_frame_to_call_audio(FakeAudioFrame())

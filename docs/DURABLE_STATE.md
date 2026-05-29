@@ -52,6 +52,16 @@ malformed JSON count, skipped invalid rows, and skipped duplicate session ids.
 Duplicate session ids use first-row-wins behavior during reload so corrupted
 local files cannot silently move a session across workspace or voicebot scope.
 
+The runtime selects the session store with:
+
+- `VOICEBOT_SESSION_STORE_PROVIDER=json|memory`
+- `VOICEBOT_SESSION_STORE_PATH=/data/voicebot_sessions.json`
+
+Routed WebRTC sessions are persisted when their metadata includes
+`workspace_id` and `voicebot_id`. On session close, the same durable record is
+marked ended. Unrouted local test sessions are intentionally skipped because
+they cannot be permission-scoped in FlowHunt product APIs.
+
 ## External Tasks
 
 `JsonSubagentTaskStore` persists delegated subagent tasks, including provider

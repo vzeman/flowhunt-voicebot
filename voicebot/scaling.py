@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal, get_args
 
 
 WorkerRole = Literal[
@@ -13,6 +13,15 @@ WorkerRole = Literal[
     "agent_worker",
     "task_poller",
     "api",
+]
+
+WorkItemKind = Literal[
+    "media_frame",
+    "stt_turn",
+    "agent_turn",
+    "tts_request",
+    "external_task_poll",
+    "session_event",
 ]
 
 
@@ -230,6 +239,51 @@ class WorkspaceBackpressure:
             self.inflight_by_key.pop(key, None)
             return
         self.inflight_by_key[key] = current - 1
+
+
+@dataclass(frozen=True)
+class WorkerQueueEnvelope:
+    item_id: str
+    kind: WorkItemKind
+    routing: RoutingKey
+    queue: str
+    payload: dict[str, Any] = field(default_factory=dict)
+    trace_id: str | None = None
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    attempt: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.item_id.strip():
+            raise ValueError("item_id is required")
+        if self.kind not in get_args(WorkItemKind):
+            raise ValueError(f"unsupported work item kind: {self.kind}")
+        if not self.queue.strip():
+            raise ValueError("queue is required")
+        if self.attempt < 0:
+            raise ValueError("attempt must be greater than or equal to 0")
+        _parse_time(self.created_at)
+
+    def partition_key(self) -> str:
+        return self.routing.partition_key()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "item_id": self.item_id,
+            "kind": self.kind,
+            "routing": {
+                "workspace_id": self.routing.workspace_id,
+                "voicebot_id": self.routing.voicebot_id,
+                "session_id": self.routing.session_id,
+                "provider": self.routing.provider,
+                "partition_key": self.routing.partition_key(),
+                "provider_key": self.routing.provider_key(),
+            },
+            "queue": self.queue,
+            "payload": self.payload,
+            "trace_id": self.trace_id,
+            "created_at": self.created_at,
+            "attempt": self.attempt,
+        }
 
 
 @dataclass(frozen=True)

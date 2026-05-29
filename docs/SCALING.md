@@ -55,6 +55,13 @@ bindings, partition key, provider keys, and whether the requested concurrency
 fits the current workspace/voicebot/provider limits. This is a planning surface
 for FlowHunt deployment orchestration; it does not enqueue work itself.
 
+`WorkerQueueEnvelope` defines the payload shape for future queue/stream
+handoff. Every queued item carries an item id, work kind, queue name, routing
+key with workspace/voicebot/session/provider fields, payload, trace id,
+creation timestamp, and retry attempt. The routing partition key keeps all work
+for a session addressable after worker restart, while the provider key supports
+provider-specific rate limits.
+
 `POST /scaling/workers/heartbeat` records process-local worker presence for a
 worker id, role, queue, optional workspace/voicebot affinity, capacity, and
 status. `GET /scaling/workers` lists active workers and can filter by role,

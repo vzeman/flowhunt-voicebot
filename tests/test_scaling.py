@@ -12,6 +12,7 @@ from voicebot.events import EventStore
 from voicebot.scaling import (
     RoutingKey,
     WorkerInstance,
+    WorkerQueueEnvelope,
     WorkerRegistry,
     WorkloadProfile,
     WorkspaceBackpressure,
@@ -60,6 +61,46 @@ class ScalingTests(unittest.TestCase):
             limiter.acquire(" ")
         with self.assertRaisesRegex(ValueError, "backpressure key"):
             limiter.release("")
+
+    def test_worker_queue_envelope_serializes_routing_and_payload(self) -> None:
+        envelope = WorkerQueueEnvelope(
+            item_id="item-1",
+            kind="stt_turn",
+            routing=RoutingKey("workspace-1", "voicebot-1", session_id="session-1", provider="openai"),
+            queue="voicebot.stt",
+            payload={"event_id": 42},
+            trace_id="trace-1",
+            created_at="2026-05-28T00:00:00+00:00",
+            attempt=1,
+        )
+
+        data = envelope.as_dict()
+
+        self.assertEqual(envelope.partition_key(), "workspace-1:voicebot-1:session-1")
+        self.assertEqual(data["routing"]["provider_key"], "workspace-1:voicebot-1:openai")
+        self.assertEqual(data["payload"], {"event_id": 42})
+        self.assertEqual(data["attempt"], 1)
+
+    def test_worker_queue_envelope_rejects_invalid_records(self) -> None:
+        valid = {
+            "item_id": "item-1",
+            "kind": "agent_turn",
+            "routing": RoutingKey("workspace-1", "voicebot-1"),
+            "queue": "voicebot.agent",
+        }
+
+        invalid_cases = [
+            ({**valid, "item_id": " "}, "item_id"),
+            ({**valid, "kind": "unknown"}, "unsupported work item kind"),
+            ({**valid, "queue": ""}, "queue"),
+            ({**valid, "created_at": "not-a-time"}, "Invalid isoformat"),
+            ({**valid, "attempt": -1}, "attempt"),
+        ]
+
+        for kwargs, message in invalid_cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    WorkerQueueEnvelope(**kwargs)
 
     def test_workload_plan_includes_partition_provider_keys_and_capacity_flags(self) -> None:
         plan = build_workload_plan(

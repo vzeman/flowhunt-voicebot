@@ -101,6 +101,8 @@ class Settings:
     agent_task_responded_event_retention: int = env_int("VOICEBOT_AGENT_TASK_RESPONDED_EVENT_RETENTION", 10000)
     worker_queue_store_provider: str = os.getenv("VOICEBOT_WORKER_QUEUE_STORE_PROVIDER", "json").strip().lower()
     worker_queue_store_path: str = os.getenv("VOICEBOT_WORKER_QUEUE_STORE_PATH", "/data/worker_queue.json")
+    workspace_access_control_enabled: bool = env_bool("VOICEBOT_WORKSPACE_ACCESS_CONTROL_ENABLED", False)
+    allowed_workspace_ids: tuple[str, ...] = env_csv_tuple("VOICEBOT_ALLOWED_WORKSPACE_IDS")
     transcript_dir: str = os.getenv("VOICEBOT_TRANSCRIPT_DIR", "/data/transcripts")
     voicebot_session_store_provider: str = os.getenv("VOICEBOT_SESSION_STORE_PROVIDER", "json").strip().lower()
     voicebot_session_store_path: str = os.getenv("VOICEBOT_SESSION_STORE_PATH", "/data/voicebot_sessions.json")

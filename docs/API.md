@@ -12,6 +12,12 @@ http://127.0.0.1:8080
 All request and response bodies are JSON unless noted otherwise. API responses
 that include secrets return redacted metadata instead of secret values.
 
+Workspace-scoped product endpoints under `/workspaces/{workspace_id}/...` can
+be guarded by an internal allow-list while the service is embedded into
+FlowHunt. Set `VOICEBOT_WORKSPACE_ACCESS_CONTROL_ENABLED=true` and
+`VOICEBOT_ALLOWED_WORKSPACE_IDS=workspace-1,workspace-2` to reject other
+workspace IDs with `403`.
+
 ## Common Objects
 
 ### Event
@@ -168,8 +174,9 @@ Response:
 ## Voicebot Admin
 
 These prototype product-admin endpoints manage workspace-scoped voicebot
-records in the local process store. FlowHunt production should back the same
-contract with workspace-permission checks and database storage.
+records in the local process store. The route workspace is checked by the
+workspace access policy before records, channels, sessions, tasks, or provider
+config are read or mutated.
 
 ### GET `/workspaces/{workspace_id}/voicebots`
 

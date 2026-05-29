@@ -7,6 +7,8 @@ APIs and marks prototype-only endpoints.
 ## Principles
 
 - Public APIs are workspace-scoped.
+- Workspace-scoped product APIs pass through the configured workspace access
+  policy before reading or mutating voicebot data.
 - Admin/config APIs are separate from runtime session APIs.
 - Worker/internal APIs are not exposed as product APIs.
 - Prototype endpoints must be explicitly marked for removal or internal-only
@@ -35,6 +37,12 @@ must start with `/`; and endpoints marked as not workspace-scoped must use
 `scope_source=none`.
 
 ## Admin APIs
+
+Enable the local workspace allow-list with
+`VOICEBOT_WORKSPACE_ACCESS_CONTROL_ENABLED=true` and set
+`VOICEBOT_ALLOWED_WORKSPACE_IDS` to a comma-separated list of workspace IDs.
+This is the integration hook for FlowHunt's workspace permission layer; when it
+is disabled, local development keeps accepting any non-empty workspace ID.
 
 - `GET /workspaces/{workspace_id}/voicebots`
 - `POST /workspaces/{workspace_id}/voicebots`

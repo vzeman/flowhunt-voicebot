@@ -286,6 +286,15 @@ Returns in-memory event timeline entries for the session. Query parameters:
 Returns transcript events persisted for the session id. Query parameters:
 `after` skips already-seen event ids and `limit` defaults to 200.
 
+## Voicebot External Tasks
+
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/tasks`
+
+Lists delegated subagent/external work for one voicebot. Optional query
+parameters: `session_id` narrows the list to one call session and `status`
+narrows it to a task lifecycle state such as `running`, `completed`, or
+`failed`.
+
 ## Calls
 
 ### GET `/calls`

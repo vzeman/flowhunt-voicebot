@@ -92,6 +92,8 @@ class Settings:
     event_store_path: str = os.getenv("VOICEBOT_EVENT_STORE_PATH", "/data/events/events.jsonl")
     agent_task_responded_event_retention: int = env_int("VOICEBOT_AGENT_TASK_RESPONDED_EVENT_RETENTION", 10000)
     transcript_dir: str = os.getenv("VOICEBOT_TRANSCRIPT_DIR", "/data/transcripts")
+    voicebot_session_store_provider: str = os.getenv("VOICEBOT_SESSION_STORE_PROVIDER", "json").strip().lower()
+    voicebot_session_store_path: str = os.getenv("VOICEBOT_SESSION_STORE_PATH", "/data/voicebot_sessions.json")
     sip_trunk_registry_path: str = os.getenv("VOICEBOT_SIP_TRUNK_REGISTRY_PATH", "/data/sip_trunks.json")
     sip_trunk_pjsip_include_path: str = os.getenv(
         "VOICEBOT_SIP_TRUNK_PJSIP_INCLUDE_PATH",

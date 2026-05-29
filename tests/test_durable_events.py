@@ -6,8 +6,9 @@ import unittest
 
 from voicebot.config import Settings
 from voicebot.events import EventStore, JsonEventStore, event_from_dict
-from voicebot.runtime_storage import build_event_store
+from voicebot.runtime_storage import build_event_store, build_voicebot_session_store
 from voicebot.transcripts import TranscriptStore
+from voicebot.workspace_model import JsonVoicebotSessionStore, VoicebotSessionRecord, VoicebotSessionStore
 
 
 class DurableEventTests(unittest.TestCase):
@@ -184,6 +185,28 @@ class DurableEventTests(unittest.TestCase):
 
         self.assertIsInstance(store, EventStore)
         self.assertNotIsInstance(store, JsonEventStore)
+
+    def test_runtime_builder_selects_json_voicebot_session_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = Settings(
+                voicebot_session_store_provider="json",
+                voicebot_session_store_path=f"{directory}/sessions.json",
+            )
+
+            store = build_voicebot_session_store(settings)
+            store.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1"))
+            reloaded = build_voicebot_session_store(settings)
+
+        self.assertIsInstance(store, JsonVoicebotSessionStore)
+        self.assertEqual([session.session_id for session in reloaded.list()], ["session-1"])
+
+    def test_runtime_builder_can_select_memory_voicebot_session_store(self) -> None:
+        settings = Settings(voicebot_session_store_provider="memory")
+
+        store = build_voicebot_session_store(settings)
+
+        self.assertIsInstance(store, VoicebotSessionStore)
+        self.assertNotIsInstance(store, JsonVoicebotSessionStore)
 
 
 if __name__ == "__main__":

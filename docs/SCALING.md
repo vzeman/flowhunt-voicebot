@@ -57,11 +57,14 @@ for FlowHunt deployment orchestration; it does not enqueue work itself.
 
 `POST /scaling/workers/heartbeat` records process-local worker presence for a
 worker id, role, queue, optional workspace/voicebot affinity, capacity, and
-status. `GET /scaling/workers` lists active workers, `GET /scaling/capacity`
-summarizes active capacity by role, `POST /scaling/workers/{worker_id}/drain`
-marks a worker as draining, and `DELETE /scaling/workers/{worker_id}` removes a
-presence record. This API is a runtime contract for orchestration; production
-should back the same shape with Redis or FlowHunt shared state.
+status. `GET /scaling/workers` lists active workers and can filter by role,
+workspace, and voicebot. `GET /scaling/capacity` summarizes active capacity by
+role and can also filter by workspace and voicebot. Global workers with no
+workspace or voicebot affinity are included in narrower summaries because they
+can serve any voicebot. `POST /scaling/workers/{worker_id}/drain` marks a worker
+as draining, and `DELETE /scaling/workers/{worker_id}` removes a presence
+record. This API is a runtime contract for orchestration; production should back
+the same shape with Redis or FlowHunt shared state.
 
 ## Shared State
 

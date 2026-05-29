@@ -644,12 +644,16 @@ def create_app(
         return {"worker": worker.as_dict()}
 
     @app.get("/scaling/workers")
-    def scaling_worker_list(role: str | None = None, workspace_id: str | None = None) -> dict[str, Any]:
+    def scaling_worker_list(
+        role: str | None = None,
+        workspace_id: str | None = None,
+        voicebot_id: str | None = None,
+    ) -> dict[str, Any]:
         try:
             worker_role = validated_worker_role(role) if role else None
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
-        workers = scaling_workers.active(role=worker_role, workspace_id=workspace_id)
+        workers = scaling_workers.active(role=worker_role, workspace_id=workspace_id, voicebot_id=voicebot_id)
         return {"workers": [worker.as_dict() for worker in workers]}
 
     @app.post("/scaling/workers/{worker_id}/drain")
@@ -665,8 +669,8 @@ def create_app(
         return {"removed": scaling_workers.remove(worker_id)}
 
     @app.get("/scaling/capacity")
-    def scaling_capacity(workspace_id: str | None = None) -> dict[str, Any]:
-        return scaling_workers.capacity_summary(workspace_id=workspace_id)
+    def scaling_capacity(workspace_id: str | None = None, voicebot_id: str | None = None) -> dict[str, Any]:
+        return scaling_workers.capacity_summary(workspace_id=workspace_id, voicebot_id=voicebot_id)
 
     def provider_choice_from_request(family: str, request, workspace_id: str) -> ProviderChoice:
         secret_ref = None

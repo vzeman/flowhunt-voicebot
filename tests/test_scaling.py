@@ -157,6 +157,38 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(summary["roles"]["agent_worker"], {"workers": 1, "capacity": 2})
         self.assertNotIn("tts_worker", summary["roles"])
 
+    def test_worker_registry_filters_capacity_by_voicebot_affinity(self) -> None:
+        registry = WorkerRegistry(heartbeat_ttl_seconds=30)
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        registry.heartbeat(WorkerInstance("agent-global", "agent_worker", "voicebot.agent", capacity=4), now)
+        registry.heartbeat(
+            WorkerInstance(
+                "agent-voicebot-1",
+                "agent_worker",
+                "voicebot.agent",
+                workspace_id="workspace-1",
+                voicebot_id="voicebot-1",
+                capacity=2,
+            ),
+            now,
+        )
+        registry.heartbeat(
+            WorkerInstance(
+                "agent-voicebot-2",
+                "agent_worker",
+                "voicebot.agent",
+                workspace_id="workspace-1",
+                voicebot_id="voicebot-2",
+                capacity=8,
+            ),
+            now,
+        )
+
+        summary = registry.capacity_summary(workspace_id="workspace-1", voicebot_id="voicebot-1", now=now)
+
+        self.assertEqual(summary["voicebot_id"], "voicebot-1")
+        self.assertEqual(summary["roles"]["agent_worker"], {"workers": 2, "capacity": 6})
+
     def test_scaling_topology_endpoint_returns_runtime_topology(self) -> None:
         client = self.build_client()
 
@@ -197,6 +229,7 @@ class ScalingTests(unittest.TestCase):
             },
         )
         list_response = client.get("/scaling/workers?role=agent_worker&workspace_id=workspace-1")
+        voicebot_capacity = client.get("/scaling/capacity?workspace_id=workspace-1&voicebot_id=voicebot-1")
         capacity = client.get("/scaling/capacity?workspace_id=workspace-1")
         drain = client.post("/scaling/workers/agent-1/drain")
         after_drain = client.get("/scaling/workers?role=agent_worker&workspace_id=workspace-1")
@@ -205,6 +238,7 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(heartbeat.status_code, 200)
         self.assertEqual(heartbeat.json()["worker"]["worker_id"], "agent-1")
         self.assertEqual([worker["worker_id"] for worker in list_response.json()["workers"]], ["agent-1"])
+        self.assertEqual(voicebot_capacity.json()["voicebot_id"], "voicebot-1")
         self.assertEqual(capacity.json()["roles"]["agent_worker"], {"workers": 1, "capacity": 3})
         self.assertEqual(drain.json()["worker"]["status"], "draining")
         self.assertEqual(after_drain.json()["workers"], [])

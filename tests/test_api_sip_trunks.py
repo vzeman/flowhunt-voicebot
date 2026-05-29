@@ -68,6 +68,7 @@ class ApiSipTrunkTests(unittest.TestCase):
                     "host": "sip.example.com",
                     "user": "user-1",
                     "password": "secret",
+                    "auth_user": "auth-1",
                     "display_name": "Customer 1",
                 },
             )
@@ -75,6 +76,7 @@ class ApiSipTrunkTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             payload = response.json()
             self.assertEqual(payload["trunk"]["password"], {"configured": True, "redacted": True})
+            self.assertEqual(payload["trunk"]["auth_user"], "auth-1")
             self.assertEqual(
                 asterisk.commands,
                 ["pjsip reload", "pjsip send register trunk-customer-1-reg"],

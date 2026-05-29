@@ -223,7 +223,30 @@ class PlaybackControlTests(unittest.TestCase):
             session.submit_agent_response(AgentResponse("call-1", "Old answer.", response_to_event_id=request.id))
 
             event_types = [event.type for event in events.list_events(call_id="call-1")]
-            self.assertIn("agent_response_deferred", event_types)
+            self.assertIn("agent_response_dropped", event_types)
+            self.assertNotIn("agent_response_queued", event_types)
+            self.assertFalse(session.playback.is_active())
+        finally:
+            session.stop()
+
+    def test_response_is_dropped_after_newer_user_speech_even_without_transcript(self) -> None:
+        events = EventStore(max_context_events=30)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(deferred_response_wait_seconds=1.0),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"text": "old question"})
+            session._remember_response_generation(request.id)
+            events.append("call-1", "user_speech_started", {"turn_id": 2})
+
+            session.submit_agent_response(AgentResponse("call-1", "Old answer.", response_to_event_id=request.id))
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
             self.assertIn("agent_response_dropped", event_types)
             self.assertNotIn("agent_response_queued", event_types)
             self.assertFalse(session.playback.is_active())

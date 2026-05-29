@@ -153,6 +153,9 @@ class SipTrunkRequest(BaseModel):
     host: str
     user: str
     password: str
+    auth_user: str = ""
+    contact_user: str = ""
+    from_user: str = ""
     display_name: str = ""
     enabled: bool = True
     codecs: list[str] = Field(default_factory=lambda: ["ulaw", "alaw", "slin"])

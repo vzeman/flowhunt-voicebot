@@ -94,6 +94,7 @@ services:
       AMI_USERNAME: voicebot
       AMI_PASSWORD: ${AMI_PASSWORD:-voicebot-local-dev}
       PJSIP_DYNAMIC_INCLUDE: /data/asterisk/pjsip-trunks.conf
+      PJSIP_BIND: ${PJSIP_BIND:-0.0.0.0:5060}
     volumes:
       - voicebot-data:/data
       - ./asterisk/docker-entrypoint.sh:/docker-entrypoint.sh:ro

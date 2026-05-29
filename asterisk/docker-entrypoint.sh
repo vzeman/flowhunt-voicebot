@@ -5,6 +5,7 @@ set -eu
 : "${AMI_USERNAME:=voicebot}"
 : "${AMI_PASSWORD:=voicebot-local-dev}"
 : "${PJSIP_DYNAMIC_INCLUDE:=/data/asterisk/pjsip-trunks.conf}"
+: "${PJSIP_BIND:=0.0.0.0:5060}"
 
 mkdir -p "$(dirname "$PJSIP_DYNAMIC_INCLUDE")"
 
@@ -12,7 +13,7 @@ cat >/etc/asterisk/pjsip.conf <<EOF
 [transport-udp]
 type=transport
 protocol=udp
-bind=0.0.0.0:5060
+bind=${PJSIP_BIND}
 
 #include ${PJSIP_DYNAMIC_INCLUDE}
 EOF

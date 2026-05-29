@@ -21,6 +21,9 @@ class SipTrunkStoreTests(unittest.TestCase):
                     host="sip.example.com",
                     user="user-1",
                     password="secret",
+                    auth_user="auth-1",
+                    contact_user="contact-1",
+                    from_user="from-1",
                     display_name="Customer 1",
                 )
             )
@@ -30,6 +33,10 @@ class SipTrunkStoreTests(unittest.TestCase):
             rendered = Path(directory, "asterisk", "pjsip-trunks.conf").read_text(encoding="utf-8")
             self.assertIn("[trunk-customer-1-reg]", rendered)
             self.assertIn("endpoint=trunk-customer-1-endpoint", rendered)
+            self.assertIn("client_uri=sip:user-1@sip.example.com", rendered)
+            self.assertIn("username=auth-1", rendered)
+            self.assertIn("contact_user=contact-1", rendered)
+            self.assertIn("from_user=from-1", rendered)
             self.assertIn("line=yes", rendered)
             self.assertIn("password=secret", rendered)
 

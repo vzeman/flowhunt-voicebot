@@ -238,9 +238,20 @@ class WebRTCCallSession:
             {"text": text, "response_to_event_id": response.response_to_event_id},
         )
         startup_response = self._is_startup_response(response.response_to_event_id)
+        if self._has_newer_user_activity(response.response_to_event_id) and not startup_response:
+            self.events.append(
+                self.call_id,
+                "agent_response_dropped",
+                {
+                    "reason": "stale_response_after_new_caller_speech",
+                    "response_to_event_id": response.response_to_event_id,
+                },
+            )
+            return event
+
         if self.recording_event.is_set() and not startup_response:
             self._defer_until_caller_silence(response.response_to_event_id, "caller_is_speaking")
-            if not self.recording_event.is_set() and not self._has_newer_user_transcript(response.response_to_event_id):
+            if not self.recording_event.is_set() and not self._has_newer_user_activity(response.response_to_event_id):
                 return self.submit_agent_response(response)
             self.events.append(
                 self.call_id,
@@ -252,7 +263,7 @@ class WebRTCCallSession:
         request_generation = self._response_generation(response.response_to_event_id)
         if (
             request_generation != self._current_interrupt_generation()
-            and self._has_newer_user_transcript(response.response_to_event_id)
+            and self._has_newer_user_activity(response.response_to_event_id)
             and not startup_response
         ):
             self.events.append(
@@ -329,6 +340,17 @@ class WebRTCCallSession:
             )
             raise RuntimeError("TTS produced no audio")
 
+        if self._has_newer_user_activity(response.response_to_event_id) and not startup_response:
+            self.events.append(
+                self.call_id,
+                "agent_response_dropped",
+                {
+                    "reason": "stale_response_after_new_caller_speech",
+                    "response_to_event_id": response.response_to_event_id,
+                },
+            )
+            return event
+
         if (self.recording_event.is_set() or request_generation != self._current_interrupt_generation()) and not startup_response:
             if self.recording_event.is_set():
                 self._defer_until_caller_silence(response.response_to_event_id, "caller_started_speaking_during_tts")
@@ -336,7 +358,7 @@ class WebRTCCallSession:
                 not self.recording_event.is_set()
                 and (
                     request_generation == self._current_interrupt_generation()
-                    or not self._has_newer_user_transcript(response.response_to_event_id)
+                    or not self._has_newer_user_activity(response.response_to_event_id)
                 )
             ):
                 for chunk in audio_chunks:
@@ -636,6 +658,14 @@ class WebRTCCallSession:
             return False
         return any(
             event.id > event_id and event.type == "user_transcript"
+            for event in self.events.list_events(call_id=self.call_id, limit=200)
+        )
+
+    def _has_newer_user_activity(self, event_id: int | None) -> bool:
+        if event_id is None:
+            return False
+        return any(
+            event.id > event_id and event.type in {"user_speech_started", "user_transcript"}
             for event in self.events.list_events(call_id=self.call_id, limit=200)
         )
 

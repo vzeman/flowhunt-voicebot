@@ -17,6 +17,9 @@ class SipTrunk:
     host: str
     user: str
     password: str
+    auth_user: str = ""
+    contact_user: str = ""
+    from_user: str = ""
     display_name: str = ""
     enabled: bool = True
     codecs: tuple[str, ...] = DEFAULT_CODECS
@@ -49,6 +52,9 @@ class SipTrunk:
             "trunk_id": self.trunk_id,
             "host": self.host,
             "user": self.user,
+            "auth_user": self.auth_user or self.user,
+            "contact_user": self.contact_user or self.user,
+            "from_user": self.from_user or self.user,
             "display_name": self.display_name,
             "enabled": self.enabled,
             "codecs": list(self.codecs),
@@ -66,6 +72,9 @@ class SipTrunk:
             "host": self.host,
             "user": self.user,
             "password": self.password,
+            "auth_user": self.auth_user,
+            "contact_user": self.contact_user,
+            "from_user": self.from_user,
             "display_name": self.display_name,
             "enabled": self.enabled,
             "codecs": list(self.codecs),
@@ -146,6 +155,9 @@ def trunk_from_dict(data: dict[str, Any]) -> SipTrunk:
         host=str(data["host"]),
         user=str(data["user"]),
         password=str(data.get("password") or ""),
+        auth_user=str(data.get("auth_user") or ""),
+        contact_user=str(data.get("contact_user") or ""),
+        from_user=str(data.get("from_user") or ""),
         display_name=str(data.get("display_name") or ""),
         enabled=bool(data.get("enabled", True)),
         codecs=tuple(str(codec) for codec in data.get("codecs", DEFAULT_CODECS)),
@@ -163,6 +175,9 @@ def render_pjsip_trunks(trunks: list[SipTrunk]) -> str:
     for trunk in trunks:
         validate_trunk(trunk)
         allow = ",".join(trunk.codecs)
+        auth_user = trunk.auth_user or trunk.user
+        contact_user = trunk.contact_user or trunk.user
+        from_user = trunk.from_user or trunk.user
         lines.extend(
             [
                 f"[{trunk.registration_name}]",
@@ -171,7 +186,7 @@ def render_pjsip_trunks(trunks: list[SipTrunk]) -> str:
                 f"outbound_auth={trunk.auth_name}",
                 f"server_uri=sip:{trunk.host}",
                 f"client_uri=sip:{trunk.user}@{trunk.host}",
-                f"contact_user={trunk.user}",
+                f"contact_user={contact_user}",
                 f"endpoint={trunk.endpoint_name}",
                 "line=yes",
                 f"retry_interval={trunk.retry_interval}",
@@ -181,7 +196,7 @@ def render_pjsip_trunks(trunks: list[SipTrunk]) -> str:
                 f"[{trunk.auth_name}]",
                 "type=auth",
                 "auth_type=userpass",
-                f"username={trunk.user}",
+                f"username={auth_user}",
                 f"password={trunk.password}",
                 "",
                 f"[{trunk.aor_name}]",
@@ -196,7 +211,7 @@ def render_pjsip_trunks(trunks: list[SipTrunk]) -> str:
                 f"allow={allow}",
                 f"outbound_auth={trunk.auth_name}",
                 f"aors={trunk.aor_name}",
-                f"from_user={trunk.user}",
+                f"from_user={from_user}",
                 f"from_domain={trunk.host}",
                 "direct_media=no",
                 "rtp_symmetric=yes",
@@ -219,6 +234,9 @@ def validate_trunk(trunk: SipTrunk) -> None:
     for label, value in {
         "host": trunk.host,
         "user": trunk.user,
+        "auth_user": trunk.auth_user,
+        "contact_user": trunk.contact_user,
+        "from_user": trunk.from_user,
         "password": trunk.password,
         "display_name": trunk.display_name,
     }.items():

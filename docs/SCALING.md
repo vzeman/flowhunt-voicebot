@@ -62,6 +62,13 @@ creation timestamp, and retry attempt. The routing partition key keeps all work
 for a session addressable after worker restart, while the provider key supports
 provider-specific rate limits.
 
+`WorkerQueueStore` is the local lifecycle contract for these envelopes. It can
+enqueue pending items, claim them by queue with an owner and TTL, acknowledge
+completed work, release work back to pending, expire abandoned claims, and
+produce grouped pending/claimed snapshots. It is intentionally in-memory; the
+same lifecycle should move to Redis streams, a database queue, or FlowHunt
+shared infrastructure for production.
+
 `POST /scaling/workers/heartbeat` records process-local worker presence for a
 worker id, role, queue, optional workspace/voicebot affinity, capacity, and
 status. `GET /scaling/workers` lists active workers and can filter by role,

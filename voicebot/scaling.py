@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections import deque
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, get_args
 
@@ -283,6 +284,117 @@ class WorkerQueueEnvelope:
             "trace_id": self.trace_id,
             "created_at": self.created_at,
             "attempt": self.attempt,
+        }
+
+
+class WorkerQueueStore:
+    def __init__(self) -> None:
+        self._pending: dict[str, deque[WorkerQueueEnvelope]] = {}
+        self._claimed: dict[str, tuple[WorkerQueueEnvelope, str, datetime]] = {}
+        self._known_item_ids: set[str] = set()
+
+    def enqueue(self, envelope: WorkerQueueEnvelope) -> WorkerQueueEnvelope:
+        if envelope.item_id in self._known_item_ids:
+            raise ValueError(f"work item already exists: {envelope.item_id}")
+        self._pending.setdefault(envelope.queue, deque()).append(envelope)
+        self._known_item_ids.add(envelope.item_id)
+        return envelope
+
+    def claim(
+        self,
+        queue: str,
+        owner: str,
+        *,
+        limit: int = 1,
+        ttl_seconds: float = 30.0,
+        now: datetime | None = None,
+    ) -> tuple[WorkerQueueEnvelope, ...]:
+        if not queue.strip():
+            raise ValueError("queue is required")
+        if not owner.strip():
+            raise ValueError("owner is required")
+        if limit < 1:
+            raise ValueError("limit must be greater than or equal to 1")
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+        current = now or datetime.now(UTC)
+        self.expire(current)
+        pending = self._pending.setdefault(queue, deque())
+        claimed: list[WorkerQueueEnvelope] = []
+        while pending and len(claimed) < limit:
+            envelope = pending.popleft()
+            updated = replace(envelope, attempt=envelope.attempt + 1)
+            self._claimed[updated.item_id] = (updated, owner, current + timedelta(seconds=ttl_seconds))
+            claimed.append(updated)
+        return tuple(claimed)
+
+    def ack(self, item_id: str, owner: str | None = None) -> WorkerQueueEnvelope | None:
+        claim = self._claimed.get(item_id)
+        if claim is None:
+            return None
+        envelope, claim_owner, _expires_at = claim
+        if owner is not None and claim_owner != owner:
+            return None
+        self._claimed.pop(item_id, None)
+        self._known_item_ids.discard(item_id)
+        return envelope
+
+    def release(self, item_id: str, owner: str | None = None) -> WorkerQueueEnvelope | None:
+        claim = self._claimed.get(item_id)
+        if claim is None:
+            return None
+        envelope, claim_owner, _expires_at = claim
+        if owner is not None and claim_owner != owner:
+            return None
+        self._claimed.pop(item_id, None)
+        self._pending.setdefault(envelope.queue, deque()).appendleft(envelope)
+        return envelope
+
+    def expire(self, now: datetime | None = None) -> tuple[WorkerQueueEnvelope, ...]:
+        current = now or datetime.now(UTC)
+        expired: list[WorkerQueueEnvelope] = []
+        for item_id, (envelope, _owner, expires_at) in list(self._claimed.items()):
+            if expires_at > current:
+                continue
+            self._claimed.pop(item_id, None)
+            self._pending.setdefault(envelope.queue, deque()).appendleft(envelope)
+            expired.append(envelope)
+        return tuple(expired)
+
+    def pending(self, queue: str | None = None) -> tuple[WorkerQueueEnvelope, ...]:
+        if queue is not None:
+            return tuple(self._pending.get(queue, ()))
+        items: list[WorkerQueueEnvelope] = []
+        for queue_name in sorted(self._pending):
+            items.extend(self._pending[queue_name])
+        return tuple(items)
+
+    def claimed(self, owner: str | None = None, now: datetime | None = None) -> tuple[dict[str, Any], ...]:
+        current = now or datetime.now(UTC)
+        self.expire(current)
+        claims = []
+        for envelope, claim_owner, expires_at in self._claimed.values():
+            if owner is not None and claim_owner != owner:
+                continue
+            claims.append(
+                {
+                    "item": envelope.as_dict(),
+                    "owner": claim_owner,
+                    "expires_in_seconds": max(0.0, (expires_at - current).total_seconds()),
+                }
+            )
+        return tuple(sorted(claims, key=lambda item: item["item"]["item_id"]))
+
+    def snapshot(self, now: datetime | None = None) -> dict[str, Any]:
+        current = now or datetime.now(UTC)
+        self.expire(current)
+        return {
+            "pending": {
+                queue: [envelope.as_dict() for envelope in envelopes]
+                for queue, envelopes in sorted(self._pending.items())
+                if envelopes
+            },
+            "claimed": list(self.claimed(now=current)),
         }
 
 

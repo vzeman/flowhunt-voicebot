@@ -120,6 +120,17 @@ exceeded, and exposes buffered sample/duration diagnostics. This gives SIP,
 WebRTC, and future transports a shared primitive before turn detection without
 mixing jitter handling into agent or STT logic.
 
+The WebRTC receive path now feeds remote audio through `AudioJitterBuffer`
+before VAD. Runtime settings:
+
+- `VOICEBOT_WEBRTC_JITTER_BUFFER_ENABLED=true|false`
+- `VOICEBOT_WEBRTC_JITTER_TARGET_DELAY_MS=60`
+- `VOICEBOT_WEBRTC_JITTER_MAX_DELAY_MS=200`
+
+Direct unit-test calls to `process_audio_block()` bypass the jitter buffer;
+live WebRTC tracks use `process_remote_audio_block()` so packet timing
+stabilization stays transport-local.
+
 ## Debug Capture
 
 `DebugAudioCapture` is a gated in-memory ring buffer for recent normalized audio
@@ -135,6 +146,6 @@ caller audio by default.
 1. Replace duplicated SIP and WebRTC VAD loops with `TurnDetector`.
 2. Emit metrics for every turn decision from `TurnDetectionResult.metric_data()`.
 3. Add a pluggable VAD provider interface.
-4. Wire jitter buffer and audio normalization stages into SIP/WebRTC media loops.
+4. Wire jitter buffer into the SIP AudioSocket media loop.
 5. Wire debug capture behind runtime/workspace configuration.
 6. Add stronger echo suppression strategy for real deployments.

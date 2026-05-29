@@ -20,6 +20,7 @@ from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, AudioOutputFrame, PlaybackFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
+from .realtime_audio import AudioJitterBuffer, JitterBufferConfig
 from .transports import WEBRTC_CAPABILITIES, StaticMediaTransport
 from .workspace_model import VoicebotSessionRecord, VoicebotSessionStore
 
@@ -129,6 +130,18 @@ class WebRTCCallSession:
         self._active_turn = 0
         self._active_turn_lock = threading.Lock()
         self._vad_state = _VadState()
+        self._jitter_buffer = (
+            AudioJitterBuffer(
+                JitterBufferConfig(
+                    sample_rate=STT_SAMPLE_RATE,
+                    frame_ms=settings.packet_ms,
+                    target_delay_ms=settings.webrtc_jitter_target_delay_ms,
+                    max_delay_ms=settings.webrtc_jitter_max_delay_ms,
+                )
+            )
+            if settings.webrtc_jitter_buffer_enabled
+            else None
+        )
         self._speech_worker = threading.Thread(target=self._speech_worker_loop, daemon=True)
         self._speech_worker.start()
 
@@ -161,11 +174,25 @@ class WebRTCCallSession:
         try:
             while not self.stop_event.is_set():
                 frame = await track.recv()
-                self.process_audio_block(audio_frame_to_call_audio(frame))
+                self.process_remote_audio_block(audio_frame_to_call_audio(frame))
         except Exception as exc:
             if not self.stop_event.is_set():
                 self.events.append(self.call_id, "transport_error", {"transport": "webrtc", "error": str(exc)})
                 self.stop()
+
+    def process_remote_audio_block(self, block: np.ndarray) -> int:
+        if self._jitter_buffer is None:
+            self.process_audio_block(block)
+            return 1 if block.size else 0
+        self._jitter_buffer.push(block)
+        processed = 0
+        while True:
+            frame = self._jitter_buffer.pop()
+            if frame is None:
+                break
+            self.process_audio_block(frame)
+            processed += 1
+        return processed
 
     def process_audio_block(self, block: np.ndarray) -> None:
         if block.size == 0 or self.stop_event.is_set():
@@ -410,6 +437,7 @@ class WebRTCCallSession:
             "playback_active": self.playback.is_active(),
             "stopped": self.stop_event.is_set(),
             "active_turn": self._current_turn(),
+            "jitter_buffer": self._jitter_buffer_snapshot(),
             "route": self.descriptor.route.as_event_data(),
             "capabilities": {
                 "call_control": sorted(self.descriptor.capabilities.call_control),
@@ -422,8 +450,21 @@ class WebRTCCallSession:
         if self.stop_event.is_set():
             return
         self.stop_event.set()
+        if self._jitter_buffer is not None:
+            self._jitter_buffer.clear()
         self.connection_state = "closed"
         self.events.append(self.call_id, "call_ended", {"session_id": self.session_id, **self.descriptor.lifecycle_event_data()})
+
+    def _jitter_buffer_snapshot(self) -> dict[str, Any]:
+        if self._jitter_buffer is None:
+            return {"enabled": False, "buffered_ms": 0, "buffered_samples": 0}
+        return {
+            "enabled": True,
+            "buffered_ms": self._jitter_buffer.buffered_ms(),
+            "buffered_samples": self._jitter_buffer.buffered_samples(),
+            "target_delay_ms": self._jitter_buffer.config.target_delay_ms,
+            "max_delay_ms": self._jitter_buffer.config.max_delay_ms,
+        }
 
     def _speech_worker_loop(self) -> None:
         while not self.stop_event.is_set():

@@ -233,6 +233,63 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertEqual(snapshot["route"]["workspace_id"], "workspace-1")
         self.assertIn("hangup", snapshot["capabilities"]["call_control"])
 
+    def test_webrtc_remote_audio_uses_jitter_buffer_before_vad(self) -> None:
+        events = EventStore(max_context_events=20)
+        session = WebRTCCallSession(
+            call_id="webrtc-call-1",
+            session_id="session-1",
+            settings=Settings(
+                greet_on_connect=False,
+                start_threshold=0.1,
+                stop_threshold=0.05,
+                vad_start_ms=0,
+                packet_ms=20,
+                webrtc_jitter_target_delay_ms=40,
+                webrtc_jitter_max_delay_ms=80,
+            ),
+            event_store=events,
+            stt=FakeSTT(),
+            tts=FakeTTS(),
+        )
+        self.addCleanup(session.stop)
+        block = np.full(320, 0.4, dtype=np.float32)
+
+        self.assertEqual(session.process_remote_audio_block(block), 0)
+        self.assertEqual(session.process_remote_audio_block(block), 0)
+        self.assertEqual(session.process_remote_audio_block(block), 1)
+
+        self.assertEqual(
+            [event.type for event in events.list_events(call_id="webrtc-call-1") if event.type == "user_speech_started"],
+            ["user_speech_started"],
+        )
+        self.assertTrue(session.snapshot()["jitter_buffer"]["enabled"])
+
+    def test_webrtc_remote_audio_can_bypass_jitter_buffer(self) -> None:
+        events = EventStore(max_context_events=20)
+        session = WebRTCCallSession(
+            call_id="webrtc-call-1",
+            session_id="session-1",
+            settings=Settings(
+                greet_on_connect=False,
+                start_threshold=0.1,
+                stop_threshold=0.05,
+                vad_start_ms=0,
+                webrtc_jitter_buffer_enabled=False,
+            ),
+            event_store=events,
+            stt=FakeSTT(),
+            tts=FakeTTS(),
+        )
+        self.addCleanup(session.stop)
+
+        self.assertEqual(session.process_remote_audio_block(np.full(160, 0.4, dtype=np.float32)), 1)
+
+        self.assertFalse(session.snapshot()["jitter_buffer"]["enabled"])
+        self.assertEqual(
+            [event.type for event in events.list_events(call_id="webrtc-call-1") if event.type == "user_speech_started"],
+            ["user_speech_started"],
+        )
+
     def test_webrtc_vad_decisions_emit_runtime_metrics(self) -> None:
         events = EventStore(max_context_events=20)
         session = WebRTCCallSession(

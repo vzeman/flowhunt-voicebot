@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 
 from voicebot.workspace_model import (
     ChannelResolver,
+    JsonVoicebotSessionStore,
     VoicebotChannelBinding,
     VoicebotSessionRecord,
     VoicebotSessionStore,
@@ -239,6 +242,55 @@ class WorkspaceModelTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "across voicebots"):
             store.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-2"))
+
+    def test_json_session_store_persists_sessions_and_reload_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/sessions.json"
+            first = JsonVoicebotSessionStore(path)
+            first.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1", channel_id="channel-1"))
+            ended = first.end("session-1", "workspace-1")
+
+            reloaded = JsonVoicebotSessionStore(path)
+
+        self.assertEqual(ended.status, "ended")
+        self.assertEqual(reloaded.load_diagnostics["loaded_sessions"], 1)
+        self.assertEqual(reloaded.get("session-1", "workspace-1").status, "ended")
+        self.assertEqual(reloaded.get("session-1").channel_id, "channel-1")
+
+    def test_json_session_store_skips_invalid_and_duplicate_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/sessions.json"
+            session = VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "version": 1,
+                        "sessions": [
+                            session.as_dict(),
+                            {**session.as_dict(), "workspace_id": "workspace-2"},
+                            {"session_id": "bad"},
+                        ],
+                    },
+                    handle,
+                )
+
+            reloaded = JsonVoicebotSessionStore(path)
+
+        self.assertEqual(reloaded.load_diagnostics["loaded_sessions"], 1)
+        self.assertEqual(reloaded.load_diagnostics["skipped_duplicate_session_ids"], 1)
+        self.assertEqual(reloaded.load_diagnostics["skipped_invalid_sessions"], 1)
+        self.assertEqual([session.session_id for session in reloaded.list("workspace-1")], ["session-1"])
+
+    def test_json_session_store_reports_malformed_json(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/sessions.json"
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("{bad json}")
+
+            reloaded = JsonVoicebotSessionStore(path)
+
+        self.assertEqual(reloaded.load_diagnostics["skipped_malformed_json"], 1)
+        self.assertEqual(reloaded.list(), ())
 
 
 if __name__ == "__main__":

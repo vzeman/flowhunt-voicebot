@@ -43,6 +43,15 @@ whenever the transport route is known.
 `TranscriptStore` already persists per-call transcript/event JSONL files and
 reports corruption statistics. It remains the call transcript surface.
 
+## Sessions
+
+`JsonVoicebotSessionStore` persists normalized voicebot session records,
+including workspace, voicebot, channel, external session, status, timestamps,
+and metadata fields. It exposes `load_diagnostics` with loaded session count,
+malformed JSON count, skipped invalid rows, and skipped duplicate session ids.
+Duplicate session ids use first-row-wins behavior during reload so corrupted
+local files cannot silently move a session across workspace or voicebot scope.
+
 ## External Tasks
 
 `JsonSubagentTaskStore` persists delegated subagent tasks, including provider

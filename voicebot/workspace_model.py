@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import json
+from pathlib import Path
 from typing import Any, Literal, get_args
 
 
@@ -199,6 +201,67 @@ class VoicebotSessionStore:
         )
 
 
+class JsonVoicebotSessionStore(VoicebotSessionStore):
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.load_diagnostics: dict[str, int] = {
+            "loaded_sessions": 0,
+            "skipped_malformed_json": 0,
+            "skipped_invalid_sessions": 0,
+            "skipped_duplicate_session_ids": 0,
+        }
+        super().__init__()
+        self._load()
+
+    def save(self, session: VoicebotSessionRecord) -> VoicebotSessionRecord:
+        saved = super().save(session)
+        self._save()
+        return saved
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            raw = json.loads(self.path.read_text())
+        except (OSError, json.JSONDecodeError):
+            self.load_diagnostics["skipped_malformed_json"] += 1
+            return
+        seen: set[str] = set()
+        for item in raw.get("sessions", []):
+            try:
+                session = voicebot_session_from_dict(item)
+            except (KeyError, TypeError, ValueError):
+                self.load_diagnostics["skipped_invalid_sessions"] += 1
+                continue
+            if session.session_id in seen:
+                self.load_diagnostics["skipped_duplicate_session_ids"] += 1
+                continue
+            seen.add(session.session_id)
+            self._sessions[session.session_id] = session
+            self.load_diagnostics["loaded_sessions"] += 1
+
+    def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"version": 1, "sessions": [session.as_dict() for session in self.list()]}
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, sort_keys=True, indent=2))
+        tmp.replace(self.path)
+
+
+def voicebot_session_from_dict(data: dict[str, Any]) -> VoicebotSessionRecord:
+    return VoicebotSessionRecord(
+        session_id=str(data["session_id"]),
+        workspace_id=str(data["workspace_id"]),
+        voicebot_id=str(data["voicebot_id"]),
+        channel_id=_optional_str(data.get("channel_id")),
+        external_session_id=_optional_str(data.get("external_session_id")),
+        status=str(data.get("status", "active")),
+        started_at=str(data["started_at"]),
+        ended_at=_optional_str(data.get("ended_at")),
+        metadata=dict(data.get("metadata") or {}),
+    )
+
+
 def require_same_workspace(source: WorkspaceScope, target_workspace_id: str) -> None:
     if source.workspace_id != target_workspace_id:
         raise ValueError("cross-workspace voicebot operation is not allowed")
@@ -212,3 +275,10 @@ def _parse_aware_timestamp(value: str, field: str) -> datetime:
     if parsed.tzinfo is None:
         raise ValueError(f"{field} must include timezone")
     return parsed.astimezone(UTC)
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

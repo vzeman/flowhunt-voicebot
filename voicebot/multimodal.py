@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 
 Modality = Literal[
@@ -28,6 +28,18 @@ class MultimodalContent:
     text: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if self.modality not in get_args(Modality):
+            raise ValueError(f"unsupported modality: {self.modality}")
+        if self.direction not in get_args(ContentDirection):
+            raise ValueError(f"unsupported content direction: {self.direction}")
+        if self.mime_type is not None and not self.mime_type.strip():
+            raise ValueError("mime_type must not be blank")
+        if self.uri is not None and not self.uri.strip():
+            raise ValueError("uri must not be blank")
+        if self.text is not None and not self.text.strip():
+            raise ValueError("text must not be blank")
+
     def to_agent_part(self) -> dict[str, Any]:
         part = {
             "modality": self.modality,
@@ -49,6 +61,14 @@ class MultimodalContext:
     voicebot_id: str | None = None
     session_id: str | None = None
     parts: tuple[MultimodalContent, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.call_id.strip():
+            raise ValueError("call_id is required")
+        for field_name in ("workspace_id", "voicebot_id", "session_id"):
+            value = getattr(self, field_name)
+            if value is not None and not value.strip():
+                raise ValueError(f"{field_name} must not be blank")
 
     def add(self, part: MultimodalContent) -> "MultimodalContext":
         return MultimodalContext(
@@ -112,6 +132,15 @@ class MultimodalContextStore:
 class ModalityCapabilities:
     input: frozenset[Modality] = frozenset({"audio", "text"})
     output: frozenset[Modality] = frozenset({"audio", "text"})
+
+    def __post_init__(self) -> None:
+        supported = set(get_args(Modality))
+        invalid_input = sorted(modality for modality in self.input if modality not in supported)
+        invalid_output = sorted(modality for modality in self.output if modality not in supported)
+        if invalid_input:
+            raise ValueError(f"unsupported input modalities: {', '.join(invalid_input)}")
+        if invalid_output:
+            raise ValueError(f"unsupported output modalities: {', '.join(invalid_output)}")
 
     def supports_input(self, modality: Modality) -> bool:
         return modality in self.input

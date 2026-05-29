@@ -31,6 +31,10 @@ one content reference (`text`, `uri`, or metadata). This gives transports and
 provider adapters a shared validation path before they hand multimodal context to
 the session pipeline.
 
+The value objects also fail fast on unsupported modalities/directions, blank
+content references, blank context identifiers, and unsupported capability
+modalities, so invalid multimodal state cannot enter the context store.
+
 ## Design Rule
 
 Media/session orchestration should not know how a model consumes images or

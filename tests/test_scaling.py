@@ -59,6 +59,7 @@ class ScalingTests(unittest.TestCase):
         self.assertFalse(limiter.acquire("workspace-1"))
         limiter.release("workspace-1")
         self.assertTrue(limiter.acquire("workspace-1"))
+        self.assertEqual(limiter.snapshot(), {"max_inflight": 2, "inflight": {"workspace-1": 2}})
 
     def test_backpressure_rejects_invalid_limits_and_keys(self) -> None:
         with self.assertRaisesRegex(ValueError, "max_inflight"):
@@ -503,6 +504,32 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(after_drain.json()["workers"], [])
         self.assertTrue(removed.json()["removed"])
 
+    def test_scaling_backpressure_api_acquires_and_releases_provider_capacity(self) -> None:
+        client = self.build_client(Settings(scaling_backpressure_max_inflight=1))
+        request = {
+            "workspace_id": "workspace-1",
+            "voicebot_id": "voicebot-1",
+            "provider": "openai",
+        }
+
+        first = client.post("/scaling/backpressure/acquire", json=request)
+        second = client.post("/scaling/backpressure/acquire", json=request)
+        snapshot = client.get("/scaling/backpressure")
+        released = client.post("/scaling/backpressure/release", json=request)
+        third = client.post(
+            "/scaling/backpressure/acquire",
+            json={"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "session_id": "session-1"},
+        )
+
+        self.assertTrue(first.json()["acquired"])
+        self.assertEqual(first.json()["key"], "workspace-1:voicebot-1:openai")
+        self.assertFalse(second.json()["acquired"])
+        self.assertEqual(snapshot.json()["inflight"], {"workspace-1:voicebot-1:openai": 1})
+        self.assertTrue(released.json()["released"])
+        self.assertEqual(released.json()["inflight"], {})
+        self.assertTrue(third.json()["acquired"])
+        self.assertEqual(third.json()["key"], "workspace-1:voicebot-1:session-1")
+
     def test_scaling_worker_presence_api_rejects_invalid_role(self) -> None:
         client = self.build_client()
 
@@ -572,7 +599,7 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(invalid_claim.status_code, 400)
         self.assertIn("limit", invalid_claim.json()["detail"])
 
-    def build_client(self) -> TestClient:
+    def build_client(self, settings: Settings | None = None) -> TestClient:
         app = create_app(
             EventStore(max_context_events=20),
             CallRegistry(),
@@ -580,6 +607,7 @@ class ScalingTests(unittest.TestCase):
             WebSocketHub(),
             TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
             None,
+            settings=settings,
         )
         return TestClient(app)
 

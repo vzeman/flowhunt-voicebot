@@ -43,6 +43,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(result["call_state_store_path"], "/data/call_states.json")
         self.assertEqual(result["worker_registry_store_provider"], "json")
         self.assertEqual(result["worker_registry_store_path"], "/data/worker_registry.json")
+        self.assertEqual(result["scaling_backpressure_max_inflight"], 100)
         self.assertEqual(result["allowed_workspace_ids"], [])
 
     def test_agent_task_retention_can_be_configured(self) -> None:

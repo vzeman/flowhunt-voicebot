@@ -110,6 +110,7 @@ voicebot.
 - `/agent/tasks` is an internal worker lease API.
 - `/calls/state-store` is an internal runtime diagnostics API for persisted
   call/playback snapshots.
+- `/scaling/backpressure/*` is an internal worker capacity accounting API.
 - `/scaling/queue/*` is an internal worker queue lifecycle API.
 - `/webrtc/test` is a prototype local browser test app.
 

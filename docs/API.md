@@ -126,6 +126,24 @@ Response:
       "message": "event catalog is valid",
       "missing_event_types": [],
       "integrity_issues": []
+    },
+    "durable_storage": {
+      "ok": true,
+      "message": "durable storage is reachable",
+      "stores": {
+        "events": {
+          "kind": "JsonEventStore",
+          "path": "/data/events/events.jsonl",
+          "load_diagnostics": {
+            "loaded_events": 0,
+            "skipped_malformed_json": 0
+          },
+          "warning_count": 0,
+          "writable": true
+        }
+      },
+      "unwritable": [],
+      "warning_counts": {}
     }
   }
 }

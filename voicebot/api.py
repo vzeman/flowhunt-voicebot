@@ -247,6 +247,14 @@ def create_app(
             transcripts=transcripts,
             asterisk=asterisk,
             active_call_ids=registry.active_call_ids(),
+            storage_components={
+                "events": events,
+                "agent_tasks": tracker,
+                "call_states": registry.state_store,
+                "voicebot_sessions": voicebot_session_store,
+                "worker_queue": scaling_queue,
+                **({"subagent_tasks": subagent_coordinator.store} if subagent_coordinator is not None else {}),
+            },
         )
 
     @app.get("/calls")

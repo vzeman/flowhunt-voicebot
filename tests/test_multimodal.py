@@ -41,6 +41,18 @@ class MultimodalTests(unittest.TestCase):
             },
         )
 
+    def test_content_part_rejects_invalid_fields(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported modality"):
+            MultimodalContent("unknown", "input", text="hello")
+        with self.assertRaisesRegex(ValueError, "unsupported content direction"):
+            MultimodalContent("text", "sideways", text="hello")
+        with self.assertRaisesRegex(ValueError, "mime_type"):
+            MultimodalContent("file", "input", mime_type=" ", uri="s3://file")
+        with self.assertRaisesRegex(ValueError, "uri"):
+            MultimodalContent("file", "input", uri=" ")
+        with self.assertRaisesRegex(ValueError, "text"):
+            MultimodalContent("text", "input", text=" ")
+
     def test_context_packages_multiple_modalities_without_session_changes(self) -> None:
         context = MultimodalContext("call-1", workspace_id="workspace-1", voicebot_id="voicebot-1")
         context = context.add(MultimodalContent("chat", "input", text="hello"))
@@ -51,6 +63,16 @@ class MultimodalTests(unittest.TestCase):
         self.assertEqual(payload["workspace_id"], "workspace-1")
         self.assertEqual([part["modality"] for part in payload["parts"]], ["chat", "visual_card"])
 
+    def test_context_rejects_invalid_identity_fields(self) -> None:
+        with self.assertRaisesRegex(ValueError, "call_id"):
+            MultimodalContext("")
+        with self.assertRaisesRegex(ValueError, "workspace_id"):
+            MultimodalContext("call-1", workspace_id=" ")
+        with self.assertRaisesRegex(ValueError, "voicebot_id"):
+            MultimodalContext("call-1", voicebot_id=" ")
+        with self.assertRaisesRegex(ValueError, "session_id"):
+            MultimodalContext("call-1", session_id=" ")
+
     def test_modality_capabilities_can_declare_browser_visual_support(self) -> None:
         capabilities = ModalityCapabilities(
             input=frozenset({"audio", "chat", "image"}),
@@ -60,6 +82,12 @@ class MultimodalTests(unittest.TestCase):
         self.assertTrue(capabilities.supports_input("image"))
         self.assertTrue(capabilities.supports_output("visual_card"))
         self.assertFalse(capabilities.supports_output("avatar_video"))
+
+    def test_modality_capabilities_reject_unknown_modalities(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported input modalities"):
+            ModalityCapabilities(input=frozenset({"audio", "unknown"}))
+        with self.assertRaisesRegex(ValueError, "unsupported output modalities"):
+            ModalityCapabilities(output=frozenset({"audio", "unknown"}))
 
     def test_transport_capabilities_have_audio_text_default_modalities(self) -> None:
         self.assertTrue(WEBRTC_CAPABILITIES.modalities.supports_input("audio"))

@@ -69,6 +69,14 @@ playback is not active. Browser echo cancellation, the playback echo tail, and
 future echo-cancellation stages still carry part of the self-audio suppression
 responsibility, but live playback gating uses the stronger barge-in threshold.
 
+SIP and WebRTC sessions also guard the output queue against stale responses. If
+a non-startup agent response is ready to play after a newer
+`user_speech_started` or `user_transcript` event already exists, the session
+drops that response instead of speaking it. The runtime emits
+`agent_response_dropped` with reason `stale_response_after_new_caller_speech`.
+Startup greetings are exempt so a greeting can still play after the initial
+call setup and recording path settle.
+
 ## Configuration
 
 `TurnDetectionConfig` contains:

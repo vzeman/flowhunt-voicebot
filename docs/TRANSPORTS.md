@@ -58,6 +58,25 @@ implemented by this runtime, call-control actions, audio flags, concurrency
 support, and modality support. Control planes can use this before binding a
 voicebot to SIP, WebRTC, or future telephony providers.
 
+## SIP Runtime
+
+SIP calls are currently handled by Asterisk using PJSIP registration, INVITE,
+RTP, and AudioSocket media handoff into the voicebot service. Asterisk loads a
+base PJSIP configuration from `asterisk/docker-entrypoint.sh` and includes
+`/data/asterisk/pjsip-trunks.conf` for runtime trunks.
+
+Dynamic trunks are managed by the voicebot HTTP API and persisted in
+`/data/sip_trunks.json`. For local development only, the Asterisk entrypoint can
+seed a single `trunk-default` registration from `SIP_HOST`, `SIP_USER`, and
+`SIP_PASSWORD` when the generated include file does not exist or is empty. Once
+the include exists, the dynamic API path owns it.
+
+The PJSIP UDP transport bind is controlled by `PJSIP_BIND`, defaulting to
+`0.0.0.0:5060`. Local Docker/NAT environments can require a different source
+port for REGISTER responses to arrive reliably; set
+`PJSIP_BIND=0.0.0.0:5062` or another free UDP port and recreate the Asterisk
+container when that is needed.
+
 ## Routing
 
 Routing metadata uses FlowHunt workspace terminology:

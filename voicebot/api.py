@@ -528,6 +528,28 @@ def create_app(
             "events": transcript,
         }
 
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/tasks")
+    def list_voicebot_external_tasks(
+        workspace_id: str,
+        voicebot_id: str,
+        session_id: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        if subagent_coordinator is None:
+            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
+        tasks = [
+            task
+            for task in subagent_coordinator.store.list(workspace_id=workspace_id, session_id=session_id)
+            if task.voicebot_id == voicebot_id and (status is None or task.status == status)
+        ]
+        return {
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "session_id": session_id,
+            "status": status,
+            "tasks": [subagent_task_to_dict(task) for task in tasks],
+        }
+
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")
     def get_voicebot_provider_config(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
         config = provider_config_store.get(workspace_id, voicebot_id)

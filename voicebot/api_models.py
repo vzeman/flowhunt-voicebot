@@ -78,6 +78,19 @@ class VoicebotProviderConfigRequest(BaseModel):
     agent: ProviderChoiceRequest
 
 
+class VoicebotAdminRequest(BaseModel):
+    voicebot_id: str
+    display_name: str = ""
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class VoicebotAdminPatchRequest(BaseModel):
+    display_name: str | None = None
+    enabled: bool | None = None
+    metadata: dict[str, Any] | None = None
+
+
 class CallControlRequest(BaseModel):
     action: str
     target: str | None = None

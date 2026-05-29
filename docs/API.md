@@ -165,6 +165,45 @@ Response:
 }
 ```
 
+## Voicebot Admin
+
+These prototype product-admin endpoints manage workspace-scoped voicebot
+records in the local process store. FlowHunt production should back the same
+contract with workspace-permission checks and database storage.
+
+### GET `/workspaces/{workspace_id}/voicebots`
+
+Lists voicebots in one workspace.
+
+### POST `/workspaces/{workspace_id}/voicebots`
+
+Creates a voicebot record.
+
+Request:
+
+```json
+{
+  "voicebot_id": "support-bot",
+  "display_name": "Support bot",
+  "enabled": true,
+  "metadata": {"language": "en"}
+}
+```
+
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}`
+
+Returns one voicebot record.
+
+### PATCH `/workspaces/{workspace_id}/voicebots/{voicebot_id}`
+
+Updates mutable voicebot fields: `display_name`, `enabled`, and `metadata`.
+
+### DELETE `/workspaces/{workspace_id}/voicebots/{voicebot_id}`
+
+Deletes one voicebot record from the workspace.
+
+## Provider Configuration
+
 ### PUT `/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers`
 
 Validates and saves workspace voicebot provider choices.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -33,6 +33,82 @@ class WorkspaceScope:
         if not self.session_id:
             raise ValueError("session_id is required for task dedupe")
         return f"{self.session_id}:{request_event_id}"
+
+
+@dataclass(frozen=True)
+class VoicebotDefinition:
+    workspace_id: str
+    voicebot_id: str
+    display_name: str = ""
+    enabled: bool = True
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.workspace_id.strip():
+            raise ValueError("workspace_id is required")
+        if not self.voicebot_id.strip():
+            raise ValueError("voicebot_id is required")
+        if self.display_name and not self.display_name.strip():
+            raise ValueError("display_name must not be blank")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "workspace_id": self.workspace_id,
+            "voicebot_id": self.voicebot_id,
+            "display_name": self.display_name,
+            "enabled": self.enabled,
+            "metadata": self.metadata,
+        }
+
+
+class VoicebotStore:
+    def __init__(self) -> None:
+        self._voicebots: dict[tuple[str, str], VoicebotDefinition] = {}
+
+    def create(self, voicebot: VoicebotDefinition) -> VoicebotDefinition:
+        key = (voicebot.workspace_id, voicebot.voicebot_id)
+        if key in self._voicebots:
+            raise ValueError("voicebot already exists")
+        self._voicebots[key] = voicebot
+        return voicebot
+
+    def save(self, voicebot: VoicebotDefinition) -> VoicebotDefinition:
+        self._voicebots[(voicebot.workspace_id, voicebot.voicebot_id)] = voicebot
+        return voicebot
+
+    def patch(
+        self,
+        workspace_id: str,
+        voicebot_id: str,
+        *,
+        display_name: str | None = None,
+        enabled: bool | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> VoicebotDefinition:
+        existing = self.get(workspace_id, voicebot_id)
+        if existing is None:
+            raise KeyError(f"voicebot not found: {voicebot_id}")
+        updated = replace(
+            existing,
+            display_name=existing.display_name if display_name is None else display_name,
+            enabled=existing.enabled if enabled is None else enabled,
+            metadata=existing.metadata if metadata is None else metadata,
+        )
+        return self.save(updated)
+
+    def get(self, workspace_id: str, voicebot_id: str) -> VoicebotDefinition | None:
+        return self._voicebots.get((workspace_id, voicebot_id))
+
+    def list(self, workspace_id: str) -> tuple[VoicebotDefinition, ...]:
+        return tuple(
+            sorted(
+                [voicebot for voicebot in self._voicebots.values() if voicebot.workspace_id == workspace_id],
+                key=lambda item: item.voicebot_id,
+            )
+        )
+
+    def delete(self, workspace_id: str, voicebot_id: str) -> VoicebotDefinition | None:
+        return self._voicebots.pop((workspace_id, voicebot_id), None)
 
 
 @dataclass(frozen=True)

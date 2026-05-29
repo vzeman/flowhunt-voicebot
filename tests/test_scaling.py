@@ -13,6 +13,7 @@ from voicebot.scaling import (
     RoutingKey,
     WorkerInstance,
     WorkerQueueEnvelope,
+    WorkerQueueStore,
     WorkerRegistry,
     WorkloadProfile,
     WorkspaceBackpressure,
@@ -101,6 +102,107 @@ class ScalingTests(unittest.TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
                     WorkerQueueEnvelope(**kwargs)
+
+    def test_worker_queue_store_claims_acks_and_releases_items(self) -> None:
+        store = WorkerQueueStore()
+        first = WorkerQueueEnvelope(
+            item_id="item-1",
+            kind="stt_turn",
+            routing=RoutingKey("workspace-1", "voicebot-1", session_id="session-1"),
+            queue="voicebot.stt",
+        )
+        second = WorkerQueueEnvelope(
+            item_id="item-2",
+            kind="stt_turn",
+            routing=RoutingKey("workspace-1", "voicebot-1", session_id="session-1"),
+            queue="voicebot.stt",
+        )
+        store.enqueue(first)
+        store.enqueue(second)
+
+        claimed = store.claim("voicebot.stt", "worker-1", limit=1)
+        wrong_ack = store.ack("item-1", owner="worker-2")
+        released = store.release("item-1", owner="worker-1")
+        reclaimed = store.claim("voicebot.stt", "worker-1", limit=2)
+        acked = store.ack("item-1", owner="worker-1")
+
+        self.assertEqual([item.item_id for item in claimed], ["item-1"])
+        self.assertEqual(claimed[0].attempt, 1)
+        self.assertIsNone(wrong_ack)
+        self.assertEqual(released.item_id if released else None, "item-1")
+        self.assertEqual([item.item_id for item in reclaimed], ["item-1", "item-2"])
+        self.assertEqual(reclaimed[0].attempt, 2)
+        self.assertEqual(acked.item_id if acked else None, "item-1")
+        self.assertEqual([claim["item"]["item_id"] for claim in store.claimed()], ["item-2"])
+
+    def test_worker_queue_store_expires_claims_back_to_pending(self) -> None:
+        store = WorkerQueueStore()
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        envelope = WorkerQueueEnvelope(
+            item_id="item-1",
+            kind="agent_turn",
+            routing=RoutingKey("workspace-1", "voicebot-1"),
+            queue="voicebot.agent",
+            created_at=now.isoformat(),
+        )
+        store.enqueue(envelope)
+        store.claim("voicebot.agent", "worker-1", ttl_seconds=1.0, now=now)
+
+        expired = store.expire(now + timedelta(seconds=2))
+
+        self.assertEqual([item.item_id for item in expired], ["item-1"])
+        self.assertEqual(store.claimed(now=now + timedelta(seconds=2)), ())
+        self.assertEqual([item.item_id for item in store.pending("voicebot.agent")], ["item-1"])
+
+    def test_worker_queue_store_rejects_duplicate_and_invalid_claim_requests(self) -> None:
+        store = WorkerQueueStore()
+        envelope = WorkerQueueEnvelope(
+            item_id="item-1",
+            kind="tts_request",
+            routing=RoutingKey("workspace-1", "voicebot-1"),
+            queue="voicebot.tts",
+        )
+        store.enqueue(envelope)
+
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            store.enqueue(envelope)
+        with self.assertRaisesRegex(ValueError, "queue"):
+            store.claim(" ", "worker-1")
+        with self.assertRaisesRegex(ValueError, "owner"):
+            store.claim("voicebot.tts", " ")
+        with self.assertRaisesRegex(ValueError, "limit"):
+            store.claim("voicebot.tts", "worker-1", limit=0)
+        with self.assertRaisesRegex(ValueError, "ttl_seconds"):
+            store.claim("voicebot.tts", "worker-1", ttl_seconds=0)
+
+    def test_worker_queue_store_snapshot_groups_pending_and_claimed(self) -> None:
+        store = WorkerQueueStore()
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        store.enqueue(
+            WorkerQueueEnvelope(
+                item_id="item-1",
+                kind="session_event",
+                routing=RoutingKey("workspace-1", "voicebot-1"),
+                queue="voicebot.sessions",
+                created_at=now.isoformat(),
+            )
+        )
+        store.enqueue(
+            WorkerQueueEnvelope(
+                item_id="item-2",
+                kind="session_event",
+                routing=RoutingKey("workspace-1", "voicebot-1"),
+                queue="voicebot.sessions",
+                created_at=now.isoformat(),
+            )
+        )
+        store.claim("voicebot.sessions", "worker-1", now=now)
+
+        snapshot = store.snapshot(now=now)
+
+        self.assertEqual([item["item_id"] for item in snapshot["pending"]["voicebot.sessions"]], ["item-2"])
+        self.assertEqual(snapshot["claimed"][0]["item"]["item_id"], "item-1")
+        self.assertEqual(snapshot["claimed"][0]["owner"], "worker-1")
 
     def test_workload_plan_includes_partition_provider_keys_and_capacity_flags(self) -> None:
         plan = build_workload_plan(

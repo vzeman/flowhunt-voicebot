@@ -30,6 +30,7 @@ from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, AudioOutputFrame, PlaybackFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
+from .realtime_audio import AudioJitterBuffer, JitterBufferConfig
 from .transports import ASTERISK_AUDIOSOCKET_CAPABILITIES, StaticMediaTransport
 
 if TYPE_CHECKING:
@@ -179,6 +180,24 @@ class CallSession:
         self._active_turn = 0
         self._active_turn_lock = threading.Lock()
         self._call_id_change_callback = None
+        self._jitter_buffer = (
+            AudioJitterBuffer(
+                JitterBufferConfig(
+                    sample_rate=CALL_SAMPLE_RATE,
+                    frame_ms=settings.packet_ms,
+                    target_delay_ms=settings.audiosocket_jitter_target_delay_ms,
+                    max_delay_ms=settings.audiosocket_jitter_max_delay_ms,
+                )
+            )
+            if settings.audiosocket_jitter_buffer_enabled
+            else None
+        )
+        self._is_recording = False
+        self._collected: list[np.ndarray] = []
+        self._pending_start: list[np.ndarray] = []
+        self._pending_start_ms = 0
+        self._silence_ms = 0
+        self._speech_ms = 0
 
     def set_call_id_change_callback(self, callback) -> None:
         self._call_id_change_callback = callback
@@ -192,6 +211,8 @@ class CallSession:
             self._receive_loop()
         finally:
             self.stop_event.set()
+            if self._jitter_buffer is not None:
+                self._jitter_buffer.clear()
             sender.join(timeout=1.0)
             speech_worker.join(timeout=1.0)
             self.events.append(self.call_id, "call_ended", {})
@@ -356,6 +377,7 @@ class CallSession:
             "stopped": self.stop_event.is_set(),
             "active_turn": self._current_turn(),
             "transport": self.descriptor.transport,
+            "jitter_buffer": self._jitter_buffer_snapshot(),
             "route": self.descriptor.route.as_event_data(),
             "capabilities": {
                 "call_control": sorted(self.descriptor.capabilities.call_control),
@@ -363,14 +385,18 @@ class CallSession:
             },
         }
 
-    def _receive_loop(self) -> None:
-        is_recording = False
-        collected: list[np.ndarray] = []
-        pending_start: list[np.ndarray] = []
-        pending_start_ms = 0
-        silence_ms = 0
-        speech_ms = 0
+    def _jitter_buffer_snapshot(self) -> dict:
+        if self._jitter_buffer is None:
+            return {"enabled": False, "buffered_ms": 0, "buffered_samples": 0}
+        return {
+            "enabled": True,
+            "buffered_ms": self._jitter_buffer.buffered_ms(),
+            "buffered_samples": self._jitter_buffer.buffered_samples(),
+            "target_delay_ms": self._jitter_buffer.config.target_delay_ms,
+            "max_delay_ms": self._jitter_buffer.config.max_delay_ms,
+        }
 
+    def _receive_loop(self) -> None:
         while not self.stop_event.is_set():
             try:
                 msg_type, payload = read_audiosocket_message(self.sock)
@@ -418,71 +444,91 @@ class CallSession:
                 continue
 
             block = pcm16_bytes_to_float32(payload)
-            block_ms = int(len(block) / CALL_SAMPLE_RATE * 1000)
-            level = rms(block)
+            self.process_remote_audio_block(block)
 
-            if not is_recording:
-                if self._should_ignore_input(level):
-                    pending_start = []
-                    pending_start_ms = 0
-                    continue
-                if level < self.settings.start_threshold:
-                    pending_start = []
-                    pending_start_ms = 0
-                    continue
+    def process_remote_audio_block(self, block: np.ndarray) -> int:
+        if self._jitter_buffer is None:
+            self._process_audio_block(block)
+            return 1 if block.size else 0
+        self._jitter_buffer.push(block)
+        processed = 0
+        while True:
+            frame = self._jitter_buffer.pop()
+            if frame is None:
+                break
+            self._process_audio_block(frame)
+            processed += 1
+        return processed
 
-                pending_start.append(block)
-                pending_start_ms += block_ms
-                if pending_start_ms < self.settings.vad_start_ms:
-                    continue
+    def _process_audio_block(self, block: np.ndarray) -> None:
+        if block.size == 0 or self.stop_event.is_set():
+            return
+        block = block.astype(np.float32, copy=False).reshape(-1)
+        block_ms = int(len(block) / CALL_SAMPLE_RATE * 1000)
+        level = rms(block)
 
-                is_recording = True
-                self.recording_event.set()
-                collected = pending_start
-                pending_start = []
-                pending_start_ms = 0
-                silence_ms = 0
-                speech_ms = sum(int(len(item) / CALL_SAMPLE_RATE * 1000) for item in collected)
-                turn_id = self._new_turn()
-                self.events.append(self.call_id, "user_speech_started", {"turn_id": turn_id, "level": level})
-                self._record_vad_decision("speech_started", level, block_ms, {"turn_id": turn_id})
-                self._mark_interrupted("user_speech_started")
+        if not self._is_recording:
+            if self._should_ignore_input(level):
+                self._pending_start = []
+                self._pending_start_ms = 0
+                return
+            if level < self.settings.start_threshold:
+                self._pending_start = []
+                self._pending_start_ms = 0
+                return
 
-                if self.playback.interrupt():
-                    self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "user_speech_started"})
-                continue
+            self._pending_start.append(block)
+            self._pending_start_ms += block_ms
+            if self._pending_start_ms < self.settings.vad_start_ms:
+                return
 
-            collected.append(block)
-            speech_ms += block_ms
-            if level < self.settings.stop_threshold:
-                silence_ms += block_ms
-            else:
-                silence_ms = 0
+            self._is_recording = True
+            self.recording_event.set()
+            self._collected = self._pending_start
+            self._pending_start = []
+            self._pending_start_ms = 0
+            self._silence_ms = 0
+            self._speech_ms = sum(int(len(item) / CALL_SAMPLE_RATE * 1000) for item in self._collected)
+            turn_id = self._new_turn()
+            self.events.append(self.call_id, "user_speech_started", {"turn_id": turn_id, "level": level})
+            self._record_vad_decision("speech_started", level, block_ms, {"turn_id": turn_id})
+            self._mark_interrupted("user_speech_started")
 
-            if silence_ms < self.settings.silence_ms and speech_ms < int(self.settings.max_seconds * 1000):
-                continue
+            if self.playback.interrupt():
+                self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "user_speech_started"})
+            return
 
-            audio = np.concatenate(collected)
-            final_silence_ms = silence_ms
-            is_recording = False
-            self.recording_event.clear()
-            collected = []
-            silence_ms = 0
-            speech_ms = 0
+        self._collected.append(block)
+        self._speech_ms += block_ms
+        if level < self.settings.stop_threshold:
+            self._silence_ms += block_ms
+        else:
+            self._silence_ms = 0
 
-            duration = len(audio) / CALL_SAMPLE_RATE
-            turn_id = self._current_turn()
-            self.events.append(self.call_id, "user_speech_finished", {"turn_id": turn_id, "duration": duration})
-            self._record_metric("speech_duration_seconds", duration, {"turn_id": turn_id})
-            self._record_metric("silence_duration_seconds", final_silence_ms / 1000, {"turn_id": turn_id})
-            self._record_vad_decision(
-                "speech_finished" if duration >= self.settings.min_seconds else "speech_too_short",
-                level,
-                block_ms,
-                {"turn_id": turn_id, "duration": duration},
-            )
-            if duration >= self.settings.min_seconds:
-                self._speech_jobs.put((turn_id, audio))
+        if self._silence_ms < self.settings.silence_ms and self._speech_ms < int(self.settings.max_seconds * 1000):
+            return
+
+        audio = np.concatenate(self._collected)
+        final_silence_ms = self._silence_ms
+        self._is_recording = False
+        self.recording_event.clear()
+        self._collected = []
+        self._silence_ms = 0
+        self._speech_ms = 0
+
+        duration = len(audio) / CALL_SAMPLE_RATE
+        turn_id = self._current_turn()
+        self.events.append(self.call_id, "user_speech_finished", {"turn_id": turn_id, "duration": duration})
+        self._record_metric("speech_duration_seconds", duration, {"turn_id": turn_id})
+        self._record_metric("silence_duration_seconds", final_silence_ms / 1000, {"turn_id": turn_id})
+        self._record_vad_decision(
+            "speech_finished" if duration >= self.settings.min_seconds else "speech_too_short",
+            level,
+            block_ms,
+            {"turn_id": turn_id, "duration": duration},
+        )
+        if duration >= self.settings.min_seconds:
+            self._speech_jobs.put((turn_id, audio))
 
     def _speech_worker_loop(self) -> None:
         while not self.stop_event.is_set():

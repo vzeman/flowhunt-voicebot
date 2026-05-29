@@ -127,9 +127,17 @@ before VAD. Runtime settings:
 - `VOICEBOT_WEBRTC_JITTER_TARGET_DELAY_MS=60`
 - `VOICEBOT_WEBRTC_JITTER_MAX_DELAY_MS=200`
 
-Direct unit-test calls to `process_audio_block()` bypass the jitter buffer;
-live WebRTC tracks use `process_remote_audio_block()` so packet timing
-stabilization stays transport-local.
+The SIP AudioSocket receive path uses the same jitter buffer primitive before
+its VAD loop. Runtime settings:
+
+- `VOICEBOT_AUDIOSOCKET_JITTER_BUFFER_ENABLED=true|false`
+- `VOICEBOT_AUDIOSOCKET_JITTER_TARGET_DELAY_MS=60`
+- `VOICEBOT_AUDIOSOCKET_JITTER_MAX_DELAY_MS=200`
+
+Direct unit-test calls to the low-level VAD block processors can still bypass
+the jitter buffer; live WebRTC tracks and SIP AudioSocket frames use
+`process_remote_audio_block()` so packet timing stabilization stays
+transport-local.
 
 ## Debug Capture
 
@@ -146,6 +154,6 @@ caller audio by default.
 1. Replace duplicated SIP and WebRTC VAD loops with `TurnDetector`.
 2. Emit metrics for every turn decision from `TurnDetectionResult.metric_data()`.
 3. Add a pluggable VAD provider interface.
-4. Wire jitter buffer into the SIP AudioSocket media loop.
+4. Replace duplicated SIP and WebRTC VAD loops with `TurnDetector`.
 5. Wire debug capture behind runtime/workspace configuration.
 6. Add stronger echo suppression strategy for real deployments.

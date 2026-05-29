@@ -112,6 +112,8 @@ class CallSessionPipelineTests(unittest.TestCase):
                     vad_start_ms=0,
                     silence_ms=10,
                     min_seconds=999.0,
+                    packet_ms=10,
+                    audiosocket_jitter_target_delay_ms=0,
                 ),
                 events,
                 FakeSTT(),
@@ -129,6 +131,71 @@ class CallSessionPipelineTests(unittest.TestCase):
             self.assertEqual([metric["decision"] for metric in vad_decisions], ["speech_started", "speech_too_short"])
             self.assertEqual(vad_decisions[0]["transport"], "asterisk_audiosocket")
             self.assertIn({"name": "silence_duration_seconds", "value": 0.01, "turn_id": 1}, metrics)
+        finally:
+            left.close()
+            right.close()
+
+    def test_audiosocket_remote_audio_uses_jitter_buffer_before_vad(self) -> None:
+        left, right = socket.socketpair()
+        events = EventStore(max_context_events=20)
+        try:
+            session = CallSession(
+                "call-1",
+                left,
+                Settings(
+                    greet_on_connect=False,
+                    start_threshold=0.1,
+                    stop_threshold=0.05,
+                    vad_start_ms=0,
+                    packet_ms=20,
+                    audiosocket_jitter_target_delay_ms=40,
+                    audiosocket_jitter_max_delay_ms=80,
+                ),
+                events,
+                FakeSTT(),
+                FakeTTS(),
+            )
+            block = np.full(160, 0.4, dtype=np.float32)
+
+            self.assertEqual(session.process_remote_audio_block(block), 0)
+            self.assertEqual(session.process_remote_audio_block(block), 0)
+            self.assertEqual(session.process_remote_audio_block(block), 1)
+
+            self.assertEqual(
+                [event.type for event in events.list_events(call_id="call-1") if event.type == "user_speech_started"],
+                ["user_speech_started"],
+            )
+            self.assertTrue(session.snapshot()["jitter_buffer"]["enabled"])
+        finally:
+            left.close()
+            right.close()
+
+    def test_audiosocket_remote_audio_can_bypass_jitter_buffer(self) -> None:
+        left, right = socket.socketpair()
+        events = EventStore(max_context_events=20)
+        try:
+            session = CallSession(
+                "call-1",
+                left,
+                Settings(
+                    greet_on_connect=False,
+                    start_threshold=0.1,
+                    stop_threshold=0.05,
+                    vad_start_ms=0,
+                    audiosocket_jitter_buffer_enabled=False,
+                ),
+                events,
+                FakeSTT(),
+                FakeTTS(),
+            )
+
+            self.assertEqual(session.process_remote_audio_block(np.full(80, 0.4, dtype=np.float32)), 1)
+
+            self.assertFalse(session.snapshot()["jitter_buffer"]["enabled"])
+            self.assertEqual(
+                [event.type for event in events.list_events(call_id="call-1") if event.type == "user_speech_started"],
+                ["user_speech_started"],
+            )
         finally:
             left.close()
             right.close()

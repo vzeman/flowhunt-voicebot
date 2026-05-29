@@ -4,6 +4,12 @@ The prototype now has first durable primitives for restart recovery and scoped
 queries. These are not the final FlowHunt database implementation, but they make
 the storage contracts explicit and testable.
 
+`GET /health/readiness` exposes a `durable_storage` check for the configured
+runtime stores. It reports store kind, path, load diagnostics, compact snapshot
+counts, warning counts from skipped/requeued recovery rows, and path
+writability. This makes restart-recovery problems visible through the service
+API before the JSON stores move to FlowHunt database or Redis-backed storage.
+
 ## Event Log
 
 `JsonEventStore` persists every event as JSONL and reloads it on startup. It

@@ -11,7 +11,7 @@ from voicebot.api import WebSocketHub, create_app
 from voicebot.asterisk_control import AsteriskAMI
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
-from voicebot.health import ami_configuration_check, readiness_report
+from voicebot.health import ami_configuration_check, durable_storage_check, readiness_report
 from voicebot.transcripts import TranscriptStore
 
 
@@ -22,6 +22,7 @@ class HealthTests(unittest.TestCase):
                 transcripts=TranscriptStore(directory),
                 asterisk=None,
                 active_call_ids=["call-a"],
+                storage_components={"events": EventStore(max_context_events=20)},
             )
 
         self.assertTrue(report["ok"])
@@ -30,6 +31,7 @@ class HealthTests(unittest.TestCase):
         self.assertFalse(report["checks"]["ami"]["configured"])
         self.assertTrue(report["checks"]["providers"]["ok"])
         self.assertTrue(report["checks"]["event_catalog"]["ok"])
+        self.assertTrue(report["checks"]["durable_storage"]["ok"])
 
     def test_readiness_reports_transcript_corruption_stats(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -104,7 +106,31 @@ class HealthTests(unittest.TestCase):
         payload = response.json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["active_calls"], [])
-        self.assertEqual(set(payload["checks"]), {"transcripts", "ami", "providers", "event_catalog"})
+        self.assertEqual(set(payload["checks"]), {"transcripts", "ami", "providers", "event_catalog", "durable_storage"})
+
+    def test_durable_storage_check_reports_load_diagnostics_and_counts_warnings(self) -> None:
+        class StoreWithDiagnostics:
+            load_diagnostics = {
+                "loaded_events": 3,
+                "skipped_malformed_json": 2,
+                "requeued_expired_claims": 1,
+            }
+
+            def snapshot(self):
+                return {
+                    "pending": {"voicebot.agent": [{"item_id": "item-1"}]},
+                    "claimed": [{"item": {"item_id": "item-2"}}],
+                }
+
+        check = durable_storage_check({"worker_queue": StoreWithDiagnostics()}).to_dict()
+
+        self.assertTrue(check["ok"])
+        self.assertEqual(check["message"], "durable storage is reachable with recovery warnings")
+        self.assertEqual(check["warning_counts"], {"worker_queue": 3})
+        store = check["stores"]["worker_queue"]
+        self.assertEqual(store["kind"], "StoreWithDiagnostics")
+        self.assertEqual(store["warning_count"], 3)
+        self.assertEqual(store["snapshot"], {"pending_count": 1, "claimed_count": 1})
 
     def test_existing_health_endpoint_remains_lightweight(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

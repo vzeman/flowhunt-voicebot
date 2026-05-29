@@ -30,6 +30,8 @@ from .api_models import (
     PlaybackInterruptRequest,
     ScalingWorkloadPlanRequest,
     SipTrunkRequest,
+    VoicebotAdminPatchRequest,
+    VoicebotAdminRequest,
     VoicebotProviderConfigRequest,
     WorkerHeartbeatRequest,
     WebRTCOfferRequest,
@@ -85,6 +87,7 @@ from .transcripts import TranscriptStore
 from .transports import transport_catalog
 from .tools import tool_definitions_json_schema, tool_definitions_legacy
 from .webrtc import WebRTCSessionManager
+from .workspace_model import VoicebotDefinition, VoicebotStore
 
 _MODALITIES = set(get_args(Modality))
 _CONTENT_DIRECTIONS = set(get_args(ContentDirection))
@@ -142,6 +145,7 @@ def create_app(
     multimodal_contexts: MultimodalContextStore | None = None,
     provider_configs: ProviderConfigStore | None = None,
     worker_registry: WorkerRegistry | None = None,
+    voicebots: VoicebotStore | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -169,6 +173,7 @@ def create_app(
     multimodal_store = multimodal_contexts or MultimodalContextStore()
     provider_config_store = provider_configs or ProviderConfigStore()
     scaling_workers = worker_registry or WorkerRegistry()
+    voicebot_store = voicebots or VoicebotStore()
     subagent_terminal_events: list[VoicebotEvent] = []
 
     def emit_subagent_terminal_event(event_type: TaskLifecycleEventType, task: SubagentTask) -> None:
@@ -285,6 +290,63 @@ def create_app(
     @app.get("/api/surface/prototypes")
     def api_surface_prototypes() -> dict[str, Any]:
         return {"endpoints": prototype_endpoints()}
+
+    @app.get("/workspaces/{workspace_id}/voicebots")
+    def list_workspace_voicebots(workspace_id: str) -> dict[str, Any]:
+        return {
+            "workspace_id": workspace_id,
+            "voicebots": [voicebot.as_dict() for voicebot in voicebot_store.list(workspace_id)],
+        }
+
+    @app.post("/workspaces/{workspace_id}/voicebots")
+    def create_workspace_voicebot(workspace_id: str, request: VoicebotAdminRequest) -> dict[str, Any]:
+        try:
+            voicebot = voicebot_store.create(
+                VoicebotDefinition(
+                    workspace_id=workspace_id,
+                    voicebot_id=request.voicebot_id,
+                    display_name=request.display_name,
+                    enabled=request.enabled,
+                    metadata=request.metadata,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"voicebot": voicebot.as_dict()}
+
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}")
+    def get_workspace_voicebot(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        voicebot = voicebot_store.get(workspace_id, voicebot_id)
+        if voicebot is None:
+            raise HTTPException(status_code=404, detail="Voicebot not found")
+        return {"voicebot": voicebot.as_dict()}
+
+    @app.patch("/workspaces/{workspace_id}/voicebots/{voicebot_id}")
+    def patch_workspace_voicebot(
+        workspace_id: str,
+        voicebot_id: str,
+        request: VoicebotAdminPatchRequest,
+    ) -> dict[str, Any]:
+        try:
+            voicebot = voicebot_store.patch(
+                workspace_id,
+                voicebot_id,
+                display_name=request.display_name,
+                enabled=request.enabled,
+                metadata=request.metadata,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Voicebot not found") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"voicebot": voicebot.as_dict()}
+
+    @app.delete("/workspaces/{workspace_id}/voicebots/{voicebot_id}")
+    def delete_workspace_voicebot(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        voicebot = voicebot_store.delete(workspace_id, voicebot_id)
+        if voicebot is None:
+            raise HTTPException(status_code=404, detail="Voicebot not found")
+        return {"voicebot": voicebot.as_dict(), "deleted": True}
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")
     def get_voicebot_provider_config(workspace_id: str, voicebot_id: str) -> dict[str, Any]:

@@ -137,6 +137,43 @@ class VoicebotAdminTests(unittest.TestCase):
         self.assertIn("unsupported channel kind", invalid_kind.json()["detail"])
         self.assertEqual(missing_patch.status_code, 404)
 
+    def test_voicebot_validate_reports_missing_and_ready_runtime_dependencies(self) -> None:
+        client, _store, _channels = self.build_client()
+
+        missing = client.post("/workspaces/workspace-1/voicebots/voicebot-1/validate")
+        client.post("/workspaces/workspace-1/voicebots", json={"voicebot_id": "voicebot-1"})
+        no_channel_or_provider = client.post("/workspaces/workspace-1/voicebots/voicebot-1/validate")
+        client.post(
+            "/workspaces/workspace-1/voicebots/voicebot-1/channels",
+            json={"channel_id": "channel-1", "kind": "webrtc_widget", "external_id": "widget-1"},
+        )
+        client.put(
+            "/workspaces/workspace-1/voicebots/voicebot-1/providers",
+            json={
+                "stt": {"provider": "whisper", "model": "base"},
+                "tts": {"provider": "supertonic", "model": "supertonic-3"},
+                "agent": {
+                    "provider": "openai-responses",
+                    "secret_ref": {"name": "openai-main"},
+                },
+            },
+        )
+        ready = client.post("/workspaces/workspace-1/voicebots/voicebot-1/validate")
+
+        self.assertFalse(missing.json()["ok"])
+        self.assertEqual(
+            [issue["area"] for issue in missing.json()["issues"]],
+            ["voicebot", "channel", "provider"],
+        )
+        self.assertFalse(no_channel_or_provider.json()["ok"])
+        self.assertEqual(
+            [issue["area"] for issue in no_channel_or_provider.json()["issues"]],
+            ["channel", "provider"],
+        )
+        self.assertTrue(ready.json()["ok"])
+        self.assertEqual(ready.json()["channel_count"], 1)
+        self.assertEqual(ready.json()["selection_plan"]["providers"]["stt"], "whisper")
+
 
 if __name__ == "__main__":
     unittest.main()

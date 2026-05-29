@@ -238,6 +238,13 @@ are immutable in this prototype; create a replacement channel to change
 
 Deletes one channel binding and removes it from runtime resolution.
 
+### POST `/workspaces/{workspace_id}/voicebots/{voicebot_id}/validate`
+
+Checks whether a voicebot is ready to run. The response includes `ok`,
+channel counts, the normalized provider selection plan when provider config is
+valid, and issue entries for missing or disabled voicebot records, missing or
+disabled channels, and invalid or missing provider config.
+
 ## Provider Configuration
 
 ### PUT `/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers`

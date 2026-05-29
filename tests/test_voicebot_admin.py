@@ -9,12 +9,13 @@ from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.transcripts import TranscriptStore
-from voicebot.workspace_model import VoicebotDefinition, VoicebotStore
+from voicebot.workspace_model import ChannelResolver, VoicebotDefinition, VoicebotStore
 
 
 class VoicebotAdminTests(unittest.TestCase):
-    def build_client(self) -> tuple[TestClient, VoicebotStore]:
+    def build_client(self) -> tuple[TestClient, VoicebotStore, ChannelResolver]:
         store = VoicebotStore()
+        channels = ChannelResolver()
         app = create_app(
             EventStore(max_context_events=20),
             CallRegistry(),
@@ -23,11 +24,12 @@ class VoicebotAdminTests(unittest.TestCase):
             TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
             None,
             voicebots=store,
+            channels=channels,
         )
-        return TestClient(app), store
+        return TestClient(app), store, channels
 
     def test_voicebot_admin_crud_is_workspace_scoped(self) -> None:
-        client, _store = self.build_client()
+        client, _store, _channels = self.build_client()
 
         created = client.post(
             "/workspaces/workspace-1/voicebots",
@@ -58,7 +60,7 @@ class VoicebotAdminTests(unittest.TestCase):
         self.assertEqual(missing.status_code, 404)
 
     def test_voicebot_admin_rejects_duplicates_and_invalid_records(self) -> None:
-        client, store = self.build_client()
+        client, store, _channels = self.build_client()
         store.create(VoicebotDefinition("workspace-1", "voicebot-1"))
 
         duplicate = client.post("/workspaces/workspace-1/voicebots", json={"voicebot_id": "voicebot-1"})
@@ -72,6 +74,67 @@ class VoicebotAdminTests(unittest.TestCase):
         self.assertIn("already exists", duplicate.json()["detail"])
         self.assertEqual(invalid.status_code, 400)
         self.assertIn("voicebot_id", invalid.json()["detail"])
+        self.assertEqual(missing_patch.status_code, 404)
+
+    def test_voicebot_channel_crud_uses_workspace_voicebot_scope(self) -> None:
+        client, _store, channels = self.build_client()
+
+        created = client.post(
+            "/workspaces/workspace-1/voicebots/voicebot-1/channels",
+            json={
+                "channel_id": "channel-1",
+                "kind": "sip_trunk",
+                "external_id": "trunk-1",
+                "metadata": {"country": "sk"},
+            },
+        )
+        listed = client.get("/workspaces/workspace-1/voicebots/voicebot-1/channels")
+        hidden = client.get("/workspaces/workspace-1/voicebots/voicebot-2/channels")
+        read = client.get("/workspaces/workspace-1/voicebots/voicebot-1/channels/channel-1")
+        patched = client.patch(
+            "/workspaces/workspace-1/voicebots/voicebot-1/channels/channel-1",
+            json={"enabled": False, "metadata": {"country": "cz"}},
+        )
+        deleted = client.delete("/workspaces/workspace-1/voicebots/voicebot-1/channels/channel-1")
+        missing = client.get("/workspaces/workspace-1/voicebots/voicebot-1/channels/channel-1")
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.json()["channel"]["workspace_id"], "workspace-1")
+        self.assertEqual(created.json()["channel"]["voicebot_id"], "voicebot-1")
+        self.assertEqual([item["channel_id"] for item in listed.json()["channels"]], ["channel-1"])
+        self.assertEqual(hidden.json()["channels"], [])
+        self.assertEqual(read.json()["channel"]["external_id"], "trunk-1")
+        self.assertFalse(patched.json()["channel"]["enabled"])
+        self.assertEqual(patched.json()["channel"]["metadata"], {"country": "cz"})
+        self.assertIsNone(channels.resolve("sip_trunk", "trunk-1"))
+        self.assertTrue(deleted.json()["deleted"])
+        self.assertEqual(missing.status_code, 404)
+
+    def test_voicebot_channel_admin_rejects_invalid_and_conflicting_routes(self) -> None:
+        client, _store, _channels = self.build_client()
+
+        first = client.post(
+            "/workspaces/workspace-1/voicebots/voicebot-1/channels",
+            json={"channel_id": "channel-1", "kind": "sip_trunk", "external_id": "trunk-1"},
+        )
+        duplicate_route = client.post(
+            "/workspaces/workspace-1/voicebots/voicebot-1/channels",
+            json={"channel_id": "channel-2", "kind": "sip_trunk", "external_id": "trunk-1"},
+        )
+        invalid_kind = client.post(
+            "/workspaces/workspace-1/voicebots/voicebot-1/channels",
+            json={"channel_id": "channel-3", "kind": "fax", "external_id": "fax-1"},
+        )
+        missing_patch = client.patch(
+            "/workspaces/workspace-1/voicebots/voicebot-1/channels/missing",
+            json={"enabled": False},
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(duplicate_route.status_code, 400)
+        self.assertIn("another channel", duplicate_route.json()["detail"])
+        self.assertEqual(invalid_kind.status_code, 400)
+        self.assertIn("unsupported channel kind", invalid_kind.json()["detail"])
         self.assertEqual(missing_patch.status_code, 404)
 
 

@@ -47,6 +47,7 @@ must start with `/`; and endpoints marked as not workspace-scoped must use
 
 - `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/channels`
 - `POST /workspaces/{workspace_id}/voicebots/{voicebot_id}/channels`
+- `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}`
 - `PATCH /workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}`
 - `DELETE /workspaces/{workspace_id}/voicebots/{voicebot_id}/channels/{channel_id}`
 

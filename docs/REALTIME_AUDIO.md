@@ -56,14 +56,14 @@ Decision values:
 
 When playback is active:
 
-- audio below `start_threshold` is treated as likely bot echo and ignored;
-- audio above `start_threshold` can start a caller turn and should interrupt
-  playback, even if it is below the higher diagnostic `barge_in_threshold`.
+- audio below `barge_in_threshold` is treated as likely bot echo and ignored;
+- audio at or above `barge_in_threshold` can start a caller turn and should
+  interrupt playback.
 
-The higher `barge_in_threshold` remains useful for diagnostics and future
-confidence scoring, but live interruption must favor the caller. Browser echo
-cancellation, the playback echo tail, and future echo-cancellation stages carry
-the main self-audio suppression responsibility.
+The lower `start_threshold` still controls ordinary speech start detection when
+playback is not active. Browser echo cancellation, the playback echo tail, and
+future echo-cancellation stages still carry part of the self-audio suppression
+responsibility, but live playback gating uses the stronger barge-in threshold.
 
 ## Configuration
 

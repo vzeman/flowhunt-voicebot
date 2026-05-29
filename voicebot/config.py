@@ -89,6 +89,9 @@ class Settings:
     webrtc_jitter_buffer_enabled: bool = env_bool("VOICEBOT_WEBRTC_JITTER_BUFFER_ENABLED", True)
     webrtc_jitter_target_delay_ms: int = env_int("VOICEBOT_WEBRTC_JITTER_TARGET_DELAY_MS", 60)
     webrtc_jitter_max_delay_ms: int = env_int("VOICEBOT_WEBRTC_JITTER_MAX_DELAY_MS", 200)
+    audiosocket_jitter_buffer_enabled: bool = env_bool("VOICEBOT_AUDIOSOCKET_JITTER_BUFFER_ENABLED", True)
+    audiosocket_jitter_target_delay_ms: int = env_int("VOICEBOT_AUDIOSOCKET_JITTER_TARGET_DELAY_MS", 60)
+    audiosocket_jitter_max_delay_ms: int = env_int("VOICEBOT_AUDIOSOCKET_JITTER_MAX_DELAY_MS", 200)
 
     max_context_events: int = env_int("VOICEBOT_MAX_CONTEXT_EVENTS", 80)
     event_store_provider: str = os.getenv("VOICEBOT_EVENT_STORE_PROVIDER", "json").strip().lower()

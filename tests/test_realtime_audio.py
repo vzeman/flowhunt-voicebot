@@ -8,7 +8,9 @@ import numpy as np
 from voicebot.config import Settings
 from voicebot.realtime_audio import (
     AudioChunkNormalizer,
+    AudioJitterBuffer,
     DebugAudioCapture,
+    JitterBufferConfig,
     TurnDetectionConfig,
     TurnDetector,
     turn_detection_config_from_settings,
@@ -129,6 +131,45 @@ class RealtimeAudioTests(unittest.TestCase):
             with self.subTest(settings=settings):
                 with self.assertRaises(ValueError):
                     AudioChunkNormalizer(**settings)
+
+    def test_audio_jitter_buffer_waits_for_target_delay_before_frames(self) -> None:
+        buffer = AudioJitterBuffer(JitterBufferConfig(sample_rate=1000, frame_ms=20, target_delay_ms=40, max_delay_ms=100))
+
+        buffer.push(np.arange(40, dtype=np.float32))
+        self.assertFalse(buffer.ready())
+        self.assertIsNone(buffer.pop())
+
+        buffer.push(np.arange(40, 70, dtype=np.float32))
+        frame = buffer.pop()
+
+        self.assertIsNotNone(frame)
+        self.assertEqual(frame.tolist(), list(np.arange(0, 20, dtype=np.float32)))
+        self.assertEqual(buffer.buffered_samples(), 50)
+        self.assertEqual(buffer.buffered_ms(), 50)
+
+    def test_audio_jitter_buffer_trims_oldest_samples_to_max_delay(self) -> None:
+        buffer = AudioJitterBuffer(JitterBufferConfig(sample_rate=1000, frame_ms=10, target_delay_ms=10, max_delay_ms=30))
+
+        buffer.push(np.arange(50, dtype=np.float32))
+
+        self.assertEqual(buffer.buffered_samples(), 30)
+        self.assertEqual(buffer.pop().tolist(), list(np.arange(20, 30, dtype=np.float32)))
+        buffer.clear()
+        self.assertEqual(buffer.buffered_samples(), 0)
+
+    def test_jitter_buffer_config_rejects_invalid_values(self) -> None:
+        invalid_configs = [
+            {"sample_rate": 0},
+            {"frame_ms": 0},
+            {"target_delay_ms": -1},
+            {"frame_ms": 20, "max_delay_ms": 10},
+            {"target_delay_ms": 80, "max_delay_ms": 40},
+        ]
+
+        for overrides in invalid_configs:
+            with self.subTest(overrides=overrides):
+                with self.assertRaises(ValueError):
+                    JitterBufferConfig(**{"sample_rate": 1000, **overrides})
 
     def test_turn_detection_config_can_be_built_from_runtime_settings(self) -> None:
         settings = Settings(

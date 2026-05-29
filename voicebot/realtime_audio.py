@@ -123,6 +123,74 @@ class AudioChunkNormalizer:
         return resample_audio(samples.reshape(-1), self.source_rate, self.target_rate)
 
 
+@dataclass(frozen=True)
+class JitterBufferConfig:
+    sample_rate: int
+    frame_ms: int = 20
+    target_delay_ms: int = 60
+    max_delay_ms: int = 200
+
+    def __post_init__(self) -> None:
+        if self.sample_rate <= 0:
+            raise ValueError("sample_rate must be greater than 0")
+        if self.frame_ms <= 0:
+            raise ValueError("frame_ms must be greater than 0")
+        if self.target_delay_ms < 0:
+            raise ValueError("target_delay_ms must be greater than or equal to 0")
+        if self.max_delay_ms < self.frame_ms:
+            raise ValueError("max_delay_ms must be greater than or equal to frame_ms")
+        if self.max_delay_ms < self.target_delay_ms:
+            raise ValueError("max_delay_ms must be greater than or equal to target_delay_ms")
+
+    @property
+    def frame_samples(self) -> int:
+        return max(1, int(self.sample_rate * self.frame_ms / 1000))
+
+    @property
+    def target_delay_samples(self) -> int:
+        return int(self.sample_rate * self.target_delay_ms / 1000)
+
+    @property
+    def max_delay_samples(self) -> int:
+        return max(self.frame_samples, int(self.sample_rate * self.max_delay_ms / 1000))
+
+
+@dataclass
+class AudioJitterBuffer:
+    config: JitterBufferConfig
+    _samples: deque[float] = field(default_factory=deque)
+
+    def push(self, block: np.ndarray) -> None:
+        samples = np.asarray(block, dtype=np.float32).reshape(-1)
+        if samples.size == 0:
+            return
+        self._samples.extend(float(sample) for sample in samples)
+        self._trim()
+
+    def ready(self) -> bool:
+        return len(self._samples) >= self.config.target_delay_samples + self.config.frame_samples
+
+    def pop(self) -> np.ndarray | None:
+        if not self.ready():
+            return None
+        frame = [self._samples.popleft() for _ in range(self.config.frame_samples)]
+        return np.asarray(frame, dtype=np.float32)
+
+    def buffered_samples(self) -> int:
+        return len(self._samples)
+
+    def buffered_ms(self) -> int:
+        return int(len(self._samples) / self.config.sample_rate * 1000)
+
+    def clear(self) -> None:
+        self._samples.clear()
+
+    def _trim(self) -> None:
+        overflow = len(self._samples) - self.config.max_delay_samples
+        for _ in range(max(0, overflow)):
+            self._samples.popleft()
+
+
 @dataclass
 class DebugAudioCapture:
     enabled: bool

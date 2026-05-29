@@ -17,6 +17,7 @@ from .runtime_storage import (
     build_agent_task_tracker,
     build_call_state_store,
     build_event_store,
+    build_session_lease_store,
     build_worker_registry,
     build_voicebot_session_store,
     build_worker_queue_store,
@@ -33,6 +34,7 @@ def main() -> None:
     transcripts = TranscriptStore(settings.transcript_dir)
     events = build_event_store(settings, transcripts)
     voicebot_sessions = build_voicebot_session_store(settings)
+    session_leases = build_session_lease_store(settings)
     registry = CallRegistry(build_call_state_store(settings))
     tracker = build_agent_task_tracker(settings)
     worker_registry = build_worker_registry(settings)
@@ -85,6 +87,7 @@ def main() -> None:
         worker_queue=worker_queue,
         worker_registry=worker_registry,
         voicebot_sessions=voicebot_sessions,
+        session_leases=session_leases,
     )
     uvicorn.run(app, host=settings.api_host, port=settings.api_port)
 

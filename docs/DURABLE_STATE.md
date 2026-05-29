@@ -68,6 +68,32 @@ Routed WebRTC sessions are persisted when their metadata includes
 marked ended. Unrouted local test sessions are intentionally skipped because
 they cannot be permission-scoped in FlowHunt product APIs.
 
+## Session Leases
+
+`JsonSessionLeaseStore` persists active session ownership leases:
+
+- workspace, voicebot, and session id
+- lease owner
+- absolute expiration timestamp
+- load diagnostics for malformed JSON, invalid rows, duplicate lease keys, and
+  expired leases skipped during reload
+
+The runtime selects the session lease store with:
+
+- `VOICEBOT_SESSION_LEASE_STORE_PROVIDER=json|memory`
+- `VOICEBOT_SESSION_LEASE_STORE_PATH=/data/session_leases.json`
+
+Internal worker/session orchestration APIs use:
+
+- `GET /scaling/session-leases`
+- `POST /scaling/session-leases/acquire`
+- `POST /scaling/session-leases/renew`
+- `POST /scaling/session-leases/release`
+
+These leases are the local coordination contract for active sessions. In
+production, the same semantics should move to Redis or another shared
+lease-capable store.
+
 ## External Tasks
 
 `JsonSubagentTaskStore` persists delegated subagent tasks, including provider

@@ -99,6 +99,8 @@ class Settings:
     agent_task_store_provider: str = os.getenv("VOICEBOT_AGENT_TASK_STORE_PROVIDER", "json").strip().lower()
     agent_task_store_path: str = os.getenv("VOICEBOT_AGENT_TASK_STORE_PATH", "/data/agent_tasks.json")
     agent_task_responded_event_retention: int = env_int("VOICEBOT_AGENT_TASK_RESPONDED_EVENT_RETENTION", 10000)
+    call_state_store_provider: str = os.getenv("VOICEBOT_CALL_STATE_STORE_PROVIDER", "json").strip().lower()
+    call_state_store_path: str = os.getenv("VOICEBOT_CALL_STATE_STORE_PATH", "/data/call_states.json")
     worker_queue_store_provider: str = os.getenv("VOICEBOT_WORKER_QUEUE_STORE_PROVIDER", "json").strip().lower()
     worker_queue_store_path: str = os.getenv("VOICEBOT_WORKER_QUEUE_STORE_PATH", "/data/worker_queue.json")
     workspace_access_control_enabled: bool = env_bool("VOICEBOT_WORKSPACE_ACCESS_CONTROL_ENABLED", False)

@@ -80,6 +80,7 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("POST", "/scaling/queue/claim", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Claim worker queue items."),
     ApiEndpointSpec("POST", "/scaling/queue/ack", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Acknowledge worker item."),
     ApiEndpointSpec("POST", "/scaling/queue/release", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Release worker item."),
+    ApiEndpointSpec("GET", "/calls/state-store", "runtime", "internal", workspace_scoped=False, scope_source="none", description="Inspect persisted call runtime state."),
     ApiEndpointSpec("GET", "/calls/{call_id}/multimodal", "multimodal", "internal", workspace_scoped=True, scope_source="route_binding", description="Read normalized multimodal call context."),
     ApiEndpointSpec("POST", "/calls/{call_id}/multimodal/parts", "multimodal", "internal", workspace_scoped=True, scope_source="payload", description="Attach normalized multimodal content to a call."),
     ApiEndpointSpec("POST", "/runtime/webrtc/sessions", "runtime", "public", scope_source="payload", description="Create WebRTC runtime session."),

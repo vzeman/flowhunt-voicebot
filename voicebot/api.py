@@ -253,6 +253,10 @@ def create_app(
     def list_calls() -> dict[str, Any]:
         return {"calls": registry.snapshots()}
 
+    @app.get("/calls/state-store")
+    def list_stored_call_states(active_only: bool = False) -> dict[str, Any]:
+        return {"calls": registry.stored_snapshots(active_only=active_only)}
+
     @app.get("/calls/{call_id}")
     def call_state(call_id: str) -> dict[str, Any]:
         snapshot = registry.snapshot(call_id)

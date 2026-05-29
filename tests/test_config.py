@@ -39,6 +39,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(result["stt_pipeline"], [{"name": "stt"}])
         self.assertEqual(result["stt_provider"], settings.stt_provider)
         self.assertEqual(result["agent_task_responded_event_retention"], 10000)
+        self.assertEqual(result["call_state_store_provider"], "json")
+        self.assertEqual(result["call_state_store_path"], "/data/call_states.json")
         self.assertEqual(result["allowed_workspace_ids"], [])
 
     def test_agent_task_retention_can_be_configured(self) -> None:

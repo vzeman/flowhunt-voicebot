@@ -324,6 +324,12 @@ Response:
 
 The exact call snapshot fields depend on active session state.
 
+### GET `/calls/state-store`
+
+Internal runtime diagnostics endpoint. Returns persisted call snapshots from the
+configured call-state store. Set `active_only=true` to return only snapshots
+whose last stored state is `active`.
+
 ### GET `/calls/{call_id}`
 
 Returns one active call snapshot.

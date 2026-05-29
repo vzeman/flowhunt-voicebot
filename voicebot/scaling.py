@@ -155,6 +155,7 @@ class WorkerRegistry:
         self,
         role: WorkerRole | None = None,
         workspace_id: str | None = None,
+        voicebot_id: str | None = None,
         now: datetime | None = None,
     ) -> tuple[WorkerInstance, ...]:
         current = now or datetime.now(UTC)
@@ -165,6 +166,7 @@ class WorkerRegistry:
             if worker.status == "active"
             and (role is None or worker.role == role)
             and (workspace_id is None or worker.workspace_id in (None, workspace_id))
+            and (voicebot_id is None or worker.voicebot_id in (None, voicebot_id))
         )
 
     def expire(self, now: datetime | None = None) -> tuple[WorkerInstance, ...]:
@@ -181,8 +183,13 @@ class WorkerRegistry:
         self.expire(current)
         return {"workers": [worker.as_dict() for worker in sorted(self._workers.values(), key=lambda item: item.worker_id)]}
 
-    def capacity_summary(self, workspace_id: str | None = None, now: datetime | None = None) -> dict:
-        workers = self.active(workspace_id=workspace_id, now=now)
+    def capacity_summary(
+        self,
+        workspace_id: str | None = None,
+        voicebot_id: str | None = None,
+        now: datetime | None = None,
+    ) -> dict:
+        workers = self.active(workspace_id=workspace_id, voicebot_id=voicebot_id, now=now)
         roles: dict[str, dict[str, int]] = {}
         for worker in workers:
             role = roles.setdefault(worker.role, {"workers": 0, "capacity": 0})
@@ -190,6 +197,7 @@ class WorkerRegistry:
             role["capacity"] += worker.capacity
         return {
             "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
             "roles": dict(sorted(roles.items())),
             "total_workers": len(workers),
             "total_capacity": sum(worker.capacity for worker in workers),

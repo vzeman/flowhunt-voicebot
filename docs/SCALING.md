@@ -85,6 +85,10 @@ Backpressure must exist at multiple levels:
 - per provider
 - per worker role
 
+`WorkspaceBackpressure` is the local contract for this accounting. It requires a
+positive inflight limit and non-blank keys, so invalid capacity controls fail
+before accepting or releasing work.
+
 STT and TTS workers also need provider-aware limits because external APIs can
 rate-limit independently from workspace capacity.
 

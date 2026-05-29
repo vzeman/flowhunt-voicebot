@@ -7,7 +7,13 @@ import unittest
 from voicebot.config import Settings
 from voicebot.events import EventStore, JsonEventStore, event_from_dict
 from voicebot.agent_tasks import AgentTaskTracker, JsonAgentTaskTracker
-from voicebot.runtime_storage import build_agent_task_tracker, build_event_store, build_voicebot_session_store
+from voicebot.runtime_storage import (
+    build_agent_task_tracker,
+    build_event_store,
+    build_voicebot_session_store,
+    build_worker_queue_store,
+)
+from voicebot.scaling import JsonWorkerQueueStore, RoutingKey, WorkerQueueEnvelope, WorkerQueueStore
 from voicebot.transcripts import TranscriptStore
 from voicebot.workspace_model import JsonVoicebotSessionStore, VoicebotSessionRecord, VoicebotSessionStore
 
@@ -232,6 +238,35 @@ class DurableEventTests(unittest.TestCase):
 
         self.assertIsInstance(tracker, AgentTaskTracker)
         self.assertNotIsInstance(tracker, JsonAgentTaskTracker)
+
+    def test_runtime_builder_selects_json_worker_queue_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = Settings(
+                worker_queue_store_provider="json",
+                worker_queue_store_path=f"{directory}/worker_queue.json",
+            )
+
+            store = build_worker_queue_store(settings)
+            store.enqueue(
+                WorkerQueueEnvelope(
+                    item_id="item-1",
+                    kind="agent_turn",
+                    routing=RoutingKey("workspace-1", "voicebot-1"),
+                    queue="voicebot.agent",
+                )
+            )
+            reloaded = build_worker_queue_store(settings)
+
+        self.assertIsInstance(store, JsonWorkerQueueStore)
+        self.assertEqual([item.item_id for item in reloaded.pending("voicebot.agent")], ["item-1"])
+
+    def test_runtime_builder_can_select_memory_worker_queue_store(self) -> None:
+        settings = Settings(worker_queue_store_provider="memory")
+
+        store = build_worker_queue_store(settings)
+
+        self.assertIsInstance(store, WorkerQueueStore)
+        self.assertNotIsInstance(store, JsonWorkerQueueStore)
 
 
 if __name__ == "__main__":

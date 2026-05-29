@@ -11,6 +11,7 @@ from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.scaling import (
     RoutingKey,
+    JsonWorkerQueueStore,
     WorkerInstance,
     WorkerQueueEnvelope,
     WorkerQueueStore,
@@ -203,6 +204,65 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual([item["item_id"] for item in snapshot["pending"]["voicebot.sessions"]], ["item-2"])
         self.assertEqual(snapshot["claimed"][0]["item"]["item_id"], "item-1")
         self.assertEqual(snapshot["claimed"][0]["owner"], "worker-1")
+
+    def test_json_worker_queue_store_persists_pending_and_claimed_items(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/queue.json"
+            now = datetime.now(UTC)
+            first = JsonWorkerQueueStore(path)
+            first.enqueue(
+                WorkerQueueEnvelope(
+                    item_id="pending-1",
+                    kind="agent_turn",
+                    routing=RoutingKey("workspace-1", "voicebot-1"),
+                    queue="voicebot.agent",
+                    created_at=now.isoformat(),
+                )
+            )
+            first.enqueue(
+                WorkerQueueEnvelope(
+                    item_id="claimed-1",
+                    kind="agent_turn",
+                    routing=RoutingKey("workspace-1", "voicebot-1"),
+                    queue="voicebot.agent",
+                    created_at=now.isoformat(),
+                )
+            )
+            first.claim("voicebot.agent", "worker-1", limit=1, ttl_seconds=60, now=now)
+
+            reloaded = JsonWorkerQueueStore(path)
+
+        self.assertEqual([item.item_id for item in reloaded.pending("voicebot.agent")], ["claimed-1"])
+        self.assertEqual([claim["item"]["item_id"] for claim in reloaded.claimed(now=now)], ["pending-1"])
+        self.assertEqual(reloaded.load_diagnostics["loaded_pending"], 1)
+        self.assertEqual(reloaded.load_diagnostics["loaded_claimed"], 1)
+
+    def test_json_worker_queue_store_requeues_expired_claims_on_reload(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/queue.json"
+            first = JsonWorkerQueueStore(path)
+            first.enqueue(
+                WorkerQueueEnvelope(
+                    item_id="item-1",
+                    kind="agent_turn",
+                    routing=RoutingKey("workspace-1", "voicebot-1"),
+                    queue="voicebot.agent",
+                )
+            )
+            first.claim("voicebot.agent", "worker-1", ttl_seconds=0.1)
+
+            import time
+
+            time.sleep(0.12)
+            reloaded = JsonWorkerQueueStore(path)
+
+        self.assertEqual([item.item_id for item in reloaded.pending("voicebot.agent")], ["item-1"])
+        self.assertEqual(reloaded.claimed(), ())
+        self.assertEqual(reloaded.load_diagnostics["requeued_expired_claims"], 1)
 
     def test_workload_plan_includes_partition_provider_keys_and_capacity_flags(self) -> None:
         plan = build_workload_plan(

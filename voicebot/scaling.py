@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+import json
+from pathlib import Path
 from typing import Any, Literal, get_args
 
 
@@ -398,6 +400,150 @@ class WorkerQueueStore:
         }
 
 
+class JsonWorkerQueueStore(WorkerQueueStore):
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.load_diagnostics: dict[str, int] = {
+            "loaded_pending": 0,
+            "loaded_claimed": 0,
+            "requeued_expired_claims": 0,
+            "skipped_malformed_json": 0,
+            "skipped_invalid_items": 0,
+            "skipped_duplicate_item_ids": 0,
+        }
+        super().__init__()
+        self._load()
+
+    def enqueue(self, envelope: WorkerQueueEnvelope) -> WorkerQueueEnvelope:
+        item = super().enqueue(envelope)
+        self._save()
+        return item
+
+    def claim(
+        self,
+        queue: str,
+        owner: str,
+        *,
+        limit: int = 1,
+        ttl_seconds: float = 30.0,
+        now: datetime | None = None,
+    ) -> tuple[WorkerQueueEnvelope, ...]:
+        claimed = super().claim(queue, owner, limit=limit, ttl_seconds=ttl_seconds, now=now)
+        self._save()
+        return claimed
+
+    def ack(self, item_id: str, owner: str | None = None) -> WorkerQueueEnvelope | None:
+        item = super().ack(item_id, owner=owner)
+        self._save()
+        return item
+
+    def release(self, item_id: str, owner: str | None = None) -> WorkerQueueEnvelope | None:
+        item = super().release(item_id, owner=owner)
+        self._save()
+        return item
+
+    def expire(self, now: datetime | None = None) -> tuple[WorkerQueueEnvelope, ...]:
+        expired = super().expire(now)
+        if expired:
+            self._save()
+        return expired
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            self.load_diagnostics["skipped_malformed_json"] += 1
+            return
+        seen: set[str] = set()
+        for queue, items in (payload.get("pending") or {}).items():
+            if not isinstance(items, list):
+                self.load_diagnostics["skipped_invalid_items"] += 1
+                continue
+            for item in items:
+                envelope = self._load_envelope(item, seen)
+                if envelope is None:
+                    continue
+                self._pending.setdefault(str(queue), deque()).append(envelope)
+                self._known_item_ids.add(envelope.item_id)
+                self.load_diagnostics["loaded_pending"] += 1
+        now = datetime.now(UTC)
+        for claim in payload.get("claimed") or []:
+            try:
+                envelope = self._load_envelope(claim["item"], seen)
+                owner = str(claim["owner"])
+                expires_at = _parse_time(str(claim["expires_at"]))
+            except (KeyError, TypeError, ValueError):
+                self.load_diagnostics["skipped_invalid_items"] += 1
+                continue
+            if envelope is None:
+                continue
+            if expires_at <= now:
+                self._pending.setdefault(envelope.queue, deque()).append(envelope)
+                self.load_diagnostics["requeued_expired_claims"] += 1
+            else:
+                self._claimed[envelope.item_id] = (envelope, owner, expires_at)
+                self.load_diagnostics["loaded_claimed"] += 1
+            self._known_item_ids.add(envelope.item_id)
+
+    def _load_envelope(self, data: dict[str, Any], seen: set[str]) -> WorkerQueueEnvelope | None:
+        try:
+            envelope = worker_queue_envelope_from_dict(data)
+        except (KeyError, TypeError, ValueError):
+            self.load_diagnostics["skipped_invalid_items"] += 1
+            return None
+        if envelope.item_id in seen:
+            self.load_diagnostics["skipped_duplicate_item_ids"] += 1
+            return None
+        seen.add(envelope.item_id)
+        return envelope
+
+    def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "pending": {
+                queue: [envelope.as_dict() for envelope in envelopes]
+                for queue, envelopes in sorted(self._pending.items())
+                if envelopes
+            },
+            "claimed": [
+                {
+                    "item": envelope.as_dict(),
+                    "owner": owner,
+                    "expires_at": expires_at.isoformat(),
+                }
+                for envelope, owner, expires_at in sorted(
+                    self._claimed.values(),
+                    key=lambda claim: claim[0].item_id,
+                )
+            ],
+        }
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+        tmp.replace(self.path)
+
+
+def worker_queue_envelope_from_dict(data: dict[str, Any]) -> WorkerQueueEnvelope:
+    routing = data["routing"]
+    return WorkerQueueEnvelope(
+        item_id=str(data["item_id"]),
+        kind=str(data["kind"]),  # type: ignore[arg-type]
+        routing=RoutingKey(
+            workspace_id=str(routing["workspace_id"]),
+            voicebot_id=str(routing["voicebot_id"]),
+            session_id=_optional_str(routing.get("session_id")),
+            provider=_optional_str(routing.get("provider")),
+        ),
+        queue=str(data["queue"]),
+        payload=dict(data.get("payload") or {}),
+        trace_id=_optional_str(data.get("trace_id")),
+        created_at=str(data["created_at"]),
+        attempt=int(data.get("attempt") or 0),
+    )
+
+
 @dataclass(frozen=True)
 class WorkloadProfile:
     workspace_id: str
@@ -458,6 +604,13 @@ def _capacity_ok(concurrent_sessions: int, limit: int | None) -> bool | None:
     if limit is None:
         return None
     return concurrent_sessions <= limit
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _parse_time(value: str) -> datetime:

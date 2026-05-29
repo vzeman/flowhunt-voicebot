@@ -68,6 +68,8 @@ completed work, release work back to pending, expire abandoned claims, and
 produce grouped pending/claimed snapshots. It is intentionally in-memory; the
 same lifecycle should move to Redis streams, a database queue, or FlowHunt
 shared infrastructure for production.
+`JsonWorkerQueueStore` persists this local lifecycle for restart recovery during
+development and single-node deployments.
 
 Internal queue endpoints expose this lifecycle for early worker separation:
 

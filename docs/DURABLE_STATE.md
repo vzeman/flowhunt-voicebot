@@ -99,6 +99,22 @@ claim leases survive local service restarts within their configured TTL.
 
 ## Worker Queue
 
+`JsonWorkerRegistry` persists local worker presence records:
+
+- worker id, role, queue, workspace/voicebot affinity, capacity, and status
+- last heartbeat timestamp
+- load diagnostics for malformed JSON, invalid rows, duplicate worker ids, and
+  expired workers skipped during reload
+
+The runtime selects the worker registry store with:
+
+- `VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER=json|memory`
+- `VOICEBOT_WORKER_REGISTRY_STORE_PATH=/data/worker_registry.json`
+- `VOICEBOT_WORKER_REGISTRY_HEARTBEAT_TTL_SECONDS=30`
+
+Docker defaults to `json`, so local worker presence and drain state can recover
+after service restart within the heartbeat TTL.
+
 `JsonWorkerQueueStore` persists the local worker queue lifecycle contract:
 
 - pending worker queue envelopes by queue name

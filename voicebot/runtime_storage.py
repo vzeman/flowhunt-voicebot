@@ -4,7 +4,7 @@ from .agent_tasks import AgentTaskTracker, JsonAgentTaskTracker
 from .config import Settings
 from .call_state import CallStateStore, JsonCallStateStore
 from .events import EventStore, JsonEventStore
-from .scaling import JsonWorkerQueueStore, WorkerQueueStore
+from .scaling import JsonWorkerQueueStore, JsonWorkerRegistry, WorkerQueueStore, WorkerRegistry
 from .transcripts import TranscriptStore
 from .workspace_model import JsonVoicebotSessionStore, VoicebotSessionStore
 
@@ -50,3 +50,14 @@ def build_worker_queue_store(settings: Settings) -> WorkerQueueStore:
     if settings.worker_queue_store_provider in {"memory", "inmemory", "in-memory"}:
         return WorkerQueueStore()
     raise ValueError(f"Unsupported VOICEBOT_WORKER_QUEUE_STORE_PROVIDER: {settings.worker_queue_store_provider}")
+
+
+def build_worker_registry(settings: Settings) -> WorkerRegistry:
+    if settings.worker_registry_store_provider in {"json", "jsonl"}:
+        return JsonWorkerRegistry(
+            settings.worker_registry_store_path,
+            heartbeat_ttl_seconds=settings.worker_registry_heartbeat_ttl_seconds,
+        )
+    if settings.worker_registry_store_provider in {"memory", "inmemory", "in-memory"}:
+        return WorkerRegistry(heartbeat_ttl_seconds=settings.worker_registry_heartbeat_ttl_seconds)
+    raise ValueError(f"Unsupported VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER: {settings.worker_registry_store_provider}")

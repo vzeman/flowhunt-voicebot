@@ -24,9 +24,11 @@ and limits are explicit and testable.
 status. Worker presence records require a worker id, queue, and positive
 capacity. The registry requires a positive heartbeat TTL, can list active
 workers by role/workspace, mark a worker as draining, remove a worker, expire
-stale heartbeats, and summarize active worker capacity by role. The first
-implementation is in-memory; production should back it with Redis or FlowHunt
-shared state.
+stale heartbeats, and summarize active worker capacity by role. Runtime can use
+`JsonWorkerRegistry` for local restart recovery via
+`VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER=json` and
+`VOICEBOT_WORKER_REGISTRY_STORE_PATH=/data/worker_registry.json`; production
+should back the same contract with Redis or FlowHunt shared state.
 
 A worker id is bound to its role and queue. Heartbeats may update status,
 capacity, workspace affinity, and heartbeat time, but they cannot silently move

@@ -5,7 +5,6 @@ import threading
 
 import uvicorn
 
-from .agent_tasks import AgentTaskTracker
 from .api import WebSocketHub, create_app
 from .asterisk_control import AsteriskAMI
 from .audiosocket_server import ThreadingAudioSocketServer
@@ -14,7 +13,7 @@ from .config import Settings
 from .events import EventStore
 from .flowhunt import FlowHuntClient
 from .provider_registry import default_provider_registry
-from .runtime_storage import build_event_store, build_voicebot_session_store
+from .runtime_storage import build_agent_task_tracker, build_event_store, build_voicebot_session_store
 from .sip_trunks import SipTrunkStore
 from .subagents import FlowHuntSubagentProvider, JsonSubagentTaskStore, SubagentCoordinator
 from .transcripts import TranscriptStore
@@ -28,7 +27,7 @@ def main() -> None:
     events = build_event_store(settings, transcripts)
     voicebot_sessions = build_voicebot_session_store(settings)
     registry = CallRegistry()
-    tracker = AgentTaskTracker(settings.agent_task_responded_event_retention)
+    tracker = build_agent_task_tracker(settings)
     sip_trunks = SipTrunkStore(settings.sip_trunk_registry_path, settings.sip_trunk_pjsip_include_path)
     subagents = build_subagent_coordinator(settings, events)
     asterisk = (

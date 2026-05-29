@@ -6,7 +6,8 @@ import unittest
 
 from voicebot.config import Settings
 from voicebot.events import EventStore, JsonEventStore, event_from_dict
-from voicebot.runtime_storage import build_event_store, build_voicebot_session_store
+from voicebot.agent_tasks import AgentTaskTracker, JsonAgentTaskTracker
+from voicebot.runtime_storage import build_agent_task_tracker, build_event_store, build_voicebot_session_store
 from voicebot.transcripts import TranscriptStore
 from voicebot.workspace_model import JsonVoicebotSessionStore, VoicebotSessionRecord, VoicebotSessionStore
 
@@ -207,6 +208,30 @@ class DurableEventTests(unittest.TestCase):
 
         self.assertIsInstance(store, VoicebotSessionStore)
         self.assertNotIsInstance(store, JsonVoicebotSessionStore)
+
+    def test_runtime_builder_selects_json_agent_task_tracker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = Settings(
+                agent_task_store_provider="json",
+                agent_task_store_path=f"{directory}/agent_tasks.json",
+                agent_task_responded_event_retention=5,
+            )
+
+            tracker = build_agent_task_tracker(settings)
+            tracker.mark_responded(7)
+            reloaded = build_agent_task_tracker(settings)
+
+        self.assertIsInstance(tracker, JsonAgentTaskTracker)
+        self.assertEqual(reloaded.snapshot()["responded_event_ids"], [7])
+        self.assertEqual(reloaded.snapshot()["responded_event_id_retention"], 5)
+
+    def test_runtime_builder_can_select_memory_agent_task_tracker(self) -> None:
+        settings = Settings(agent_task_store_provider="memory")
+
+        tracker = build_agent_task_tracker(settings)
+
+        self.assertIsInstance(tracker, AgentTaskTracker)
+        self.assertNotIsInstance(tracker, JsonAgentTaskTracker)
 
 
 if __name__ == "__main__":

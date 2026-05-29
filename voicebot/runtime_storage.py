@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .agent_tasks import AgentTaskTracker, JsonAgentTaskTracker
 from .config import Settings
 from .events import EventStore, JsonEventStore
 from .transcripts import TranscriptStore
@@ -20,3 +21,14 @@ def build_voicebot_session_store(settings: Settings) -> VoicebotSessionStore:
     if settings.voicebot_session_store_provider in {"memory", "inmemory", "in-memory"}:
         return VoicebotSessionStore()
     raise ValueError(f"Unsupported VOICEBOT_SESSION_STORE_PROVIDER: {settings.voicebot_session_store_provider}")
+
+
+def build_agent_task_tracker(settings: Settings) -> AgentTaskTracker:
+    if settings.agent_task_store_provider in {"json", "jsonl"}:
+        return JsonAgentTaskTracker(
+            settings.agent_task_store_path,
+            max_responded_event_ids=settings.agent_task_responded_event_retention,
+        )
+    if settings.agent_task_store_provider in {"memory", "inmemory", "in-memory"}:
+        return AgentTaskTracker(settings.agent_task_responded_event_retention)
+    raise ValueError(f"Unsupported VOICEBOT_AGENT_TASK_STORE_PROVIDER: {settings.agent_task_store_provider}")

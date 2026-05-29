@@ -83,6 +83,14 @@ On restart, unexpired claims are restored and expired claims are dropped. This i
 still a local JSON implementation, but it makes the lease persistence contract
 explicit before the tracker moves to Redis or FlowHunt database-backed leases.
 
+The runtime selects the agent task tracker with:
+
+- `VOICEBOT_AGENT_TASK_STORE_PROVIDER=json|memory`
+- `VOICEBOT_AGENT_TASK_STORE_PATH=/data/agent_tasks.json`
+
+Docker defaults to `json`, so communication-agent task responses and active
+claim leases survive local service restarts within their configured TTL.
+
 ## Production Direction
 
 The JSON stores are implementation scaffolding. In FlowHunt production:

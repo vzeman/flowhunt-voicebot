@@ -12,6 +12,7 @@ from voicebot.config import Settings
 from voicebot.events import EventStore
 from voicebot.runtime_storage import (
     build_agent_task_tracker,
+    build_audio_artifact_store,
     build_event_store,
     build_subagent_task_store,
     build_transcript_store,
@@ -70,16 +71,19 @@ class StorageDriverTests(unittest.TestCase):
                 transcript_dir=f"{directory}/transcripts",
                 agent_task_store_path=f"{directory}/agent_tasks.json",
                 subagent_task_store_path=f"{directory}/subagent_tasks.json",
+                tts_cache_dir=f"{directory}/tts-cache",
             )
             transcripts = build_transcript_store(settings)
             events = build_event_store(settings, transcripts)
             agent_tasks = build_agent_task_tracker(settings)
             subagent_tasks = build_subagent_task_store(settings)
+            artifacts = build_audio_artifact_store(settings)
 
         self.assertEqual(attached_storage_driver(transcripts).family, "transcripts")
         self.assertEqual(attached_storage_driver(events).driver, "jsonl")
         self.assertEqual(attached_storage_driver(agent_tasks).family, "agent_tasks")
         self.assertEqual(attached_storage_driver(subagent_tasks).family, "subagent_tasks")
+        self.assertEqual(attached_storage_driver(artifacts).family, "audio_artifacts")
 
     def test_jsonl_alias_still_selects_json_for_object_stores(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
@@ -88,6 +89,23 @@ class TTSCacheTests(unittest.TestCase):
 
         self.assertEqual(first_inner.calls, 1)
         self.assertEqual(second_inner.calls, 1)
+
+    def test_cached_tts_writes_artifact_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            inner = CountingTTS()
+            provider = CachedTTSProvider(
+                inner,
+                directory,
+                TTSCacheConfig(provider="openai", model="tts-model", voice="alloy", language="en"),
+            )
+
+            provider.synthesize("Hello")
+
+            metadata_files = list(Path(directory).glob("*.metadata.json"))
+            metadata = metadata_files[0].read_text(encoding="utf-8")
+
+        self.assertEqual(len(metadata_files), 1)
+        self.assertIn('"kind": "tts_cache"', metadata)
 
     def test_pcm16le_bytes_to_float32_ignores_trailing_odd_byte(self) -> None:
         audio = pcm16le_bytes_to_float32(b"\x00\x40\xff")

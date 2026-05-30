@@ -96,6 +96,24 @@ Reusable contract tests live in `tests/storage_contract_cases.py`. New drivers
 should run the same lifecycle tests as the local memory/JSON/JSONL drivers
 before they are enabled in production configuration.
 
+## Audio Artifacts
+
+`FilesystemArtifactStore` is the first concrete audio artifact driver. It stores
+binary artifacts under a configured root and writes sidecar metadata files with
+the `.metadata.json` suffix. The TTS cache now writes through this artifact
+interface, so the generated audio cache follows the same `put/get/delete/list`
+contract that an object-storage driver must implement later.
+
+The current local TTS cache still uses:
+
+- `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER=filesystem`
+- `VOICEBOT_TTS_CACHE_DIR=/data/tts-cache`
+
+The managed production target remains object storage plus a DB metadata index.
+Production object-storage drivers must keep artifact metadata workspace-scoped
+and must not make recordings, debug audio, or generated speech publicly
+readable unless a separate authenticated access layer issues a signed URL.
+
 Retention and deletion policy is exposed separately by
 `GET /workspaces/{workspace_id}/security/retention`. The policy defines
 workspace-scoped deletion hooks for events, transcripts, recordings/debug

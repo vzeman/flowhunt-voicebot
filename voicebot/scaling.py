@@ -1039,8 +1039,10 @@ def latency_metric_signals(events: list[Any]) -> dict[str, Any]:
         "stt_duration_seconds",
         "tts_duration_seconds",
         "tts_synthesis_latency_seconds",
+        "tts_first_audio_latency_seconds",
         "agent_response_latency_seconds",
         "end_of_speech_to_first_audio_seconds",
+        "end_of_speech_to_playback_started_seconds",
     }
     values: dict[str, list[float]] = {}
     for event in events:

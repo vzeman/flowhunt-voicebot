@@ -65,6 +65,7 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/transports", "transport", "public", description="List transport capabilities."),
     ApiEndpointSpec("GET", "/sip/media-plane", "transport", "internal", workspace_scoped=False, scope_source="none", description="Inspect SIP/Asterisk media-plane HA contract."),
     ApiEndpointSpec("GET", "/webrtc/media-plane", "transport", "internal", workspace_scoped=False, scope_source="none", description="Inspect WebRTC media-plane scale contract."),
+    ApiEndpointSpec("GET", "/realtime/audio-profile", "runtime", "internal", workspace_scoped=False, scope_source="none", description="Inspect realtime audio quality profile and validation issues."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions", "session", "public", description="List sessions."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}", "session", "public", description="Read session."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/timeline", "session", "public", description="Event timeline."),

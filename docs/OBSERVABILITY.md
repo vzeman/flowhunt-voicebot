@@ -46,6 +46,11 @@ Current SLO checks include:
 Targets are intentionally explicit in the API response so production alerting
 can map them to Prometheus, Datadog, OpenTelemetry, or FlowHunt-native monitors.
 
+Realtime audio metrics include `tts_first_audio_latency_seconds`; transports or
+workers may also emit `end_of_speech_to_playback_started_seconds` for full
+caller-finished to first-bot-audio latency. These are consumed by
+`/scaling/signals`, `/observability/timeline`, and `/observability/slo`.
+
 ## Diagnostics
 
 Diagnostics summarize:

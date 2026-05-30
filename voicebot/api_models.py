@@ -133,6 +133,7 @@ class WorkerQueueEnqueueRequest(BaseModel):
     attempt: int = 0
     idempotency_key: str | None = None
     max_attempts: int = 3
+    priority: str | None = None
 
 
 class WorkerQueueClaimRequest(BaseModel):

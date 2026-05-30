@@ -107,6 +107,7 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("POST", "/scaling/backpressure/acquire", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Acquire workspace voicebot/provider capacity."),
     ApiEndpointSpec("POST", "/scaling/backpressure/release", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Release workspace voicebot/provider capacity."),
     ApiEndpointSpec("GET", "/scaling/queue", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Inspect local worker queue."),
+    ApiEndpointSpec("GET", "/scaling/queue/priorities", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Inspect worker queue priority classes and routing rules."),
     ApiEndpointSpec("POST", "/scaling/queue/enqueue", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Enqueue worker item."),
     ApiEndpointSpec("POST", "/scaling/queue/claim", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Claim worker queue items."),
     ApiEndpointSpec("POST", "/scaling/queue/renew", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Renew a claimed worker queue item."),

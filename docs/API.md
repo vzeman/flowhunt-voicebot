@@ -1860,6 +1860,12 @@ Stops active media sessions that no longer have a valid owner lease and emits
 
 Returns local worker queue pending and claimed snapshots.
 
+### GET `/scaling/queue/priorities`
+
+Returns the configured priority classes and routing rules. Claim order is
+`high`, then `normal`, then `background`, with FIFO preserved inside each
+priority.
+
 ### POST `/scaling/queue/enqueue`
 
 Enqueues a worker item in the local queue lifecycle store.
@@ -1872,6 +1878,7 @@ Enqueues a worker item in the local queue lifecycle store.
   "queue": "voicebot.agent",
   "payload": {"event_id": 42},
   "trace_id": "trace-1",
+  "priority": "normal",
   "idempotency_key": "session-1:event-42",
   "max_attempts": 3
 }

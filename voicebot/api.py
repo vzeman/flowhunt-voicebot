@@ -115,7 +115,9 @@ from .scaling import (
     autoscaling_signals,
     autoscaling_signals_prometheus,
     build_workload_plan,
+    default_work_priority,
     default_deployment_topology,
+    priority_routing_rules,
 )
 from .session_leases import SessionLeaseStore
 from .security_contract import redact_sensitive_data, security_contract_issues, security_contract_payload
@@ -1421,6 +1423,7 @@ def create_app(
                     attempt=request.attempt,
                     idempotency_key=request.idempotency_key,
                     max_attempts=request.max_attempts,
+                    priority=request.priority or default_work_priority(request.kind, request.payload),
                 )
             )
         except ValueError as exc:
@@ -1439,6 +1442,10 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         return {"items": [item.as_dict() for item in claimed]}
+
+    @app.get("/scaling/queue/priorities")
+    def scaling_queue_priorities() -> dict[str, Any]:
+        return priority_routing_rules()
 
     @app.post("/scaling/queue/renew")
     def scaling_queue_renew(request: WorkerQueueItemRequest) -> dict[str, Any]:

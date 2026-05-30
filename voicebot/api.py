@@ -88,6 +88,7 @@ from .multimodal import (
 )
 from .observability import ConversationExpectation, build_timeline, diagnostics_summary, evaluate_conversation, evaluate_slos
 from .pipeline_contract import pipeline_contract_payload
+from .progress import ProgressCadenceMemory, normalize_progress_message
 from .provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities, provider_catalog
 from .provider_config import (
     ProviderChoice,
@@ -246,6 +247,7 @@ def create_app(
     runtime_config_store = runtime_configs or VoicebotRuntimeConfigStore()
     prompt_config_store = prompt_configs or VoicebotPromptConfigStore()
     workspace_access_policy = workspace_policy or workspace_access_policy_from_settings(runtime_settings)
+    delegated_progress_memory = ProgressCadenceMemory(runtime_settings.flowhunt_progress_update_seconds)
     subagent_terminal_events: list[VoicebotEvent] = []
 
     def require_workspace_access(workspace_id: str) -> None:
@@ -2321,6 +2323,8 @@ def create_app(
             schedule_tool_progress(
                 call_id,
                 "I will ask a colleague to check that and come back with the result.",
+                progress_key=f"{call_id}:{response_to_event_id or project_id}:initial",
+                min_interval_seconds=1.0,
             )
         tracker.mark_responded(response_to_event_id)
         requested = events.append(
@@ -2405,7 +2409,12 @@ def create_app(
             }
         scope = subagent_scope_from_call(call_id)
         if not args.get("suppress_progress"):
-            schedule_tool_progress(call_id, "I will ask a colleague to check that and come back with the result.")
+            schedule_tool_progress(
+                call_id,
+                "I will ask a colleague to check that and come back with the result.",
+                progress_key=f"{call_id}:{response_to_event_id or provider}:initial",
+                min_interval_seconds=1.0,
+            )
         tracker.mark_responded(response_to_event_id)
         requested = events.append(
             call_id,
@@ -2462,6 +2471,8 @@ def create_app(
             schedule_tool_progress(
                 call_id,
                 "I will ask a FlowHunt colleague to check that and come back with the result.",
+                progress_key=f"{call_id}:{response_to_event_id or flow_id}:initial",
+                min_interval_seconds=1.0,
             )
         tracker.mark_responded(response_to_event_id)
         invoked = events.append(
@@ -2618,12 +2629,31 @@ def create_app(
         if session is None:
             return
         try:
-            session.submit_agent_response(AgentResponse(call_id=call_id, text=text))
+            session.submit_agent_response(AgentResponse(call_id=call_id, text=normalize_progress_message(text)))
         except Exception as exc:
             events.append(call_id, "agent_response_dropped", {"reason": "progress_playback_failed", "error": str(exc)})
 
-    def schedule_tool_progress(call_id: str, text: str) -> None:
-        threading.Thread(target=speak_tool_progress_sync, args=(call_id, text), daemon=True).start()
+    def schedule_tool_progress(
+        call_id: str,
+        text: str,
+        *,
+        progress_key: str | None = None,
+        min_interval_seconds: float | None = None,
+    ) -> None:
+        key = progress_key or f"{call_id}:tool-progress"
+        normalized = normalize_progress_message(text)
+        if not delegated_progress_memory.should_speak(
+            key,
+            normalized,
+            min_interval_seconds=min_interval_seconds,
+        ):
+            events.append(
+                call_id,
+                "agent_response_dropped",
+                {"reason": "duplicate_progress_suppressed", "progress_key": key, "text": normalized},
+            )
+            return
+        threading.Thread(target=speak_tool_progress_sync, args=(call_id, normalized), daemon=True).start()
 
     async def request_communication_agent(
         call_id: str,
@@ -2759,12 +2789,15 @@ def create_app(
             if now >= next_progress:
                 update = extract_issue_updates(response)
                 state_text = extract_issue_state(response)
+                message = normalize_progress_message(
+                    update or (f"Current status is {state_text}." if state_text else "Still in progress.")
+                )
                 updated = events.append(
                     call_id,
                     "flowhunt_issue_updated",
                     {
                         "ok": True,
-                        "message": update or (f"Current status is {state_text}." if state_text else "Still in progress."),
+                        "message": message,
                         "project_id": project_id,
                         "issue_id": issue_id,
                         "response_to_event_id": response_to_event_id,
@@ -2782,7 +2815,7 @@ def create_app(
             return FlowHuntResult(True, result, latest.data)
         if state and is_terminal_issue_state(state):
             ok = state not in {"failed", "error", "cancelled", "canceled", "human_input_needed"}
-            message = update or f"The colleague task finished with status {state}."
+            message = normalize_progress_message(update or f"The colleague task finished with status {state}.")
             return FlowHuntResult(ok, message, latest.data)
         data = dict(latest.data)
         data["pending"] = True
@@ -2847,7 +2880,7 @@ def create_app(
             update = extract_issue_updates(response)
             state = extract_issue_state(response).lower()
             if result or is_terminal_issue_state(state):
-                message = result or update or f"The colleague task finished with status {state}."
+                message = normalize_progress_message(result or update or f"The colleague task finished with status {state}.")
                 completed = events.append(
                     call_id,
                     "flowhunt_issue_completed",
@@ -2876,8 +2909,12 @@ def create_app(
 
             now = asyncio.get_running_loop().time()
             if now >= next_progress:
-                message = update or "The colleague task is still in progress."
-                if message == last_progress_message:
+                message = normalize_progress_message(update or "The colleague task is still in progress.")
+                if message == last_progress_message or not delegated_progress_memory.should_speak(
+                    f"{call_id}:{issue_id}:progress",
+                    message,
+                    min_interval_seconds=progress_update_seconds,
+                ):
                     next_progress = now + max(1.0, progress_update_seconds)
                     continue
                 last_progress_message = message

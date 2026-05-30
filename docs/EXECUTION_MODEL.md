@@ -156,6 +156,12 @@ Partial STT settings:
 - `VOICEBOT_STT_PARTIAL_MIN_CHARS`: minimum recognized text length before a
   partial event is persisted. Default `4`.
 
+Final STT results are persisted even when they are stale, so operators can audit
+what the recognizer returned. Stale final transcripts and very short low-signal
+fragments are not converted into communication-agent requests; the runtime emits
+`stt_result_dropped` instead. `VOICEBOT_AGENT_MIN_TRANSCRIPT_CHARS` and
+`VOICEBOT_AGENT_MIN_TRANSCRIPT_TOKENS` control the low-signal gate.
+
 ## Streaming Agent To TTS
 
 Agent providers can expose a provider-neutral streaming response interface that

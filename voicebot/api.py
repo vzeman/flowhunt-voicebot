@@ -121,6 +121,7 @@ from .security_contract import redact_sensitive_data, security_contract_issues, 
 from .sip_media_plane import sip_media_plane_payload
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .storage_contracts import storage_contracts_payload
+from .runtime_storage import storage_drivers_payload
 from .runtime_config import (
     VoicebotPromptConfig,
     VoicebotQuotaConfig,
@@ -433,6 +434,10 @@ def create_app(
     @app.get("/storage/contracts")
     def storage_contracts() -> dict[str, Any]:
         return storage_contracts_payload()
+
+    @app.get("/storage/drivers")
+    def storage_drivers() -> dict[str, Any]:
+        return storage_drivers_payload(runtime_settings)
 
     @app.get("/security/contract")
     def security_contract() -> dict[str, Any]:

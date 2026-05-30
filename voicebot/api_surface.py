@@ -80,6 +80,7 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("POST", "/subagent/tasks/{task_id}/cancel", "task", "internal", workspace_scoped=True, scope_source="payload", description="Cancel a provider-neutral delegated colleague task."),
     ApiEndpointSpec("GET", "/scaling/topology", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Inspect worker topology."),
     ApiEndpointSpec("GET", "/deployment/topology", "runtime", "internal", workspace_scoped=False, scope_source="none", description="Inspect local-to-Kubernetes deployment role topology."),
+    ApiEndpointSpec("GET", "/storage/drivers", "runtime", "internal", workspace_scoped=False, scope_source="none", description="Inspect selected storage drivers and registered driver catalog."),
     ApiEndpointSpec("GET", "/health/liveness", "runtime", "internal", workspace_scoped=False, scope_source="none", description="Lightweight liveness check."),
     ApiEndpointSpec("GET", "/health/readiness/roles", "runtime", "internal", workspace_scoped=False, scope_source="none", description="Inspect role-specific readiness for enabled runtime roles."),
     ApiEndpointSpec("GET", "/operations/drain", "runtime", "internal", workspace_scoped=False, scope_source="none", description="Inspect runtime drain and rollout contract."),

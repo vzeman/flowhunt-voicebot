@@ -149,6 +149,57 @@ Response:
 }
 ```
 
+### GET `/storage/drivers`
+
+Lists the storage driver registry and the currently selected driver per storage
+family. This endpoint is operational metadata only; it does not expose stored
+records or secrets.
+
+Response:
+
+```json
+{
+  "registry": {
+    "families": {
+      "events": [
+        {
+          "family": "events",
+          "driver": "jsonl",
+          "scope": "node",
+          "managed": false,
+          "supports_local_dev": true,
+          "supports_production": false,
+          "consistency": "append-only JSONL event log",
+          "idempotency_fields": [],
+          "required_scope_fields": [],
+          "notes": ""
+        }
+      ]
+    }
+  },
+  "selected": {
+    "events": {
+      "family": "events",
+      "driver": "jsonl",
+      "configured_driver": "json",
+      "path": "/data/events/events.jsonl"
+    },
+    "audio_artifacts": {
+      "family": "audio_artifacts",
+      "driver": "filesystem",
+      "configured_driver": "filesystem",
+      "path": "/data/tts-cache"
+    }
+  }
+}
+```
+
+### GET `/storage/contracts`
+
+Lists the storage contract catalog: required scope fields, idempotency fields,
+local providers, and intended production backend classes for every storage
+family.
+
 ### GET `/health/readiness/roles`
 
 Returns readiness grouped by enabled deployment role from

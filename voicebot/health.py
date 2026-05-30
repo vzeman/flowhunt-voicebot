@@ -12,6 +12,7 @@ from .provider_catalog import provider_catalog
 from .config import Settings
 from .security_contract import security_contract_issues, security_contract_payload
 from .sip_media_plane import sip_media_plane_issues, sip_media_plane_payload
+from .storage import attached_storage_driver
 from .storage_contracts import storage_contract_issues, storage_contracts_payload
 from .realtime_quality import realtime_audio_profile, realtime_audio_profile_issues
 from .webrtc_media_plane import webrtc_media_plane_issues, webrtc_media_plane_payload
@@ -223,9 +224,11 @@ def store_diagnostics(component: Any) -> dict[str, Any]:
     path = getattr(component, "path", None)
     diagnostics = dict(getattr(component, "load_diagnostics", {}) or {})
     snapshot = component_snapshot(component)
+    driver = attached_storage_driver(component)
     details: dict[str, Any] = {
         "kind": component.__class__.__name__,
         "path": str(path) if path is not None else None,
+        "driver": driver.to_dict() if driver is not None else None,
         "load_diagnostics": diagnostics,
         "warning_count": recovery_warning_count(diagnostics),
         "snapshot": snapshot,

@@ -17,6 +17,11 @@ idempotency keys, and consistency expectation. The same catalog is also checked
 from `GET /health/readiness` under `storage_contracts`, so missing scope or
 idempotency definitions fail readiness diagnostics before Kubernetes work starts.
 
+`GET /storage/drivers` exposes the storage driver registry and the currently
+selected driver for each family. It is the operational view of the same
+abstraction layer: contracts describe what each family must do, while drivers
+describe which implementation is selected in this environment.
+
 The current contract families are:
 
 | Contract | Local provider | Production backend direction | Idempotency |
@@ -37,6 +42,37 @@ The current contract families are:
 Every production implementation must preserve the same public semantics as the
 local provider: workspace-scoped reads, idempotent retries where expected,
 diagnostics for skipped/recovered rows, and no raw secrets in API responses.
+
+## Driver Configuration
+
+Storage is selected per family by environment variables. Local Docker defaults
+use JSON, JSONL, memory, and filesystem drivers. Managed drivers are registered
+in the driver catalog so configuration and readiness can describe the production
+target, but only local drivers are implemented in this slice.
+
+| Family | Provider env var | Default | Path/config env var | Current drivers | Managed target |
+| --- | --- | --- | --- | --- | --- |
+| `events` | `VOICEBOT_EVENT_STORE_PROVIDER` | `json` | `VOICEBOT_EVENT_STORE_PATH` | `json`, `jsonl`, `memory` | `flowhunt_db`, `append_only_event_log` |
+| `transcripts` | `VOICEBOT_TRANSCRIPT_STORE_PROVIDER` | `jsonl` | `VOICEBOT_TRANSCRIPT_DIR` | `jsonl` | `flowhunt_db`, `object_storage` |
+| `voicebot_sessions` | `VOICEBOT_SESSION_STORE_PROVIDER` | `json` | `VOICEBOT_SESSION_STORE_PATH` | `json`, `memory` | `flowhunt_db` |
+| `session_leases` | `VOICEBOT_SESSION_LEASE_STORE_PROVIDER` | `json` | `VOICEBOT_SESSION_LEASE_STORE_PATH` | `json`, `memory` | `redis` |
+| `agent_tasks` | `VOICEBOT_AGENT_TASK_STORE_PROVIDER` | `json` | `VOICEBOT_AGENT_TASK_STORE_PATH` | `json`, `memory` | `redis`, `flowhunt_db` |
+| `worker_queue` | `VOICEBOT_WORKER_QUEUE_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_QUEUE_STORE_PATH` | `json`, `memory` | `redis_streams`, `nats_jetstream`, `rabbitmq`, `flowhunt_queue` |
+| `worker_registry` | `VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_REGISTRY_STORE_PATH` | `json`, `memory` | `redis`, `flowhunt_db` |
+| `call_states` | `VOICEBOT_CALL_STATE_STORE_PROVIDER` | `json` | `VOICEBOT_CALL_STATE_STORE_PATH` | `json`, `memory` | `redis`, `flowhunt_db` |
+| `provider_config` | internal | `memory` | environment/runtime config | `memory` | `flowhunt_db`, secret references |
+| `sip_trunks` | `VOICEBOT_SIP_TRUNK_STORE_PROVIDER` | `json` | `VOICEBOT_SIP_TRUNK_REGISTRY_PATH`, `VOICEBOT_SIP_TRUNK_PJSIP_INCLUDE_PATH` | `json` | `flowhunt_db`, secret references |
+| `subagent_tasks` | `VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER` | `json` | `VOICEBOT_SUBAGENT_TASK_STORE_PATH` | `json`, `memory` | `flowhunt_db`, `redis`, `flowhunt_queue` |
+| `audio_artifacts` | `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER` | `filesystem` | `VOICEBOT_TTS_CACHE_DIR`, `VOICEBOT_DEBUG_AUDIO_DIR` | `filesystem` | `object_storage`, CDN/cache |
+
+Compatibility note: existing `json` and `jsonl` aliases are preserved for local
+event storage, and object-style JSON stores continue to accept `jsonl` as an
+alias for `json` so older local configuration does not break.
+
+Readiness includes the selected driver metadata for constructed runtime stores
+under `checks.durable_storage.stores[*].driver`. The `/storage/drivers` endpoint
+also reports selected-but-not-yet-constructed families such as `provider_config`
+and `audio_artifacts`.
 
 Retention and deletion policy is exposed separately by
 `GET /workspaces/{workspace_id}/security/retention`. The policy defines

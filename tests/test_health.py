@@ -11,7 +11,8 @@ from voicebot.api import WebSocketHub, create_app
 from voicebot.asterisk_control import AsteriskAMI
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
-from voicebot.health import ami_configuration_check, durable_storage_check, readiness_report
+from voicebot.health import ami_configuration_check, durable_storage_check, readiness_report, storage_contract_check
+from voicebot.storage_contracts import storage_contracts_payload
 from voicebot.transcripts import TranscriptStore
 
 
@@ -31,6 +32,7 @@ class HealthTests(unittest.TestCase):
         self.assertFalse(report["checks"]["ami"]["configured"])
         self.assertTrue(report["checks"]["providers"]["ok"])
         self.assertTrue(report["checks"]["event_catalog"]["ok"])
+        self.assertTrue(report["checks"]["storage_contracts"]["ok"])
         self.assertTrue(report["checks"]["durable_storage"]["ok"])
 
     def test_readiness_reports_transcript_corruption_stats(self) -> None:
@@ -106,7 +108,41 @@ class HealthTests(unittest.TestCase):
         payload = response.json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["active_calls"], [])
-        self.assertEqual(set(payload["checks"]), {"transcripts", "ami", "providers", "event_catalog", "durable_storage"})
+        self.assertEqual(
+            set(payload["checks"]),
+            {"transcripts", "ami", "providers", "event_catalog", "storage_contracts", "durable_storage"},
+        )
+
+    def test_storage_contracts_are_exposed_and_valid(self) -> None:
+        check = storage_contract_check().to_dict()
+
+        self.assertTrue(check["ok"])
+        self.assertEqual(check["issue_count"], 0)
+        names = {contract["name"] for contract in check["contracts"]}
+        self.assertIn("events", names)
+        self.assertIn("session_leases", names)
+        self.assertIn("provider_config", names)
+        for contract in check["contracts"]:
+            self.assertTrue(contract["required_scope_fields"])
+            self.assertTrue(contract["idempotency_fields"])
+            self.assertTrue(contract["production_backends"])
+
+    def test_storage_contract_endpoint_returns_contract_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(
+                EventStore(max_context_events=20),
+                CallRegistry(),
+                AgentTaskTracker(),
+                WebSocketHub(),
+                TranscriptStore(directory),
+                None,
+            )
+            client = TestClient(app)
+
+            response = client.get("/storage/contracts")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), storage_contracts_payload())
 
     def test_durable_storage_check_reports_load_diagnostics_and_counts_warnings(self) -> None:
         class StoreWithDiagnostics:

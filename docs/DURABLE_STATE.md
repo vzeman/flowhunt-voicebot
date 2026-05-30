@@ -10,6 +10,34 @@ counts, warning counts from skipped/requeued recovery rows, and path
 writability. This makes restart-recovery problems visible through the service
 API before the JSON stores move to FlowHunt database or Redis-backed storage.
 
+`GET /storage/contracts` exposes the production shared-state contract catalog.
+It lists every runtime state family, the local provider used by Docker/tests,
+the future production backend class, required workspace/session scope fields,
+idempotency keys, and consistency expectation. The same catalog is also checked
+from `GET /health/readiness` under `storage_contracts`, so missing scope or
+idempotency definitions fail readiness diagnostics before Kubernetes work starts.
+
+The current contract families are:
+
+| Contract | Local provider | Production backend direction | Idempotency |
+| --- | --- | --- | --- |
+| `events` | JSONL or memory | FlowHunt DB or append-only event log | `event_id` |
+| `transcripts` | JSONL files | FlowHunt DB plus object storage for large artifacts | `event_id` |
+| `voicebot_sessions` | JSON or memory | FlowHunt DB | `session_id` |
+| `session_leases` | JSON or memory | Redis or equivalent lease-capable KV | `workspace_id + voicebot_id + session_id` |
+| `agent_tasks` | JSON or memory | Redis and/or FlowHunt DB | `event_id` |
+| `worker_queue` | JSON or memory | Redis Streams, NATS JetStream, RabbitMQ, or FlowHunt queue | `idempotency_key` or `item_id` |
+| `worker_registry` | JSON or memory | Redis and/or FlowHunt DB | `worker_id` |
+| `call_states` | JSON or memory | Redis and/or FlowHunt DB | `call_id` |
+| `provider_config` | memory fallback | FlowHunt DB plus FlowHunt/Kubernetes secret references | `workspace_id + voicebot_id + config_version` |
+| `sip_trunks` | JSON | FlowHunt DB plus secret storage | `trunk_id` |
+| `subagent_tasks` | JSON or memory | FlowHunt DB, Redis, and/or FlowHunt queue | `workspace_id + dedupe_key` |
+| `audio_artifacts` | filesystem | object storage plus DB metadata index | `artifact_id` or `content_hash` |
+
+Every production implementation must preserve the same public semantics as the
+local provider: workspace-scoped reads, idempotent retries where expected,
+diagnostics for skipped/recovered rows, and no raw secrets in API responses.
+
 ## Event Log
 
 `JsonEventStore` persists every event as JSONL and reloads it on startup. It

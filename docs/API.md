@@ -1516,7 +1516,7 @@ Supported tool names:
 | `send_dtmf` | Send one DTMF digit into an active call. |
 | `stop_playback` | Stop queued or active bot playback. |
 | `delegate_to_subagent` | Delegate complex work to a registered colleague/subagent provider. |
-| `invoke_flowhunt_flow` | Invoke the configured FlowHunt flow for complex work. |
+| `invoke_flowhunt_flow` | Invoke the configured FlowHunt flow for complex work. The voice-agent tool schema accepts `call_id`, `message`, `response_to_event_id`, and `suppress_progress`; the runtime uses `VOICEBOT_FLOWHUNT_FLOW_ID` so the agent cannot invent a flow ID during a call. |
 | `create_flowhunt_project_issue` | Create a FlowHunt AI Project issue for complex work. |
 | `list_transcripts` | List call IDs with persisted transcripts. |
 | `list_transcript_summaries` | List transcript metadata. |

@@ -133,6 +133,13 @@ class FakeSubagentProvider:
         return task.with_status("cancelled")
 
 
+class FailingSubagentProvider(FakeSubagentProvider):
+    def submit(self, request: SubagentTaskRequest) -> SubagentTask:
+        self.requests.append(request)
+        task, _created = SubagentTaskStore().get_or_create_requested(request)
+        return task.with_status("failed", error="provider rejected the request")
+
+
 class ApiCallControlTests(unittest.TestCase):
     def test_seconds_between_timestamps_handles_valid_invalid_and_reversed_values(self) -> None:
         self.assertEqual(
@@ -552,6 +559,81 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertIn(53, tracker.snapshot()["responded_event_ids"])
         tasks = client.get("/subagent/tasks?workspace_id=workspace-1").json()["tasks"]
         self.assertEqual(tasks[0]["external_task_id"], "task-1")
+
+    def test_flowhunt_flow_tool_uses_configured_flow_id_over_model_argument(self) -> None:
+        provider = FakeSubagentProvider()
+        coordinator = SubagentCoordinator()
+        coordinator.register(provider)
+        settings = Settings(
+            flowhunt_api_key="key",
+            flowhunt_workspace_id="workspace-1",
+            flowhunt_flow_id="configured-flow-id",
+            subagent_task_initial_poll_seconds=0.1,
+        )
+        client, events, _tracker = self.build_client(settings=settings, subagent_coordinator=coordinator)
+
+        response = client.post(
+            "/agent/tools/invoke_flowhunt_flow",
+            json={
+                "arguments": {
+                    "call_id": "call-1",
+                    "message": "Review the caller website.",
+                    "flow_id": "hallucinated-flow-name",
+                    "response_to_event_id": 53,
+                }
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(provider.requests[0].metadata["flow_id"], "configured-flow-id")
+        invoked = [event for event in events.list_events(call_id="call-1") if event.type == "flowhunt_flow_invoked"]
+        self.assertEqual(invoked[-1].data["flow_id"], "configured-flow-id")
+
+    def test_flowhunt_flow_terminal_subagent_failure_requests_spoken_result(self) -> None:
+        provider = FailingSubagentProvider()
+        coordinator = SubagentCoordinator()
+        coordinator.register(provider)
+        registry = CallRegistry()
+        registry.add(RecordingResponseSession("call-1", EventStore(max_context_events=20)))
+        settings = Settings(
+            flowhunt_api_key="key",
+            flowhunt_workspace_id="workspace-1",
+            flowhunt_flow_id="flow-1",
+            subagent_task_initial_poll_seconds=0.1,
+        )
+        client, events, _tracker = self.build_client(
+            registry=registry,
+            settings=settings,
+            subagent_coordinator=coordinator,
+        )
+
+        response = client.post(
+            "/agent/tools/invoke_flowhunt_flow",
+            json={
+                "arguments": {
+                    "call_id": "call-1",
+                    "message": "Review the caller website.",
+                    "response_to_event_id": 53,
+                }
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["ok"])
+        event_types = [event.type for event in events.list_events(call_id="call-1")]
+        self.assertEqual(
+            event_types,
+            [
+                "flowhunt_flow_invoked",
+                "subagent_task_requested",
+                "subagent_task_updated",
+                "subagent_task_failed",
+                "agent_response_requested",
+            ],
+        )
+        request = events.list_events(call_id="call-1")[-1]
+        self.assertEqual(request.data["reason"], "colleague_result")
+        self.assertFalse(request.data["ok"])
 
     def test_flowhunt_flow_tool_schedules_work_without_waiting_for_progress_speech(self) -> None:
         provider = FakeSubagentProvider()

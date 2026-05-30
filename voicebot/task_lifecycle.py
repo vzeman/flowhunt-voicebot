@@ -121,6 +121,11 @@ class SubagentTaskLifecycleRunner:
             )
         return cancelled
 
+    def mark_terminal(self, task: SubagentTask) -> SubagentTask:
+        if not task.is_terminal():
+            raise ValueError("only terminal subagent tasks can be marked terminal")
+        return self._mark_terminal(task)
+
     def snapshot(
         self,
         *,

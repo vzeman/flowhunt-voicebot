@@ -81,6 +81,22 @@ class SecurityAuditRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SubagentTaskSubmitRequest(BaseModel):
+    workspace_id: str
+    session_id: str
+    request_event_id: int
+    provider: str
+    input_text: str
+    voicebot_id: str | None = None
+    dedupe_key: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    schedule: bool = True
+
+
+class SubagentTaskCancelRequest(BaseModel):
+    workspace_id: str
+
+
 class ScalingBackpressureRequest(BaseModel):
     workspace_id: str
     voicebot_id: str

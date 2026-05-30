@@ -10,6 +10,7 @@ ToolName = Literal[
     "transfer_call",
     "send_dtmf",
     "stop_playback",
+    "delegate_to_subagent",
     "invoke_flowhunt_flow",
     "create_flowhunt_project_issue",
     "list_transcripts",
@@ -133,6 +134,33 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             ToolArgument(
                 "reason",
                 "Optional reason for stopping playback.",
+                required=False,
+                schema={"type": ["string", "null"]},
+            ),
+            ToolArgument(
+                "response_to_event_id",
+                "Optional event ID this answers.",
+                required=False,
+                schema={"type": ["integer", "null"]},
+            ),
+        ),
+    ),
+    ToolDefinition(
+        "delegate_to_subagent",
+        "Delegate complex caller work to any registered colleague/subagent provider. Use this generic tool when the provider is chosen by runtime configuration or when a non-FlowHunt provider is registered.",
+        (
+            ToolArgument("call_id", "Active call ID."),
+            ToolArgument("message", "Caller request and relevant context to send to the colleague provider."),
+            ToolArgument("provider", "Registered provider kind, for example flowhunt_flow or flowhunt_project."),
+            ToolArgument(
+                "metadata",
+                "Provider-specific metadata such as flow_id, project_id, skill, or target identifiers.",
+                required=False,
+                schema={"type": ["object", "null"]},
+            ),
+            ToolArgument(
+                "dedupe_key",
+                "Optional stable dedupe key. Defaults to the response event id or current request.",
                 required=False,
                 schema={"type": ["string", "null"]},
             ),

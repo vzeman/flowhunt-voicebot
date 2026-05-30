@@ -79,6 +79,26 @@ The coordinator validates required metadata before creating or submitting a task
 This catches malformed FlowHunt flow/project requests before a provider call is
 made and keeps failure behavior consistent across future providers.
 
+## Provider-Neutral Submission
+
+The runtime exposes provider-neutral surfaces so the communication agent does
+not need hardcoded language heuristics or FlowHunt-only behavior:
+
+- `GET /subagent/providers`
+- `POST /subagent/tasks`
+- `POST /subagent/tasks/{task_id}/cancel`
+- `delegate_to_subagent` agent tool
+
+`POST /subagent/tasks` accepts workspace, session, request event, provider,
+input text, optional voicebot id, dedupe key, and provider metadata. When
+`schedule=true`, the task lifecycle runner assigns the first poll/deadline.
+
+The `delegate_to_subagent` tool derives workspace/session scope from the active
+call route when available and falls back to local FlowHunt workspace settings
+for Docker testing. It submits through `SubagentCoordinator`, so every provider
+uses the same validation, dedupe, lifecycle, terminal-event, and late-result
+behavior.
+
 The first adapter is `FlowHuntSubagentProvider`, with provider kinds:
 
 - `flowhunt_flow`
@@ -91,7 +111,7 @@ For FlowHunt flow execution, the adapter uses the invoke task protocol:
 3. poll the task by `flow_id + task_id`
 4. complete only when the provider task returns a final result/status
 
-## Next Integration Step
+## Runtime Integration
 
 The current implementation is intentionally independent from HTTP routes and
 live calls. `SubagentCoordinator` can now emit workspace-scoped lifecycle events
@@ -105,9 +125,12 @@ when it is constructed with an `EventStore`:
 Event payloads use `SubagentTask.event_context()`, which exposes clean task
 status/result context and excludes raw provider payloads.
 
-Next steps:
+Completed task results are re-entered as `agent_response_requested` events when
+the call is still active. The communication agent then decides how to phrase the
+answer naturally instead of reading raw provider payloads directly.
 
-- persist subagent tasks in durable storage
-- expose task APIs
-- connect communication agent tool calls to `SubagentCoordinator`
-- throttle progress updates so the voice agent does not repeat itself
+Remaining production follow-up:
+
+- move subagent task leases to a shared multi-worker lease store
+- enforce provider rate limits from workspace/voicebot provider config
+- add more provider adapters beyond FlowHunt and internal workers

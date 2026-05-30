@@ -22,6 +22,14 @@ communication agent can present the colleague result naturally to the caller.
 `GET /subagent/tasks` exposes stored delegated work for debugging and operations,
 with optional `workspace_id` and `session_id` filters.
 
+`POST /subagent/tasks` submits provider-neutral delegated work to any registered
+subagent provider. `POST /subagent/tasks/{task_id}/cancel` cancels a task through
+the same lifecycle runner and marks the terminal event once.
+
+`GET /subagent/providers` returns registered providers and descriptor metadata,
+including async polling, cancellation support, required metadata, and whether the
+provider produces clean or raw result context.
+
 `GET /subagent/tasks/lifecycle` exposes an operational snapshot for the same
 filters. It reports total, pending, terminal, due, and overdue task counts,
 status counts, the next poll time, and the nearest deadline. Use this endpoint

@@ -384,6 +384,47 @@ parameters: `session_id` narrows the list to one call session and `status`
 narrows it to a task lifecycle state such as `running`, `completed`, or
 `failed`.
 
+### GET `/subagent/providers`
+
+Internal runtime endpoint that returns registered provider-neutral colleague
+task adapters and descriptor metadata such as async polling support,
+cancellation support, required metadata, and clean/raw result context.
+
+### POST `/subagent/tasks`
+
+Submits provider-neutral delegated work to any registered subagent provider.
+
+Request:
+
+```json
+{
+  "workspace_id": "workspace-1",
+  "voicebot_id": "voicebot-1",
+  "session_id": "session-1",
+  "request_event_id": 123,
+  "provider": "flowhunt_flow",
+  "input_text": "Count the pages in this sitemap.",
+  "dedupe_key": "session-1:turn-123",
+  "metadata": {
+    "flow_id": "flow-1"
+  },
+  "schedule": true
+}
+```
+
+### POST `/subagent/tasks/{task_id}/cancel`
+
+Cancels a delegated task in the supplied workspace and emits its terminal task
+event once.
+
+Request:
+
+```json
+{
+  "workspace_id": "workspace-1"
+}
+```
+
 ## Calls
 
 ### GET `/calls`

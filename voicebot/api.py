@@ -38,6 +38,8 @@ from .api_models import (
     SessionLeaseReleaseRequest,
     SessionLeaseRequest,
     SipTrunkRequest,
+    SubagentTaskCancelRequest,
+    SubagentTaskSubmitRequest,
     VoicebotAdminPatchRequest,
     VoicebotAdminRequest,
     VoicebotChannelPatchRequest,
@@ -1750,6 +1752,53 @@ def create_app(
         tasks = subagent_coordinator.store.list(workspace_id=workspace_id, session_id=session_id)
         return {"tasks": [subagent_task_to_dict(task) for task in tasks]}
 
+    @app.get("/subagent/providers")
+    def subagent_providers() -> dict[str, Any]:
+        if subagent_coordinator is None:
+            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
+        return subagent_coordinator.provider_catalog()
+
+    @app.post("/subagent/tasks")
+    def submit_subagent_task(request: SubagentTaskSubmitRequest) -> dict[str, Any]:
+        if subagent_coordinator is None:
+            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
+        require_workspace_access(request.workspace_id)
+        try:
+            task = subagent_coordinator.request(
+                SubagentTaskRequest(
+                    workspace_id=request.workspace_id,
+                    voicebot_id=request.voicebot_id,
+                    session_id=request.session_id,
+                    request_event_id=request.request_event_id,
+                    provider=request.provider,  # type: ignore[arg-type]
+                    input_text=request.input_text,
+                    dedupe_key=request.dedupe_key,
+                    metadata=request.metadata,
+                )
+            )
+            if request.schedule:
+                if subagent_lifecycle is None:
+                    raise HTTPException(status_code=503, detail="Subagent lifecycle runner is not configured")
+                task = subagent_lifecycle.schedule(task)
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"task": subagent_task_to_dict(task), "ok": task.status != "failed"}
+
+    @app.post("/subagent/tasks/{task_id}/cancel")
+    def cancel_subagent_task(task_id: str, request: SubagentTaskCancelRequest) -> dict[str, Any]:
+        if subagent_lifecycle is None:
+            raise HTTPException(status_code=503, detail="Subagent lifecycle runner is not configured")
+        require_workspace_access(request.workspace_id)
+        try:
+            task = subagent_lifecycle.mark_terminal(subagent_coordinator.cancel(task_id, request.workspace_id))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"task": subagent_task_to_dict(task), "ok": task.status == "cancelled"}
+
     @app.get("/subagent/tasks/lifecycle")
     def subagent_task_lifecycle(workspace_id: str | None = None, session_id: str | None = None) -> dict[str, Any]:
         if subagent_lifecycle is None:
@@ -2154,6 +2203,69 @@ def create_app(
             )
         return {"event": event_to_dict(completed), "ok": result.ok, "message": result.message}
 
+    async def tool_delegate_to_subagent(args: dict[str, Any]) -> dict[str, Any]:
+        if subagent_coordinator is None or subagent_lifecycle is None:
+            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
+        call_id = require_arg(args, "call_id")
+        message = str(require_arg(args, "message")).strip()
+        provider = str(require_arg(args, "provider")).strip()
+        if not message:
+            raise HTTPException(status_code=400, detail="message is required")
+        if provider not in subagent_coordinator.provider_descriptors:
+            raise HTTPException(status_code=400, detail=f"unknown subagent provider: {provider}")
+        metadata = args.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            raise HTTPException(status_code=400, detail="metadata must be an object")
+        response_to_event_id = args.get("response_to_event_id")
+        duplicate = existing_flowhunt_request(call_id, response_to_event_id)
+        if duplicate is not None:
+            tracker.mark_responded(response_to_event_id)
+            return {
+                "event": event_to_dict(duplicate),
+                "ok": True,
+                "message": "A colleague is already checking this request.",
+                "duplicate": True,
+            }
+        scope = subagent_scope_from_call(call_id)
+        await speak_tool_progress(call_id, "I will ask a colleague to check that and come back with the result.")
+        tracker.mark_responded(response_to_event_id)
+        requested = events.append(
+            call_id,
+            "subagent_task_requested",
+            {
+                "workspace_id": scope["workspace_id"],
+                "voicebot_id": scope["voicebot_id"],
+                "session_id": scope["session_id"],
+                "provider": provider,
+                "response_to_event_id": response_to_event_id,
+            },
+        )
+        await hub.broadcast(requested)
+        try:
+            task = subagent_coordinator.request(
+                SubagentTaskRequest(
+                    workspace_id=scope["workspace_id"],
+                    voicebot_id=scope["voicebot_id"],
+                    session_id=scope["session_id"],
+                    request_event_id=requested.id,
+                    provider=provider,  # type: ignore[arg-type]
+                    input_text=message,
+                    dedupe_key=str(args.get("dedupe_key") or response_to_event_id or requested.id),
+                    metadata=metadata,
+                )
+            )
+            scheduled = subagent_lifecycle.schedule(task)
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {
+            "event": event_to_dict(requested),
+            "task": subagent_task_to_dict(scheduled),
+            "ok": scheduled.status != "failed",
+            "message": "A colleague is working on the request.",
+        }
+
     async def tool_invoke_flowhunt_flow(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
         flow_id = str(args.get("flow_id") or runtime_settings.flowhunt_flow_id)
@@ -2290,6 +2402,10 @@ def create_app(
                 "flowhunt_issue_created",
                 "flowhunt_issue_updated",
                 "flowhunt_issue_completed",
+                "subagent_task_requested",
+                "subagent_task_updated",
+                "subagent_task_completed",
+                "subagent_task_failed",
             }:
                 continue
             try:
@@ -2299,6 +2415,24 @@ def create_app(
             if event_response_id == response_event_id:
                 return event
         return None
+
+    def subagent_scope_from_call(call_id: str) -> dict[str, str]:
+        snapshot = registry.snapshot(call_id)
+        identity = session_identity_from_snapshot(snapshot or {}) if snapshot is not None else None
+        if identity is not None:
+            require_workspace_access(identity["workspace_id"])
+            return identity
+        workspace_id = non_empty_str(runtime_settings.flowhunt_workspace_id)
+        if workspace_id is None:
+            raise HTTPException(status_code=400, detail="workspace_id is required for subagent delegation")
+        require_workspace_access(workspace_id)
+        return {
+            "workspace_id": workspace_id,
+            "voicebot_id": "default",
+            "session_id": call_id,
+            "call_id": call_id,
+            "transport": "",
+        }
 
     async def speak_tool_progress(call_id: str, text: str) -> None:
         session = registry.get(call_id)
@@ -2782,6 +2916,7 @@ def create_app(
     tool_executor.register("transfer_call", tool_transfer_call)
     tool_executor.register("send_dtmf", tool_send_dtmf)
     tool_executor.register("stop_playback", tool_stop_playback)
+    tool_executor.register("delegate_to_subagent", tool_delegate_to_subagent)
     tool_executor.register("invoke_flowhunt_flow", tool_invoke_flowhunt_flow)
     tool_executor.register("create_flowhunt_project_issue", tool_create_flowhunt_project_issue)
     tool_executor.register("list_transcripts", tool_list_transcripts)

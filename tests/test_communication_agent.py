@@ -55,21 +55,24 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
             "I had a temporary AI error. Please repeat that once more.",
         )
 
-    def test_provider_server_error_is_not_retried_for_realtime_turn(self) -> None:
+    def test_provider_server_error_is_retried_once_for_realtime_turn(self) -> None:
         calls = 0
 
-        def failing_provider(client, model, prompt, timeout, max_output_tokens, tools):
+        def flaky_provider(client, model, prompt, timeout, max_output_tokens, tools):
             nonlocal calls
             calls += 1
-            raise Exception("Error code: 500 - server_error")
+            if calls == 1:
+                raise Exception("Error code: 500 - server_error")
+            return "ok", []
 
         registry = AgentProviderRegistry()
-        registry.register("test", failing_provider)
+        registry.register("test", flaky_provider)
 
-        with self.assertRaisesRegex(Exception, "server_error"):
-            run_provider_with_retry(object(), registry, self.make_config(), "prompt", [])
+        answer, tool_calls = run_provider_with_retry(object(), registry, self.make_config(), "prompt", [])
 
-        self.assertEqual(calls, 1)
+        self.assertEqual(answer, "ok")
+        self.assertEqual(tool_calls, [])
+        self.assertEqual(calls, 2)
 
     def test_failed_say_http_result_is_detected(self) -> None:
         self.assertTrue(has_http_failed_say([{"name": "say", "ok": False, "error": "HTTP Error 404"}]))

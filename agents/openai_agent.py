@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
         "--model",
         default=env_or_default(
             "VOICEBOT_COMMUNICATION_AGENT_MODEL",
-            env_or_default("VOICEBOT_OPENAI_AGENT_MODEL", "gpt-4.1-mini"),
+            env_or_default("VOICEBOT_OPENAI_AGENT_MODEL", "gpt-4.1-nano"),
         ),
     )
     parser.add_argument(

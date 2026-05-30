@@ -358,6 +358,38 @@ class PlaybackControlTests(unittest.TestCase):
         finally:
             session.stop()
 
+    def test_call_control_ack_interrupts_generic_progress_ack(self) -> None:
+        events = EventStore(max_context_events=30)
+        tts = RecordingTTS()
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(),
+            events,
+            FakeSTT(),
+            tts,
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"text": "please hang up"})
+            session.submit_agent_response(AgentResponse("call-1", "Give me a moment.", response_kind="progress_ack"))
+
+            session.submit_agent_response(
+                AgentResponse(
+                    "call-1",
+                    "Goodbye.",
+                    response_to_event_id=request.id,
+                    response_kind="call_control_ack",
+                )
+            )
+
+            interrupted = [event for event in events.list_events(call_id="call-1") if event.type == "bot_playback_interrupted"]
+            self.assertEqual(interrupted[-1].data["reason"], "call_control_ack_priority")
+            self.assertEqual(tts.texts, ["Give me a moment.", "Goodbye."])
+            self.assertTrue(session.playback.is_active())
+            self.assertEqual(session.playback.active_response_kinds(), {"call_control_ack"})
+        finally:
+            session.stop()
+
     def test_call_session_call_control_ack_is_not_lost_after_newer_speech(self) -> None:
         events = EventStore(max_context_events=30)
         session, left, right = self.make_session("call-1", events)

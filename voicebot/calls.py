@@ -234,6 +234,7 @@ class CallSession:
         )
         startup_response = self._is_startup_response(response.response_to_event_id)
         persistent_response = self._is_persistent_response(response)
+        self._interrupt_progress_for_priority_response(response)
         if not startup_response and not persistent_response and self._has_active_persistent_response():
             self.events.append(
                 self.call_id,
@@ -773,6 +774,20 @@ class CallSession:
     def _is_persistent_response(self, response: AgentResponse) -> bool:
         return response.response_kind in {"call_control_ack", "colleague_result"} or self._should_defer_response(
             response.response_to_event_id
+        )
+
+    def _interrupt_progress_for_priority_response(self, response: AgentResponse) -> None:
+        if response.response_kind != "call_control_ack" or "progress_ack" not in self.playback.active_response_kinds():
+            return
+        interrupted = self.playback.interrupt()
+        self.events.append(
+            self.call_id,
+            "bot_playback_interrupted",
+            {
+                "reason": "call_control_ack_priority",
+                "interrupted": interrupted,
+                "response_to_event_id": response.response_to_event_id,
+            },
         )
 
     def _has_active_persistent_response(self) -> bool:

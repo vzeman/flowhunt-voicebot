@@ -195,6 +195,22 @@ class VoicebotRuntimeConfigStore:
         return sorted(configs, key=lambda config: (config.workspace_id, config.voicebot_id, config.config_version))
 
 
+class VoicebotPromptConfigStore:
+    def __init__(self) -> None:
+        self._prompts: dict[tuple[str, str], VoicebotPromptConfig] = {}
+
+    def save(self, workspace_id: str, voicebot_id: str, prompts: VoicebotPromptConfig) -> VoicebotPromptConfig:
+        if not workspace_id.strip():
+            raise ValueError("workspace_id is required")
+        if not voicebot_id.strip():
+            raise ValueError("voicebot_id is required")
+        self._prompts[(workspace_id, voicebot_id)] = prompts
+        return prompts
+
+    def get(self, workspace_id: str, voicebot_id: str) -> VoicebotPromptConfig | None:
+        return self._prompts.get((workspace_id, voicebot_id))
+
+
 def runtime_config_to_dict(config: VoicebotRuntimeConfig) -> dict[str, Any]:
     return config.as_dict()
 

@@ -340,6 +340,46 @@ disabled channels, and invalid or missing provider config.
 
 ## Provider Configuration
 
+## Prompt Configuration
+
+Each voicebot can override the default prompts used by the live communication
+agent and STT layer. Prompt config is workspace-scoped and cached in the runtime
+so `/agent/tasks` can include it with pending work instead of requiring the
+agent worker to make another API call per turn.
+
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts`
+
+Returns the effective prompt config and its source: `prompt_override`,
+`runtime_config`, or `default`.
+
+Response:
+
+```json
+{
+  "workspace_id": "workspace-1",
+  "voicebot_id": "support-sk",
+  "source": "prompt_override",
+  "prompts": {
+    "greeting": "Pozdrav volajuceho po slovensky.",
+    "system_prompt": "Use concise Slovak.",
+    "stt_prompt": "LiveAgent FlowHunt",
+    "language": "sk"
+  }
+}
+```
+
+### PUT `/workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts`
+
+Replaces the full prompt config. All fields have defaults, but callers should
+send every field when replacing the config.
+
+### PATCH `/workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts`
+
+Updates only the supplied prompt fields. Supported fields are `greeting`,
+`system_prompt`, `stt_prompt`, and `language`.
+
+Prompt changes emit `voicebot_prompts_updated` and a `security_audit` event.
+
 ### PUT `/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers`
 
 Validates and saves workspace voicebot provider choices.

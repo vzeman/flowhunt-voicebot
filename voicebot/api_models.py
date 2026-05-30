@@ -187,6 +187,13 @@ class VoicebotPromptConfigRequest(BaseModel):
     language: str = "en"
 
 
+class VoicebotPromptConfigPatchRequest(BaseModel):
+    greeting: str | None = None
+    system_prompt: str | None = None
+    stt_prompt: str | None = None
+    language: str | None = None
+
+
 class VoicebotRealtimeConfigRequest(BaseModel):
     silence_ms: int = 450
     vad_start_ms: int = 60

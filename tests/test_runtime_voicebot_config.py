@@ -11,6 +11,7 @@ from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.provider_config import ProviderChoice, SecretReference, VoicebotProviderConfig
 from voicebot.runtime_config import (
+    VoicebotPromptConfigStore,
     VoicebotPromptConfig,
     VoicebotQuotaConfig,
     VoicebotRealtimeConfig,
@@ -18,6 +19,7 @@ from voicebot.runtime_config import (
     VoicebotRuntimeConfigStore,
 )
 from voicebot.transcripts import TranscriptStore
+from voicebot.workspace_model import VoicebotDefinition, VoicebotStore
 
 
 class RuntimeVoicebotConfigTests(unittest.TestCase):
@@ -34,6 +36,8 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
     def build_client(self) -> tuple[TestClient, EventStore]:
         self.directory = tempfile.TemporaryDirectory()
         events = EventStore(max_context_events=50)
+        voicebots = VoicebotStore()
+        voicebots.create(VoicebotDefinition("workspace-1", "voicebot-1"))
         app = create_app(
             events,
             CallRegistry(),
@@ -41,6 +45,8 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
             WebSocketHub(),
             TranscriptStore(self.directory.name),
             None,
+            voicebots=voicebots,
+            prompt_configs=VoicebotPromptConfigStore(),
         )
         return TestClient(app), events
 
@@ -146,6 +152,34 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["ok"])
         self.assertEqual(events.list_events(call_id="system"), [])
+
+    def test_prompt_config_endpoint_sets_and_patches_voicebot_prompts(self) -> None:
+        client, events = self.build_client()
+
+        put_response = client.put(
+            "/workspaces/workspace-1/voicebots/voicebot-1/prompts",
+            json={
+                "greeting": "Pozdrav volajuceho po slovensky.",
+                "system_prompt": "Use concise Slovak.",
+                "stt_prompt": "LiveAgent FlowHunt",
+                "language": "sk",
+            },
+        )
+
+        self.assertEqual(put_response.status_code, 200)
+        self.assertEqual(put_response.json()["prompts"]["language"], "sk")
+
+        patch_response = client.patch(
+            "/workspaces/workspace-1/voicebots/voicebot-1/prompts",
+            json={"system_prompt": "Use friendly Slovak."},
+        )
+
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.json()["prompts"]["greeting"], "Pozdrav volajuceho po slovensky.")
+        self.assertEqual(patch_response.json()["prompts"]["system_prompt"], "Use friendly Slovak.")
+        get_response = client.get("/workspaces/workspace-1/voicebots/voicebot-1/prompts")
+        self.assertEqual(get_response.json()["source"], "prompt_override")
+        self.assertEqual(events.list_events(call_id="system")[-1].type, "voicebot_prompts_updated")
 
 
 if __name__ == "__main__":

@@ -206,7 +206,8 @@ class CallSession:
             {"text": text, "response_to_event_id": response.response_to_event_id},
         )
         startup_response = self._is_startup_response(response.response_to_event_id)
-        if self._has_newer_user_activity(response.response_to_event_id) and not startup_response:
+        persistent_response = self._should_defer_response(response.response_to_event_id)
+        if self._has_newer_user_activity(response.response_to_event_id) and not startup_response and not persistent_response:
             self.events.append(
                 self.call_id,
                 "agent_response_dropped",
@@ -219,7 +220,9 @@ class CallSession:
 
         if self.recording_event.is_set() and not startup_response:
             self._defer_until_caller_silence(response.response_to_event_id, "caller_is_speaking")
-            if not self.recording_event.is_set() and not self._has_newer_user_activity(response.response_to_event_id):
+            if not self.recording_event.is_set() and (
+                persistent_response or not self._has_newer_user_activity(response.response_to_event_id)
+            ):
                 return self.submit_agent_response(response)
             self.events.append(
                 self.call_id,
@@ -236,6 +239,7 @@ class CallSession:
             request_generation != self._current_interrupt_generation()
             and self._has_newer_user_activity(response.response_to_event_id)
             and not startup_response
+            and not persistent_response
         ):
             self.events.append(
                 self.call_id,
@@ -266,7 +270,7 @@ class CallSession:
                         {"response_to_event_id": response.response_to_event_id},
                     )
                 duration += float(chunk_duration)
-                if self._has_newer_user_activity(response.response_to_event_id) and not startup_response:
+                if self._has_newer_user_activity(response.response_to_event_id) and not startup_response and not persistent_response:
                     self.events.append(
                         self.call_id,
                         "agent_response_dropped",
@@ -285,6 +289,7 @@ class CallSession:
                         or (
                             request_generation != self._current_interrupt_generation()
                             and self._has_newer_user_activity(response.response_to_event_id)
+                            and not persistent_response
                         )
                     ):
                         self.events.append(

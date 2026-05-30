@@ -144,6 +144,13 @@ in the transcript/task context for follow-up questions instead of being read in
 full. This keeps a FlowHunt or other colleague response from being read
 literally when it contains content meant for chat or internal logs.
 
+Completed colleague/subagent result speech is persistent until it is presented.
+If the caller starts speaking while the result is being prepared, the runtime
+defers it until silence instead of treating it like an ordinary stale answer.
+Normal older answers are still dropped after newer caller activity, but
+completed colleague results should not disappear just because the caller barged
+in before the first playback attempt.
+
 Before completed caller audio is sent to STT, the runtime trims trailing silence
 that was only needed for endpointing while keeping a short tail for recognition
 context. This reduces uploaded audio duration and avoids asking the STT provider

@@ -30,7 +30,7 @@ from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
-from .realtime_audio import AudioJitterBuffer, JitterBufferConfig, TurnDetector, turn_detection_config_from_settings
+from .realtime_audio import AudioJitterBuffer, JitterBufferConfig, TurnDetector, trim_trailing_silence, turn_detection_config_from_settings
 from .transports import ASTERISK_AUDIOSOCKET_CAPABILITIES, StaticMediaTransport
 
 if TYPE_CHECKING:
@@ -499,7 +499,15 @@ class CallSession:
             {"turn_id": turn_id, "duration": result.duration},
         )
         if result.decision == "speech_finished" and result.audio is not None:
-            self._speech_jobs.put((turn_id, result.audio))
+            audio = trim_trailing_silence(
+                result.audio,
+                sample_rate=CALL_SAMPLE_RATE,
+                threshold=self.settings.stop_threshold,
+            )
+            trimmed_seconds = max(0.0, (len(result.audio) - len(audio)) / CALL_SAMPLE_RATE)
+            if trimmed_seconds > 0:
+                self._record_metric("stt_audio_trimmed_seconds", trimmed_seconds, {"turn_id": turn_id})
+            self._speech_jobs.put((turn_id, audio))
 
     def _speech_worker_loop(self) -> None:
         while not self.stop_event.is_set():

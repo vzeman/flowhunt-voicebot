@@ -116,6 +116,37 @@ class RmsVoiceActivityDetector:
         return VoiceActivity(level=level, active=level >= threshold)
 
 
+def trim_trailing_silence(
+    audio: np.ndarray,
+    *,
+    sample_rate: int,
+    threshold: float,
+    frame_ms: int = 20,
+    keep_ms: int = 120,
+) -> np.ndarray:
+    samples = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if samples.size == 0:
+        return samples
+    if sample_rate <= 0:
+        raise ValueError("sample_rate must be greater than 0")
+    if frame_ms <= 0:
+        raise ValueError("frame_ms must be greater than 0")
+    if keep_ms < 0:
+        raise ValueError("keep_ms must be greater than or equal to 0")
+
+    frame_samples = max(1, int(sample_rate * frame_ms / 1000))
+    keep_samples = int(sample_rate * keep_ms / 1000)
+    last_active_end = 0
+    for start in range(0, samples.size, frame_samples):
+        end = min(samples.size, start + frame_samples)
+        if rms(samples[start:end]) >= threshold:
+            last_active_end = end
+    if last_active_end <= 0:
+        return samples
+    trim_end = min(samples.size, last_active_end + keep_samples)
+    return samples[:trim_end].astype(np.float32, copy=False)
+
+
 @dataclass(frozen=True)
 class AudioChunkNormalizer:
     source_rate: int

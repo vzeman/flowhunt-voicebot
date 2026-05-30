@@ -11,7 +11,11 @@ import unicodedata
 
 import numpy as np
 from scipy.io import wavfile
-import whisper
+
+try:
+    import whisper
+except ModuleNotFoundError:
+    whisper = None
 
 from .audio import CALL_SAMPLE_RATE, STT_SAMPLE_RATE, resample_audio
 from .config import Settings
@@ -42,6 +46,8 @@ class STTProvider(ABC):
 
 class WhisperSTTProvider(STTProvider):
     def __init__(self, settings: Settings) -> None:
+        if whisper is None:
+            raise RuntimeError("The whisper package is required when using local Whisper STT")
         print(f"Loading Whisper STT model: {settings.whisper_model}")
         self._model = whisper.load_model(settings.whisper_model)
         self._language = settings.language

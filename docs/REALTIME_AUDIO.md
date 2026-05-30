@@ -92,6 +92,11 @@ The OpenAI-compatible TTS adapter uses the Speech API streaming response with
 raw `pcm` output, converts the 24 kHz PCM stream into normalized call audio, and
 resamples it to the runtime call sample rate before playback.
 
+Before completed caller audio is sent to STT, the runtime trims trailing silence
+that was only needed for endpointing while keeping a short tail for recognition
+context. This reduces uploaded audio duration and avoids asking the STT provider
+to transcribe long silence at the end of every turn.
+
 ## Configuration
 
 `TurnDetectionConfig` contains:

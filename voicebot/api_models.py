@@ -13,6 +13,30 @@ class AgentResponseRequest(BaseModel):
     finalize_only: bool = False
 
 
+class SpeculativeSubagentTaskRequest(BaseModel):
+    workspace_id: str
+    session_id: str
+    request_event_id: int
+    provider: str = "flowhunt_flow"
+    input_text: str
+    voicebot_id: str | None = None
+    dedupe_key: str | None = None
+    speculative_key: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SpeculativeSubagentConfirmRequest(BaseModel):
+    workspace_id: str
+    final_request_event_id: int
+    final_input_text: str
+    notify_if_terminal: bool = True
+
+
+class SpeculativeSubagentCancelRequest(BaseModel):
+    workspace_id: str
+    reason: str = "final_transcript_changed"
+
+
 class CompactContextRequest(BaseModel):
     summary: str
     call_id: str = "system"

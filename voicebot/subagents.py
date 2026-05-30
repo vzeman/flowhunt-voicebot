@@ -201,6 +201,9 @@ class SubagentTask:
     def with_terminal_event_emitted(self) -> "SubagentTask":
         return replace(self, terminal_event_emitted_at=_timestamp(), updated_at=_timestamp())
 
+    def with_metadata(self, **metadata: Any) -> "SubagentTask":
+        return replace(self, metadata={**self.metadata, **metadata}, updated_at=_timestamp())
+
     def is_terminal(self) -> bool:
         return self.status in {"completed", "failed", "timed_out", "cancelled"}
 
@@ -432,6 +435,85 @@ class SubagentCoordinator:
         updated = self.store.update(submitted)
         self._emit_task_event("subagent_task_updated", updated)
         return updated
+
+    def request_speculative(self, request: SubagentTaskRequest, *, speculative_key: str | None = None) -> SubagentTask:
+        metadata = {
+            **request.metadata,
+            "speculative": True,
+            "speculative_status": "started",
+            "speculative_key": speculative_key or request.effective_dedupe_key,
+            "speculative_request_event_id": request.request_event_id,
+            "speculative_input_text": request.input_text,
+        }
+        speculative_request = replace(
+            request,
+            metadata=metadata,
+            dedupe_key=request.dedupe_key or f"speculative:{request.session_id}:{speculative_key or request.request_event_id}",
+        )
+        task = self.request(speculative_request)
+        task = self.store.update(task.with_metadata(**metadata))
+        self._emit_task_event("subagent_task_speculative_started", task)
+        return task
+
+    def confirm_speculative(
+        self,
+        task_id: str,
+        workspace_id: str,
+        *,
+        final_request_event_id: int,
+        final_input_text: str,
+    ) -> SubagentTask:
+        task = self.store.get(task_id, workspace_id)
+        if task is None:
+            raise KeyError(f"unknown subagent task in workspace {workspace_id}: {task_id}")
+        if not task.metadata.get("speculative"):
+            raise ValueError("subagent task is not speculative")
+        confirmed = self.store.update(
+            task.with_metadata(
+                speculative_status="confirmed",
+                final_request_event_id=final_request_event_id,
+                final_input_text=final_input_text,
+            )
+        )
+        self._emit_task_event("subagent_task_speculative_confirmed", confirmed)
+        return confirmed
+
+    def cancel_speculative(self, task_id: str, workspace_id: str, *, reason: str = "final_transcript_changed") -> SubagentTask:
+        task = self.store.get(task_id, workspace_id)
+        if task is None:
+            raise KeyError(f"unknown subagent task in workspace {workspace_id}: {task_id}")
+        if not task.metadata.get("speculative"):
+            raise ValueError("subagent task is not speculative")
+        if task.is_terminal():
+            cancelled = self.store.update(task.with_metadata(speculative_status="cancelled", speculative_cancel_reason=reason))
+        elif self.supports_cancel(task.provider):
+            cancelled = self.cancel(task_id, workspace_id).with_metadata(
+                speculative_status="cancelled",
+                speculative_cancel_reason=reason,
+            )
+            cancelled = self.store.update(cancelled)
+        else:
+            cancelled = self.store.update(
+                task.with_status("cancelled", progress_message=f"Speculative task cancelled: {reason}").with_metadata(
+                    speculative_status="cancelled",
+                    speculative_cancel_reason=reason,
+                )
+            )
+        self._emit_task_event("subagent_task_speculative_cancelled", cancelled)
+        return cancelled
+
+    def supersede_speculative(
+        self,
+        task_id: str,
+        workspace_id: str,
+        replacement: SubagentTaskRequest,
+        *,
+        reason: str = "final_transcript_changed",
+    ) -> tuple[SubagentTask, SubagentTask]:
+        cancelled = self.cancel_speculative(task_id, workspace_id, reason=reason)
+        superseded = self.store.update(cancelled.with_metadata(speculative_status="superseded", speculative_cancel_reason=reason))
+        self._emit_task_event("subagent_task_speculative_superseded", superseded)
+        return superseded, self.request(replacement)
 
     def poll(self, task_id: str, workspace_id: str) -> SubagentTask:
         task = self.store.get(task_id, workspace_id)

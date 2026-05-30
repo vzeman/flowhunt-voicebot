@@ -515,6 +515,51 @@ Request:
 }
 ```
 
+### POST `/subagent/tasks/speculative`
+
+Starts cancellable delegated work from stable partial intent. The task is marked
+speculative and its completed result is not sent to the communication agent
+until confirmed.
+
+```json
+{
+  "workspace_id": "workspace-1",
+  "voicebot_id": "voicebot-1",
+  "session_id": "session-1",
+  "request_event_id": 122,
+  "provider": "flowhunt_flow",
+  "input_text": "Count pages in the sitemap",
+  "speculative_key": "session-1:turn-7",
+  "metadata": {
+    "flow_id": "flow-1"
+  }
+}
+```
+
+### POST `/subagent/tasks/{task_id}/confirm-speculative`
+
+Confirms speculative work after final STT matches the intent.
+
+```json
+{
+  "workspace_id": "workspace-1",
+  "final_request_event_id": 123,
+  "final_input_text": "Count the pages in this sitemap.",
+  "notify_if_terminal": true
+}
+```
+
+### POST `/subagent/tasks/{task_id}/cancel-speculative`
+
+Cancels speculative work when final STT changes the request.
+
+```json
+{
+  "workspace_id": "workspace-1",
+  "reason": "final_transcript_changed"
+}
+```
+
 ### POST `/subagent/tasks/{task_id}/cancel`
 
 Cancels a delegated task in the supplied workspace and emits its terminal task

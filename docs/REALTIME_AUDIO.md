@@ -106,13 +106,13 @@ chunk is available. Autoscaling and diagnostics also recognize
 worker, so STT, agent, TTS, and playback delay can be separated.
 
 Communication-agent provider failures are treated as realtime failures, not
-background job failures. OpenAI/compatible `server_error` and HTTP 500 model
-turn failures are not retried inside the same live voice turn; the agent speaks
-a short fallback while the call is active. Docker defaults keep the
-communication-agent provider timeout at 8 seconds so a provider stall cannot
-block the caller for a full minute. If that fallback speech cannot be delivered
-because the call has already ended, the agent releases the claimed task instead
-of renewing it indefinitely.
+background job failures. The agent retries a transient provider failure once
+inside the same live voice turn, including OpenAI-compatible `server_error` and
+HTTP 500 responses, before speaking a short fallback while the call is active.
+Docker defaults keep the communication-agent provider timeout at 8 seconds so a
+provider stall cannot block the caller for a full minute. If that fallback
+speech cannot be delivered because the call has already ended, the agent
+releases the claimed task instead of renewing it indefinitely.
 
 For ordinary caller requests, the communication agent also starts a delayed
 progress acknowledgement timer while the model is deciding what to do. If no

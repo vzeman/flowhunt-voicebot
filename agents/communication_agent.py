@@ -209,8 +209,7 @@ def run_provider_with_retry(
             native_tools,
         )
     except Exception as exc:
-        if is_realtime_terminal_provider_error(exc):
-            raise
+        _ = exc
         time.sleep(min(0.5, max(config.interval, 0.05)))
         return providers.run(
             client,
@@ -221,11 +220,6 @@ def run_provider_with_retry(
             config.max_output_tokens,
             native_tools,
         )
-
-
-def is_realtime_terminal_provider_error(exc: Exception) -> bool:
-    text = str(exc).lower()
-    return "error code: 500" in text or "server_error" in text
 
 
 def provider_failure_answer(exc: Exception) -> str:

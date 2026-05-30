@@ -400,6 +400,7 @@ def action_acknowledgement(call: dict) -> dict | None:
             "call_id": call_id,
             "text": text,
             "response_to_event_id": response_to_event_id,
+            "response_kind": "call_control_ack",
         },
     }
 

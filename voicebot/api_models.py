@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class AgentResponseRequest(BaseModel):
     text: str
     response_to_event_id: int | None = None
+    response_kind: str | None = None
 
 
 class CompactContextRequest(BaseModel):

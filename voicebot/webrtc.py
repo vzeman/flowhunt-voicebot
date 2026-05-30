@@ -249,10 +249,14 @@ class WebRTCCallSession:
         event = self.events.append(
             self.call_id,
             "agent_response_received",
-            {"text": text, "response_to_event_id": response.response_to_event_id},
+            {
+                "text": text,
+                "response_to_event_id": response.response_to_event_id,
+                "response_kind": response.response_kind,
+            },
         )
         startup_response = self._is_startup_response(response.response_to_event_id)
-        persistent_response = self._should_defer_response(response.response_to_event_id)
+        persistent_response = self._is_persistent_response(response)
         if not startup_response and not persistent_response and self._has_active_persistent_response():
             self.events.append(
                 self.call_id,
@@ -311,7 +315,11 @@ class WebRTCCallSession:
         self.events.append(
             self.call_id,
             "tts_started",
-            {"text": text, "response_to_event_id": response.response_to_event_id},
+            {
+                "text": text,
+                "response_to_event_id": response.response_to_event_id,
+                "response_kind": response.response_kind,
+            },
         )
         try:
             for chunk, chunk_duration in self._tts_audio_chunks(text):
@@ -354,7 +362,13 @@ class WebRTCCallSession:
                             },
                         )
                         return event
-                self.playback.enqueue(chunk, {"response_to_event_id": response.response_to_event_id})
+                self.playback.enqueue(
+                    chunk,
+                    {
+                        "response_to_event_id": response.response_to_event_id,
+                        "response_kind": response.response_kind,
+                    },
+                )
                 if startup_response and self.recording_event.is_set():
                     self._startup_playback_guard = True
                 if not queued:
@@ -684,8 +698,15 @@ class WebRTCCallSession:
         request = self.events.get_event(event_id)
         return request is not None and request.type == "agent_response_requested" and request.data.get("reason") == "colleague_result"
 
+    def _is_persistent_response(self, response: AgentResponse) -> bool:
+        return response.response_kind in {"call_control_ack", "colleague_result"} or self._should_defer_response(
+            response.response_to_event_id
+        )
+
     def _has_active_persistent_response(self) -> bool:
-        return any(self._should_defer_response(event_id) for event_id in self.playback.active_response_event_ids())
+        return bool({"call_control_ack", "colleague_result"} & self.playback.active_response_kinds()) or any(
+            self._should_defer_response(event_id) for event_id in self.playback.active_response_event_ids()
+        )
 
     def _has_newer_user_transcript(self, event_id: int | None) -> bool:
         if event_id is None:

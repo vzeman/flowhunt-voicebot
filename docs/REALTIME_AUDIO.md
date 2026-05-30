@@ -151,6 +151,15 @@ Normal older answers are still dropped after newer caller activity, but
 completed colleague results should not disappear just because the caller barged
 in before the first playback attempt.
 
+Call-control acknowledgements use the same structured persistence path. When an
+agent chooses `hangup_call`, `transfer_call`, or `send_dtmf`, the communication
+agent prepends a `say` tool call tagged with `response_kind=call_control_ack`.
+The SIP and WebRTC runtimes record that kind on `agent_response_received`,
+`tts_started`, and queued playback events, then keep the acknowledgement from
+being dropped as an ordinary stale answer after later caller noise. The decision
+to control the call still comes from the agent's tool call, not from matching
+caller text against language-specific keywords.
+
 Short conversational answers are synthesized as one TTS request even when they
 are slightly longer than the streaming chunk target. This avoids splitting a
 single customer-facing sentence at a comma, which can sound like the answer was

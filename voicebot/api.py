@@ -1845,6 +1845,7 @@ def create_app(
                     call_id=call_id,
                     text=request.text,
                     response_to_event_id=request.response_to_event_id,
+                    response_kind=request.response_kind,
                 ),
             )
         except Exception as exc:
@@ -2088,6 +2089,7 @@ def create_app(
         response = AgentResponseRequest(
             text=text,
             response_to_event_id=args.get("response_to_event_id"),
+            response_kind=args.get("response_kind"),
         )
         return await submit_response(call_id, response)
 

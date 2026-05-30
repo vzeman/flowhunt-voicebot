@@ -83,6 +83,12 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 required=False,
                 schema={"type": ["integer", "null"]},
             ),
+            ToolArgument(
+                "response_kind",
+                "Optional structured response kind for runtime playback policy.",
+                required=False,
+                schema={"type": ["string", "null"]},
+            ),
         ),
     ),
     ToolDefinition(

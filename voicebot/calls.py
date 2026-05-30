@@ -27,7 +27,7 @@ from .audio import (
 from .call_state import CallStateStore
 from .config import Settings
 from .events import EventStore, VoicebotEvent
-from .frames import AudioInputFrame, AudioOutputFrame, PlaybackFrame, TextFrame, TranscriptionFrame
+from .frames import AudioInputFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
 from .realtime_audio import AudioJitterBuffer, JitterBufferConfig, TurnDetector, turn_detection_config_from_settings
@@ -262,19 +262,69 @@ class CallSession:
             )
             return event
 
-        interrupt_generation = request_generation
         tts_synthesis_started = time.monotonic()
+        first_audio_recorded = False
+        queued = False
+        duration = 0.0
+        self.events.append(
+            self.call_id,
+            "tts_started",
+            {"text": text, "response_to_event_id": response.response_to_event_id},
+        )
         try:
-            frames = asyncio.run(
-                self.tts_pipeline.push(
-                    TextFrame(
-                        "agent_response",
-                        self.call_id,
-                        text,
-                        data={"response_to_event_id": response.response_to_event_id},
+            for chunk, chunk_duration in self._tts_audio_chunks(text):
+                if not first_audio_recorded:
+                    first_audio_recorded = True
+                    self._record_metric(
+                        "tts_first_audio_latency_seconds",
+                        time.monotonic() - tts_synthesis_started,
+                        {"response_to_event_id": response.response_to_event_id},
                     )
-                )
-            )
+                duration += float(chunk_duration)
+                if self._has_newer_user_activity(response.response_to_event_id) and not startup_response:
+                    self.events.append(
+                        self.call_id,
+                        "agent_response_dropped",
+                        {
+                            "reason": "stale_response_after_new_caller_speech",
+                            "response_to_event_id": response.response_to_event_id,
+                        },
+                    )
+                    return event
+                if (self.recording_event.is_set() or request_generation != self._current_interrupt_generation()) and not startup_response:
+                    if not queued and self.recording_event.is_set():
+                        self._defer_until_caller_silence(response.response_to_event_id, "caller_started_speaking_during_tts")
+                    if (
+                        queued
+                        or self.recording_event.is_set()
+                        or (
+                            request_generation != self._current_interrupt_generation()
+                            and self._has_newer_user_activity(response.response_to_event_id)
+                        )
+                    ):
+                        self.events.append(
+                            self.call_id,
+                            "agent_response_dropped",
+                            {
+                                "reason": "caller_started_speaking_during_tts_or_after_request",
+                                "response_to_event_id": response.response_to_event_id,
+                            },
+                        )
+                        return event
+                self.playback.enqueue(chunk, {"response_to_event_id": response.response_to_event_id})
+                if startup_response and self.recording_event.is_set():
+                    self._startup_playback_guard = True
+                if not queued:
+                    queued = True
+                    self.events.append(
+                        self.call_id,
+                        "agent_response_queued",
+                        {
+                            "duration": float(chunk_duration),
+                            "response_to_event_id": response.response_to_event_id,
+                            "streaming": True,
+                        },
+                    )
         except Exception as exc:
             self.events.append(
                 self.call_id,
@@ -282,100 +332,37 @@ class CallSession:
                 {"error": str(exc), "response_to_event_id": response.response_to_event_id},
             )
             raise
-        self._record_metric(
-            "tts_synthesis_latency_seconds",
-            time.monotonic() - tts_synthesis_started,
-            {"response_to_event_id": response.response_to_event_id},
-        )
-
-        audio_chunks: list[np.ndarray] = []
-        duration = 0.0
-        for frame in frames:
-            if isinstance(frame, TextFrame) and frame.kind == "tts_started":
-                self.events.append(
-                    self.call_id,
-                    "tts_started",
-                    {"text": text, "response_to_event_id": response.response_to_event_id},
-                )
-            elif isinstance(frame, PlaybackFrame) and frame.kind == "tts_finished":
-                duration = float(frame.data.get("duration", 0.0))
-                self._record_metric(
-                    "tts_duration_seconds",
-                    duration,
-                    {"response_to_event_id": response.response_to_event_id},
-                )
-                self.events.append(
-                    self.call_id,
-                    "tts_finished",
-                    {"duration": duration, "response_to_event_id": response.response_to_event_id},
-                )
-            elif isinstance(frame, TextFrame) and frame.kind == "tts_failed":
-                self.events.append(
-                    self.call_id,
-                    "tts_failed",
-                    {"error": frame.text, "response_to_event_id": response.response_to_event_id},
-                )
-                raise RuntimeError(frame.text)
-            elif isinstance(frame, AudioOutputFrame):
-                audio_chunks.append(frame.audio)
-
-        if not audio_chunks:
+        if not queued:
             self.events.append(
                 self.call_id,
                 "tts_failed",
                 {"error": "TTS produced no audio", "response_to_event_id": response.response_to_event_id},
             )
             raise RuntimeError("TTS produced no audio")
-
-        if self._has_newer_user_activity(response.response_to_event_id) and not startup_response:
-            self.events.append(
-                self.call_id,
-                "agent_response_dropped",
-                {
-                    "reason": "stale_response_after_new_caller_speech",
-                    "response_to_event_id": response.response_to_event_id,
-                },
-            )
-            return event
-
-        if (self.recording_event.is_set() or interrupt_generation != self._current_interrupt_generation()) and not startup_response:
-            if self.recording_event.is_set():
-                self._defer_until_caller_silence(response.response_to_event_id, "caller_started_speaking_during_tts")
-            if (
-                not self.recording_event.is_set()
-                and (
-                    interrupt_generation == self._current_interrupt_generation()
-                    or not self._has_newer_user_activity(response.response_to_event_id)
-                )
-            ):
-                for chunk in audio_chunks:
-                    self.playback.enqueue(chunk, {"response_to_event_id": response.response_to_event_id})
-                self.events.append(
-                    self.call_id,
-                    "agent_response_queued",
-                    {"duration": duration or 0.0, "response_to_event_id": response.response_to_event_id},
-                )
-                return event
-            self.events.append(
-                self.call_id,
-                "agent_response_dropped",
-                {
-                    "reason": "caller_started_speaking_during_tts_or_after_request",
-                    "response_to_event_id": response.response_to_event_id,
-                },
-            )
-            return event
-        for chunk in audio_chunks:
-            self.playback.enqueue(chunk, {"response_to_event_id": response.response_to_event_id})
-        if startup_response and self.recording_event.is_set():
-            self._startup_playback_guard = True
+        self._record_metric(
+            "tts_synthesis_latency_seconds",
+            time.monotonic() - tts_synthesis_started,
+            {"response_to_event_id": response.response_to_event_id},
+        )
+        self._record_metric(
+            "tts_duration_seconds",
+            duration,
+            {"response_to_event_id": response.response_to_event_id},
+        )
         self.events.append(
             self.call_id,
-            "agent_response_queued",
-            {"duration": duration or 0.0, "response_to_event_id": response.response_to_event_id},
+            "tts_finished",
+            {"duration": duration, "response_to_event_id": response.response_to_event_id},
         )
         self._unprotect_startup_response(response.response_to_event_id)
         return event
+
+    def _tts_audio_chunks(self, text: str):
+        synthesize_stream = getattr(self.tts, "synthesize_stream", None)
+        if synthesize_stream is None:
+            yield self.tts.synthesize(text)
+            return
+        yield from synthesize_stream(text)
 
     def interrupt_playback(self, reason: str = "agent_requested") -> VoicebotEvent:
         interrupted = self.playback.interrupt()

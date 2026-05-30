@@ -82,6 +82,12 @@ drops that response instead of speaking it. The runtime emits
 Startup greetings are exempt so a greeting can still play after the initial
 call setup and recording path settle.
 
+When a TTS provider exposes `synthesize_stream`, SIP and WebRTC sessions queue
+the first audio chunk as soon as it is available instead of waiting for the full
+response to synthesize. If the caller starts speaking while later chunks are
+still being generated, the remaining chunks are dropped and the old response is
+not resumed.
+
 ## Configuration
 
 `TurnDetectionConfig` contains:

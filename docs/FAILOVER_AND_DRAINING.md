@@ -6,6 +6,8 @@ This runtime distinguishes liveness from readiness:
   unrecoverable stuck runtime states.
 - `GET /health/readiness` fails while the runtime is draining because it should
   not accept new sessions.
+- `GET /health/readiness/roles` maps the same checks to the enabled deployment
+  roles from `VOICEBOT_RUNTIME_ROLES`.
 
 ## Local Drain Simulation
 

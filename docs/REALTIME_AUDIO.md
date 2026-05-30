@@ -105,6 +105,15 @@ chunk is available. Autoscaling and diagnostics also recognize
 `end_of_speech_to_playback_started_seconds` when emitted by a transport or
 worker, so STT, agent, TTS, and playback delay can be separated.
 
+Communication-agent provider failures are treated as realtime failures, not
+background job failures. OpenAI/compatible `server_error` and HTTP 500 model
+turn failures are not retried inside the same live voice turn; the agent speaks
+a short fallback while the call is active. Docker defaults keep the
+communication-agent provider timeout at 8 seconds so a provider stall cannot
+block the caller for a full minute. If that fallback speech cannot be delivered
+because the call has already ended, the agent releases the claimed task instead
+of renewing it indefinitely.
+
 Before completed caller audio is sent to STT, the runtime trims trailing silence
 that was only needed for endpointing while keeping a short tail for recognition
 context. This reduces uploaded audio duration and avoids asking the STT provider
@@ -135,6 +144,9 @@ superseded by newer caller speech.
 - `max_seconds`
 - `barge_in_threshold`
   - Default: `0.08`.
+- communication-agent timeout
+  - Docker default: `VOICEBOT_OPENAI_AGENT_TIMEOUT=8` and
+    `VOICEBOT_ANTHROPIC_AGENT_TIMEOUT=8`.
 
 Configuration is validated when constructed. Sample rate, silence, and max turn
 duration must be positive; stop threshold cannot exceed start threshold; max

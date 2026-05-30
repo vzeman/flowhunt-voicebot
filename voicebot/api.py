@@ -100,6 +100,7 @@ from .scaling import (
 )
 from .session_leases import SessionLeaseStore
 from .sip_trunks import SipTrunk, SipTrunkStore
+from .storage_contracts import storage_contracts_payload
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
 from .tool_executor import AgentToolExecutor
@@ -266,6 +267,10 @@ def create_app(
                 **({"subagent_tasks": subagent_coordinator.store} if subagent_coordinator is not None else {}),
             },
         )
+
+    @app.get("/storage/contracts")
+    def storage_contracts() -> dict[str, Any]:
+        return storage_contracts_payload()
 
     @app.get("/calls")
     def list_calls() -> dict[str, Any]:

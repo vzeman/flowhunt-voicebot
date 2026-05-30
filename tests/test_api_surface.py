@@ -93,6 +93,13 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(runtime["scope_source"], "payload")
         self.assertTrue(runtime["workspace_scoped"])
 
+    def test_deployment_topology_endpoints_are_internal_unscoped(self) -> None:
+        grouped = api_surface_by_area()
+        runtime_paths = {endpoint["path"]: endpoint for endpoint in grouped["runtime"]}
+
+        self.assertFalse(runtime_paths["/deployment/topology"]["workspace_scoped"])
+        self.assertFalse(runtime_paths["/health/readiness/roles"]["workspace_scoped"])
+
     def test_multimodal_endpoints_are_cataloged(self) -> None:
         grouped = api_surface_by_area()
         paths = {endpoint["path"]: endpoint for endpoint in grouped["multimodal"]}

@@ -109,6 +109,7 @@ class Settings:
     worker_queue_store_provider: str = os.getenv("VOICEBOT_WORKER_QUEUE_STORE_PROVIDER", "json").strip().lower()
     worker_queue_store_path: str = os.getenv("VOICEBOT_WORKER_QUEUE_STORE_PATH", "/data/worker_queue.json")
     deployment_mode: str = os.getenv("VOICEBOT_DEPLOYMENT_MODE", "local").strip().lower()
+    runtime_roles: tuple[str, ...] = env_csv_tuple("VOICEBOT_RUNTIME_ROLES", ("all",))
     workspace_access_control_enabled: bool = env_bool("VOICEBOT_WORKSPACE_ACCESS_CONTROL_ENABLED", False)
     allowed_workspace_ids: tuple[str, ...] = env_csv_tuple("VOICEBOT_ALLOWED_WORKSPACE_IDS")
     pii_safe_logging_enabled: bool = env_bool("VOICEBOT_PII_SAFE_LOGGING_ENABLED", True)

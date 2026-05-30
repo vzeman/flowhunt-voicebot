@@ -16,6 +16,7 @@ from voicebot.health import (
     drain_check,
     durable_storage_check,
     pipeline_contract_check,
+    realtime_audio_check,
     readiness_report,
     sip_media_plane_check,
     storage_contract_check,
@@ -48,6 +49,7 @@ class HealthTests(unittest.TestCase):
         self.assertTrue(report["checks"]["webrtc_media_plane"]["ok"])
         self.assertTrue(report["checks"]["storage_contracts"]["ok"])
         self.assertTrue(report["checks"]["security_contract"]["ok"])
+        self.assertTrue(report["checks"]["realtime_audio"]["ok"])
         self.assertTrue(report["checks"]["drain"]["ok"])
         self.assertTrue(report["checks"]["durable_storage"]["ok"])
 
@@ -136,6 +138,7 @@ class HealthTests(unittest.TestCase):
                 "webrtc_media_plane",
                 "storage_contracts",
                 "security_contract",
+                "realtime_audio",
                 "drain",
                 "durable_storage",
             },
@@ -206,6 +209,13 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(check["mode"], "local_permissive")
         self.assertFalse(check["secret_handling"]["raw_secret_api_responses"])
         self.assertIn("transcripts", {item["name"] for item in check["retention"]["classes"]})
+
+    def test_realtime_audio_check_reports_profile(self) -> None:
+        check = realtime_audio_check().to_dict()
+
+        self.assertTrue(check["ok"])
+        self.assertEqual(check["issue_count"], 0)
+        self.assertIn("turn_detection", check["profile"])
 
     def test_storage_contract_endpoint_returns_contract_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

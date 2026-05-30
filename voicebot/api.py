@@ -55,6 +55,7 @@ from .api_models import (
 from .asterisk_control import AsteriskAMI, ControlResult
 from .calls import AgentResponse, CallRegistry
 from .config import Settings, redacted_settings
+from .deployment_topology import deployment_topology_payload, role_readiness_payload
 from .drain import DrainState, rollout_contract
 from .event_catalog import event_catalog, event_catalog_integrity_issues
 from .events import EventStore, VoicebotEvent, event_to_dict
@@ -311,6 +312,9 @@ def create_app(
 
     @app.get("/health/readiness")
     def readiness() -> dict[str, Any]:
+        return build_readiness_report()
+
+    def build_readiness_report() -> dict[str, Any]:
         return readiness_report(
             transcripts=transcripts,
             asterisk=asterisk,
@@ -330,9 +334,17 @@ def create_app(
             workspace_policy=workspace_access_policy,
         )
 
+    @app.get("/health/readiness/roles")
+    def role_readiness() -> dict[str, Any]:
+        return role_readiness_payload(runtime_settings, build_readiness_report())
+
     @app.get("/health/liveness")
     def liveness() -> dict[str, Any]:
         return {"ok": True, "draining": drain_state.draining}
+
+    @app.get("/deployment/topology")
+    def deployment_topology() -> dict[str, Any]:
+        return deployment_topology_payload(runtime_settings)
 
     @app.get("/operations/drain")
     def get_drain_state() -> dict[str, Any]:

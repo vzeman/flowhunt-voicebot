@@ -19,6 +19,12 @@ Core roles:
 These roles are modeled in `voicebot/scaling.py` so queue names, routing keys,
 and limits are explicit and testable.
 
+`GET /deployment/topology` exposes the local-to-Kubernetes role catalog driven
+by `VOICEBOT_RUNTIME_ROLES`. The default `all` keeps Docker's all-in-one
+runtime behavior. A comma-separated subset such as
+`api_control_plane,subagent_task_poller` marks a process for split-role testing
+and is reflected by `GET /health/readiness/roles`.
+
 `WorkerRegistry` models runtime presence for these roles. Workers heartbeat with
 `worker_id`, role, queue, optional workspace/voicebot affinity, capacity, and
 status. Worker presence records require a worker id, queue, and positive

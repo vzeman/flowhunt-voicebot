@@ -13,6 +13,7 @@ from .config import Settings
 from .security_contract import security_contract_issues, security_contract_payload
 from .sip_media_plane import sip_media_plane_issues, sip_media_plane_payload
 from .storage_contracts import storage_contract_issues, storage_contracts_payload
+from .realtime_quality import realtime_audio_profile, realtime_audio_profile_issues
 from .webrtc_media_plane import webrtc_media_plane_issues, webrtc_media_plane_payload
 from .transcripts import TranscriptStore
 from .workspace_access import WorkspaceAccessPolicy, workspace_access_policy_from_settings
@@ -54,6 +55,7 @@ def readiness_report(
         "webrtc_media_plane": webrtc_media_plane_check().to_dict(),
         "storage_contracts": storage_contract_check().to_dict(),
         "security_contract": security_contract_check(runtime_settings, access_policy).to_dict(),
+        "realtime_audio": realtime_audio_check(runtime_settings).to_dict(),
         "drain": drain_check(drain_state).to_dict(),
     }
     if storage_components is not None:
@@ -139,6 +141,17 @@ def security_contract_check(settings: Settings | None = None, workspace_policy: 
         not issues,
         "security contract is valid" if not issues else "security contract has enforcement issues",
         {"issue_count": len(issues), "issues": issues, **payload},
+    )
+
+
+def realtime_audio_check(settings: Settings | None = None) -> HealthCheck:
+    runtime_settings = settings or Settings()
+    profile = realtime_audio_profile(runtime_settings)
+    issues = realtime_audio_profile_issues(profile)
+    return HealthCheck(
+        not issues,
+        "realtime audio profile is valid" if not issues else "realtime audio profile has issues",
+        {"issue_count": len(issues), "issues": issues, "profile": profile},
     )
 
 

@@ -72,6 +72,8 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/tasks", "task", "public", description="External task status."),
     ApiEndpointSpec("GET", "/scaling/topology", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Inspect worker topology."),
     ApiEndpointSpec("POST", "/scaling/workload-plan", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Plan workspace voicebot workload routing."),
+    ApiEndpointSpec("GET", "/scaling/signals", "scaling", "internal", workspace_scoped=True, scope_source="query", description="Inspect autoscaling signals."),
+    ApiEndpointSpec("POST", "/scaling/admission", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Evaluate admission before allocating session resources."),
     ApiEndpointSpec("POST", "/scaling/workers/heartbeat", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Record worker presence heartbeat."),
     ApiEndpointSpec("GET", "/scaling/workers", "scaling", "internal", workspace_scoped=True, scope_source="query", description="List active workers by role or workspace."),
     ApiEndpointSpec("POST", "/scaling/workers/{worker_id}/drain", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Mark a worker as draining."),

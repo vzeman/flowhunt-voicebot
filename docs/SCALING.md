@@ -52,10 +52,26 @@ rate-limits use `workspace_id:voicebot_id:provider`.
 concurrency, and backpressure limits.
 
 `POST /scaling/workload-plan` accepts a workspace, voicebot, expected concurrent
-session count, optional session id, and provider names. It returns the queue
-bindings, partition key, provider keys, and whether the requested concurrency
-fits the current workspace/voicebot/provider limits. This is a planning surface
-for FlowHunt deployment orchestration; it does not enqueue work itself.
+session count, optional session id, provider names, baseline sessions, call
+growth rate, worker warm-up seconds, hard session caps, burst allowance, and
+whether scale-to-zero is allowed. It returns the queue bindings, partition key,
+provider keys, projected peak sessions, warm-capacity policy, and whether the
+requested concurrency fits workspace/voicebot/provider/hard-cap limits. This is
+a planning surface for FlowHunt deployment orchestration; it does not enqueue
+work itself.
+
+`GET /scaling/signals` exposes autoscaling inputs in JSON. Use
+`GET /scaling/signals?format=prometheus` for Prometheus text format. Signals
+include active sessions, per-workspace/voicebot session counts, queue pending
+and claimed depth by worker role, dead-lettered queue items, provider failures,
+latency metrics, calls per second, worker capacity, and warm-capacity deficits.
+
+`POST /scaling/admission` evaluates whether a new session can be accepted before
+allocating peer connections, SIP/media resources, or provider work. It compares
+active sessions for the workspace/voicebot with `max_concurrent_sessions` and
+`burst_sessions`. Accepted sessions return `decision=accept`; full hard capacity
+with remaining burst returns `decision=queue_or_overflow`; full burst capacity
+returns `decision=reject` and emits a `capacity_rejection` metric.
 
 `WorkerQueueEnvelope` defines the payload shape for future queue/stream
 handoff. Every queued item carries an item id, idempotency key, work kind,
@@ -134,6 +150,33 @@ providers.
 
 STT and TTS workers also need provider-aware limits because external APIs can
 rate-limit independently from workspace capacity.
+
+## Warm Capacity
+
+Warm capacity maps the min/max agent model to FlowHunt voicebots:
+
+- `min_media_sessions`
+- `min_stt_workers`
+- `min_tts_workers`
+- `min_agent_workers`
+- `min_task_pollers`
+- `max_concurrent_sessions`
+- `burst_sessions`
+- `scale_to_zero_allowed`
+
+The local defaults keep one warm worker/capacity unit for every critical role.
+Scale-to-zero can be used for demos, but production phone calls should keep
+media, STT, TTS, agent, and task poller capacity warm enough to cover baseline
+sessions plus expected growth while workers start.
+
+Capacity planning uses:
+
+```text
+projected_peak_sessions = baseline_sessions + call_growth_per_minute * worker_warmup_seconds / 60
+```
+
+Round the result up and provision enough workers for the projected peak, not
+only the current active sessions.
 
 ## Restart Behavior
 

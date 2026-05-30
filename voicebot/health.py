@@ -35,6 +35,7 @@ def readiness_report(
     asterisk: AsteriskAMI | None,
     active_call_ids: list[str],
     storage_components: dict[str, Any] | None = None,
+    drain_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     checks = {
         "transcripts": transcript_store_check(transcripts).to_dict(),
@@ -45,6 +46,7 @@ def readiness_report(
         "sip_media_plane": sip_media_plane_check().to_dict(),
         "webrtc_media_plane": webrtc_media_plane_check().to_dict(),
         "storage_contracts": storage_contract_check().to_dict(),
+        "drain": drain_check(drain_state).to_dict(),
     }
     if storage_components is not None:
         checks["durable_storage"] = durable_storage_check(storage_components).to_dict()
@@ -117,6 +119,16 @@ def storage_contract_check() -> HealthCheck:
         not issues,
         "storage contracts are valid" if not issues else "storage contracts have integrity issues",
         {"issue_count": len(issues), "issues": issues, **payload},
+    )
+
+
+def drain_check(drain_state: dict[str, Any] | None = None) -> HealthCheck:
+    state = drain_state or {"draining": False, "readiness_accepts_new_sessions": True}
+    draining = bool(state.get("draining"))
+    return HealthCheck(
+        not draining,
+        "runtime accepts new sessions" if not draining else "runtime is draining and not accepting new sessions",
+        {"drain": state},
     )
 
 

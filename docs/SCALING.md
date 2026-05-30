@@ -205,6 +205,12 @@ loss with `/scaling/session-leases/enforce`. Enforcement stops live media that
 cannot be safely recovered, emits `session_interrupted`, and emits
 `session_recovered` for non-media work that can continue on another worker.
 
+Runtime drain state is represented by `/operations/drain/*`. Readiness fails
+while draining, but liveness remains healthy unless the process is actually
+stuck. Local Docker can interrupt active sessions during drain simulation;
+production should prefer a preStop drain period and only mark remaining calls
+interrupted after the configured grace period.
+
 ## Media Nodes
 
 Media nodes should be disposable. They should announce presence through shared

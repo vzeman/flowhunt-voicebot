@@ -1414,6 +1414,34 @@ reconnect semantics, admission control, and quality metrics.
 Returns worker roles, queue names, concurrency, shared state, and event bus
 settings for the voicebot runtime.
 
+### GET `/health/liveness`
+
+Returns a lightweight liveness signal. Normal provider slowness or runtime
+draining does not fail liveness.
+
+### GET `/operations/drain`
+
+Returns current drain state plus the rollout/failover contract.
+
+### POST `/operations/drain/start`
+
+Marks the runtime draining so readiness fails and new sessions should not be
+accepted.
+
+```json
+{
+  "reason": "rollout",
+  "interrupt_active_sessions": false
+}
+```
+
+Set `interrupt_active_sessions=true` in local Docker tests to stop active
+sessions and emit `session_interrupted`.
+
+### POST `/operations/drain/stop`
+
+Clears runtime drain state and allows readiness to pass again.
+
 ### POST `/scaling/workload-plan`
 
 Builds a routing and capacity plan for a workspace voicebot workload.

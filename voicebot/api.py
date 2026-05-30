@@ -26,6 +26,7 @@ from .api_models import (
     CallControlRequest,
     CompactContextRequest,
     ConversationEvaluationRequest,
+    DrainRequest,
     IncomingSessionAdmissionRequest,
     MultimodalContentRequest,
     PlaybackInterruptRequest,
@@ -51,6 +52,7 @@ from .api_models import (
 from .asterisk_control import AsteriskAMI, ControlResult
 from .calls import AgentResponse, CallRegistry
 from .config import Settings, redacted_settings
+from .drain import DrainState, rollout_contract
 from .event_catalog import event_catalog, event_catalog_integrity_issues
 from .events import EventStore, VoicebotEvent, event_to_dict
 from .execution_model import ExecutionScope
@@ -219,6 +221,7 @@ def create_app(
     app = FastAPI(title="Flowhunt Voicebot", version="0.1.0", lifespan=lifespan)
     tool_executor = AgentToolExecutor()
     runtime_settings = settings or Settings()
+    drain_state = DrainState()
     multimodal_store = multimodal_contexts or MultimodalContextStore()
     provider_config_store = provider_configs or ProviderConfigStore()
     scaling_workers = worker_registry or WorkerRegistry()
@@ -289,7 +292,47 @@ def create_app(
                 "worker_queue": scaling_queue,
                 **({"subagent_tasks": subagent_coordinator.store} if subagent_coordinator is not None else {}),
             },
+            drain_state=drain_state.snapshot(),
         )
+
+    @app.get("/health/liveness")
+    def liveness() -> dict[str, Any]:
+        return {"ok": True, "draining": drain_state.draining}
+
+    @app.get("/operations/drain")
+    def get_drain_state() -> dict[str, Any]:
+        return {"drain": drain_state.snapshot(), "rollout": rollout_contract()}
+
+    @app.post("/operations/drain/start")
+    def start_drain(request: DrainRequest) -> dict[str, Any]:
+        state = drain_state.start(request.reason)
+        event = events.append("runtime", "runtime_draining_started", state)
+        interrupted = []
+        if request.interrupt_active_sessions:
+            for snapshot in registry.snapshots():
+                call_id = snapshot["call_id"]
+                stopped = registry.stop(call_id)
+                interrupted_event = events.append(
+                    call_id,
+                    "session_interrupted",
+                    {
+                        "reason": "runtime_draining",
+                        "stopped": stopped,
+                        "drain": state,
+                        "workspace_id": (snapshot.get("route") or {}).get("workspace_id"),
+                        "voicebot_id": (snapshot.get("route") or {}).get("voicebot_id"),
+                    },
+                )
+                interrupted.append(event_to_dict(interrupted_event))
+        events.append("runtime", "metrics", {"name": "runtime_draining", "value": 1.0, "reason": state["reason"]})
+        return {"event_id": event.id, "drain": state, "interrupted": interrupted}
+
+    @app.post("/operations/drain/stop")
+    def stop_drain() -> dict[str, Any]:
+        state = drain_state.stop()
+        event = events.append("runtime", "runtime_draining_stopped", state)
+        events.append("runtime", "metrics", {"name": "runtime_draining", "value": 0.0})
+        return {"event_id": event.id, "drain": state}
 
     @app.get("/storage/contracts")
     def storage_contracts() -> dict[str, Any]:

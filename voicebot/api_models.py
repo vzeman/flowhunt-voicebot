@@ -64,6 +64,11 @@ class IncomingSessionAdmissionRequest(BaseModel):
     burst_sessions: int = 0
 
 
+class DrainRequest(BaseModel):
+    reason: str = "operator_requested"
+    interrupt_active_sessions: bool = False
+
+
 class ScalingBackpressureRequest(BaseModel):
     workspace_id: str
     voicebot_id: str

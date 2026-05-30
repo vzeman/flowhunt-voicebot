@@ -4,6 +4,7 @@ from .agent_tasks import AgentTaskTracker, JsonAgentTaskTracker
 from .config import Settings
 from .call_state import CallStateStore, JsonCallStateStore
 from .events import EventStore, JsonEventStore
+from .provider_config import JsonProviderConfigStore, ProviderConfigStore
 from .scaling import JsonWorkerQueueStore, JsonWorkerRegistry, WorkerQueueStore, WorkerRegistry
 from .session_leases import JsonSessionLeaseStore, SessionLeaseStore
 from .sip_trunks import SipTrunkStore
@@ -53,7 +54,8 @@ def default_storage_registry() -> StorageRegistry:
             _definition("call_states", "json", "node", False, True, False, "local JSON active call snapshots"),
             _definition("call_states", "redis", "shared", True, False, True, "shared active call snapshots"),
             _definition("call_states", "flowhunt_db", "shared", True, False, True, "durable call state snapshots"),
-            _definition("provider_config", "memory", "process", False, True, False, "environment-backed provider config"),
+            _definition("provider_config", "memory", "process", False, True, False, "in-memory provider config"),
+            _definition("provider_config", "json", "node", False, True, False, "local JSON provider config records"),
             _definition("provider_config", "flowhunt_db", "shared", True, False, True, "versioned provider config records"),
             _definition("sip_trunks", "json", "node", False, True, False, "local trunk registry plus generated PJSIP include"),
             _definition("sip_trunks", "flowhunt_db", "shared", True, False, True, "workspace-scoped trunk records"),
@@ -203,6 +205,21 @@ def build_transcript_store(settings: Settings) -> TranscriptStore:
     raise_unsupported_storage("VOICEBOT_TRANSCRIPT_STORE_PROVIDER", settings.transcript_store_provider, selection)
 
 
+def build_provider_config_store(settings: Settings) -> ProviderConfigStore:
+    driver = json_object_driver(settings.provider_config_store_provider)
+    selection = storage_driver_selection(
+        "provider_config",
+        driver,
+        settings.provider_config_store_provider,
+        settings.provider_config_store_path,
+    )
+    if driver == "json":
+        return attach_storage_driver(JsonProviderConfigStore(settings.provider_config_store_path), selection)
+    if driver == "memory":
+        return attach_storage_driver(ProviderConfigStore(), selection)
+    raise_unsupported_storage("VOICEBOT_PROVIDER_CONFIG_STORE_PROVIDER", settings.provider_config_store_provider, selection)
+
+
 def build_sip_trunk_store(settings: Settings) -> SipTrunkStore:
     driver = normalize_driver_name(settings.sip_trunk_store_provider)
     selection = storage_driver_selection("sip_trunks", driver, settings.sip_trunk_store_provider, settings.sip_trunk_registry_path)
@@ -293,7 +310,12 @@ def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelec
             settings.call_state_store_provider,
             settings.call_state_store_path,
         ),
-        "provider_config": storage_driver_selection("provider_config", "memory", "memory", None),
+        "provider_config": storage_driver_selection(
+            "provider_config",
+            json_object_driver(settings.provider_config_store_provider),
+            settings.provider_config_store_provider,
+            settings.provider_config_store_path,
+        ),
         "sip_trunks": storage_driver_selection(
             "sip_trunks",
             normalize_driver_name(settings.sip_trunk_store_provider),

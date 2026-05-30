@@ -378,6 +378,7 @@ def create_app(
                 "session_leases": session_lease_store,
                 "worker_registry": scaling_workers,
                 "voicebot_sessions": voicebot_session_store,
+                "provider_config": provider_config_store,
                 "worker_queue": scaling_queue,
                 **({"subagent_tasks": subagent_coordinator.store} if subagent_coordinator is not None else {}),
             },

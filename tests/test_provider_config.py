@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+import tempfile
 import unittest
 from fastapi.testclient import TestClient
 
@@ -10,6 +12,7 @@ from voicebot.events import EventStore
 from voicebot.provider_config import (
     ProviderChoice,
     ProviderConfigStore,
+    JsonProviderConfigStore,
     SecretReference,
     VoicebotProviderConfig,
     provider_selection_plan,
@@ -184,6 +187,16 @@ class ProviderConfigTests(unittest.TestCase):
 
         self.assertEqual(store.get("workspace-1", "voicebot-1"), self.config())
         self.assertEqual([config.voicebot_id for config in store.list(workspace_id="workspace-1")], ["voicebot-1"])
+
+    def test_json_provider_config_store_persists_configs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "provider_config.json"
+            JsonProviderConfigStore(path).save(self.config())
+
+            loaded = JsonProviderConfigStore(path)
+
+        self.assertEqual(loaded.load_diagnostics["loaded_configs"], 1)
+        self.assertEqual(loaded.get("workspace-1", "voicebot-1"), self.config())
 
     def test_provider_config_api_validates_saves_and_reads_config(self) -> None:
         client = self.build_client()

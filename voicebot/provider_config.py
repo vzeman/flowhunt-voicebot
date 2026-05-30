@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+from pathlib import Path
+import threading
 from typing import Literal, get_args
 
 from .providers import ProviderDescriptor, normalize_provider
@@ -83,20 +86,76 @@ class ProviderSelectionPlan:
 
 class ProviderConfigStore:
     def __init__(self) -> None:
+        self._lock = threading.RLock()
         self._configs: dict[tuple[str, str], VoicebotProviderConfig] = {}
 
     def save(self, config: VoicebotProviderConfig) -> VoicebotProviderConfig:
-        self._configs[(config.workspace_id, config.voicebot_id)] = config
+        with self._lock:
+            self._configs[(config.workspace_id, config.voicebot_id)] = config
         return config
 
     def get(self, workspace_id: str, voicebot_id: str) -> VoicebotProviderConfig | None:
-        return self._configs.get((workspace_id, voicebot_id))
+        with self._lock:
+            return self._configs.get((workspace_id, voicebot_id))
 
     def list(self, workspace_id: str | None = None) -> list[VoicebotProviderConfig]:
-        configs = self._configs.values()
+        with self._lock:
+            configs = list(self._configs.values())
         if workspace_id is not None:
             configs = [config for config in configs if config.workspace_id == workspace_id]
         return sorted(configs, key=lambda config: (config.workspace_id, config.voicebot_id))
+
+
+class JsonProviderConfigStore(ProviderConfigStore):
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.load_diagnostics: dict[str, int] = {
+            "loaded_configs": 0,
+            "skipped_malformed_json": 0,
+            "skipped_invalid_configs": 0,
+            "skipped_duplicate_configs": 0,
+        }
+        super().__init__()
+        self._load()
+
+    def save(self, config: VoicebotProviderConfig) -> VoicebotProviderConfig:
+        saved = super().save(config)
+        self._save()
+        return saved
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            self.load_diagnostics["skipped_malformed_json"] += 1
+            return
+        seen: set[tuple[str, str]] = set()
+        configs = payload.get("configs", [])
+        if not isinstance(configs, list):
+            self.load_diagnostics["skipped_invalid_configs"] += 1
+            return
+        for item in configs:
+            try:
+                config = provider_config_from_dict(item)
+            except (TypeError, ValueError, KeyError):
+                self.load_diagnostics["skipped_invalid_configs"] += 1
+                continue
+            key = (config.workspace_id, config.voicebot_id)
+            if key in seen:
+                self.load_diagnostics["skipped_duplicate_configs"] += 1
+                continue
+            seen.add(key)
+            self._configs[key] = config
+            self.load_diagnostics["loaded_configs"] += 1
+
+    def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"version": 1, "configs": [provider_config_to_dict(config) for config in self.list()]}
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+        tmp.replace(self.path)
 
 
 def provider_config_to_dict(config: VoicebotProviderConfig) -> dict:
@@ -122,6 +181,36 @@ def provider_choice_to_dict(choice: ProviderChoice) -> dict:
 
 def secret_reference_to_dict(secret: SecretReference) -> dict:
     return {"name": secret.name, "workspace_id": secret.workspace_id}
+
+
+def provider_config_from_dict(data: dict) -> VoicebotProviderConfig:
+    return VoicebotProviderConfig(
+        workspace_id=str(data["workspace_id"]),
+        voicebot_id=str(data["voicebot_id"]),
+        stt=provider_choice_from_dict(data["stt"], "stt"),
+        tts=provider_choice_from_dict(data["tts"], "tts"),
+        agent=provider_choice_from_dict(data["agent"], "agent"),
+    )
+
+
+def provider_choice_from_dict(data: dict, expected_family: ProviderFamily) -> ProviderChoice:
+    if not isinstance(data, dict):
+        raise ValueError("provider choice must be an object")
+    family = str(data.get("family") or expected_family)
+    return ProviderChoice(
+        family=family,  # type: ignore[arg-type]
+        provider=str(data["provider"]),
+        model=str(data["model"]) if data.get("model") is not None else None,
+        secret_ref=secret_reference_from_dict(data["secret_ref"]) if data.get("secret_ref") else None,
+        fallback_provider=str(data["fallback_provider"]) if data.get("fallback_provider") is not None else None,
+        config=dict(data.get("config") or {}),
+    )
+
+
+def secret_reference_from_dict(data: dict) -> SecretReference:
+    if not isinstance(data, dict):
+        raise ValueError("secret reference must be an object")
+    return SecretReference(name=str(data["name"]), workspace_id=str(data["workspace_id"]))
 
 
 def validation_issue_to_dict(issue: ProviderValidationIssue) -> dict:

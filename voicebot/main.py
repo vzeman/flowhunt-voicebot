@@ -17,6 +17,7 @@ from .runtime_storage import (
     build_agent_task_tracker,
     build_call_state_store,
     build_event_store,
+    build_provider_config_store,
     build_sip_trunk_store,
     build_session_lease_store,
     build_subagent_task_store,
@@ -41,6 +42,7 @@ def main() -> None:
     worker_registry = build_worker_registry(settings)
     worker_queue = build_worker_queue_store(settings)
     sip_trunks = build_sip_trunk_store(settings)
+    provider_configs = build_provider_config_store(settings)
     subagents = build_subagent_coordinator(settings, events)
     asterisk = (
         AsteriskAMI(settings.ami_host, settings.ami_port, settings.ami_username, settings.ami_password)
@@ -85,6 +87,7 @@ def main() -> None:
         sip_trunks,
         webrtc,
         subagents,
+        provider_configs=provider_configs,
         worker_queue=worker_queue,
         worker_registry=worker_registry,
         voicebot_sessions=voicebot_sessions,

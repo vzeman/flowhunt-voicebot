@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import unittest
 from unittest.mock import patch
 
@@ -42,6 +43,20 @@ class FakeWebRTCSession:
 
     def snapshot(self):
         return {"call_id": self.call_id, "transport": "webrtc", "session_id": "session-1"}
+
+
+class SlowProgressSession:
+    def __init__(self, call_id: str, delay: float = 0.4) -> None:
+        self.call_id = call_id
+        self.delay = delay
+        self.responses = []
+
+    def snapshot(self):
+        return {"call_id": self.call_id, "transport": "webrtc", "session_id": "session-1"}
+
+    def submit_agent_response(self, response):
+        time.sleep(self.delay)
+        self.responses.append(response)
 
 
 class FakeWebRTCManager:
@@ -487,6 +502,43 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertIn(53, tracker.snapshot()["responded_event_ids"])
         tasks = client.get("/subagent/tasks?workspace_id=workspace-1").json()["tasks"]
         self.assertEqual(tasks[0]["external_task_id"], "task-1")
+
+    def test_flowhunt_flow_tool_schedules_work_without_waiting_for_progress_speech(self) -> None:
+        provider = FakeSubagentProvider()
+        coordinator = SubagentCoordinator()
+        coordinator.register(provider)
+        registry = CallRegistry()
+        slow_session = SlowProgressSession("call-1", delay=0.4)
+        registry.add(slow_session)
+        settings = Settings(
+            flowhunt_api_key="key",
+            flowhunt_workspace_id="workspace-1",
+            flowhunt_flow_id="flow-1",
+            subagent_task_initial_poll_seconds=0.1,
+        )
+        client, _events, tracker = self.build_client(
+            registry=registry,
+            settings=settings,
+            subagent_coordinator=coordinator,
+        )
+
+        started = time.monotonic()
+        response = client.post(
+            "/agent/tools/invoke_flowhunt_flow",
+            json={
+                "arguments": {
+                    "call_id": "call-1",
+                    "message": "Review the caller website.",
+                    "response_to_event_id": 54,
+                }
+            },
+        )
+        elapsed = time.monotonic() - started
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLess(elapsed, 0.3)
+        self.assertEqual(provider.requests[0].input_text, "Review the caller website.")
+        self.assertIn(54, tracker.snapshot()["responded_event_ids"])
 
 
 if __name__ == "__main__":

@@ -106,6 +106,11 @@ the colleague tool call so the tool schedules work silently instead of repeating
 another waiting phrase. Other agents can omit `suppress_progress` and receive
 the default spoken progress update from the tool.
 
+When default progress speech is enabled, the tool schedules that speech in
+parallel with task creation. The caller can hear that work is starting while the
+subagent task is already being submitted or polled; the task lifecycle is not
+blocked by TTS generation or playback.
+
 The first adapter is `FlowHuntSubagentProvider`, with provider kinds:
 
 - `flowhunt_flow`

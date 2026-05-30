@@ -122,6 +122,13 @@ the model later invokes a colleague/subagent tool, the wrapper suppresses the
 tool's default progress phrase so the caller does not hear duplicate waiting
 messages.
 
+Colleague/subagent progress speech is intentionally scheduled in parallel with
+the background work. The tool handler queues the spoken progress update as a
+fire-and-forget call response and immediately continues to create or schedule
+the FlowHunt/subagent task. Only call-control actions that depend on sequencing,
+such as saying goodbye before hangup, wait for speech playback before executing
+the control action.
+
 Completed colleague/subagent results are normalized before speech. The
 communication layer strips provider greetings, internal task/status text,
 markdown, links, duplicated progress wording, and raw provider payloads, then

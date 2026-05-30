@@ -275,6 +275,7 @@ def execute_tool_calls(base_url: str, calls: list[dict]) -> list[dict]:
 
 CALL_CONTROL_TOOL_NAMES = {"hangup_call", "transfer_call", "send_dtmf"}
 BACKGROUND_WORK_TOOL_NAMES = {"delegate_to_subagent", "invoke_flowhunt_flow", "create_flowhunt_project_issue"}
+COLLEAGUE_SPOKEN_MAX_CHARS = 190
 
 
 def execute_conversational_tool_calls(base_url: str, calls: list[dict]) -> list[dict]:
@@ -579,7 +580,7 @@ def colleague_update_answer(task: dict) -> str:
     spoken = customer_facing_colleague_text(candidate)
     if not spoken:
         return "I checked with a colleague, but I do not have a clear customer-facing result yet."
-    return _speech_limit(f"I checked with a colleague. {spoken}", max_chars=190)
+    return _speech_limit(f"I checked with a colleague. {spoken}", max_chars=COLLEAGUE_SPOKEN_MAX_CHARS)
 
 
 def customer_facing_colleague_text(text: str) -> str:
@@ -644,6 +645,8 @@ def strip_internal_colleague_text(text: str) -> str:
             lowered,
         ):
             continue
+        if lowered.startswith(("if you tell me", "if you provide", "let me know if", "would you like me to")):
+            continue
         kept_lines.append(line)
     return " ".join(kept_lines)
 
@@ -652,6 +655,9 @@ def conversationalize_colleague_text(text: str) -> str:
     pricing_summary = extract_plan_pricing_summary(text)
     if pricing_summary:
         return pricing_summary
+    incident_summary = extract_incident_summary(text)
+    if incident_summary:
+        return incident_summary
     status_summary = extract_status_page_summary(text)
     if status_summary:
         return status_summary
@@ -678,7 +684,7 @@ def conversationalize_colleague_text(text: str) -> str:
     spoken = " ".join(useful) or cleaned
     if spoken and spoken[-1] not in ".!?":
         spoken = f"{spoken}."
-    return spoken
+    return _speech_limit(spoken, max_chars=COLLEAGUE_SPOKEN_MAX_CHARS - len("I checked with a colleague. "))
 
 
 def strip_leading_symbols(text: str) -> str:
@@ -699,6 +705,84 @@ def extract_status_page_summary(text: str) -> str:
     if "liveagent" in lowered:
         subject = "The LiveAgent status page"
     return f"{subject} currently shows normal operation, with no active downtime or visible incidents."
+
+
+def extract_incident_summary(text: str) -> str:
+    lowered = text.lower()
+    if "incident" not in lowered and "downtime" not in lowered and "degradation" not in lowered:
+        return ""
+
+    date = extract_first_match(
+        text,
+        (
+            r"\b([A-Z][a-z]+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})\b",
+            r"\b(\d{1,2} [A-Z][a-z]+ \d{4})\b",
+        ),
+    )
+    if not date:
+        return ""
+
+    duration = extract_first_match(
+        text,
+        (
+            r"\bDuration:\s*(?:Resolved in\s*)?([^.\n]+)",
+            r"\bresolved in\s+([^.\n]+)",
+        ),
+    )
+    issue = extract_first_match(
+        text,
+        (
+            r"\bIssue:\s*([^.\n]+)",
+            r"\bIt was an?\s+([^.\n]+)",
+            r"\bthere was a\s+([^.\n]+)",
+        ),
+    )
+    location = extract_first_match(
+        text,
+        (
+            r"\b(?:Europe|EU)\s*\(([^)]+)\)\s*data center",
+            r"\b(EU\s+[A-Z][A-Za-z]+)\s*data center",
+            r"\b(Europe\s+[A-Z][A-Za-z]+)\s*data center",
+        ),
+    )
+
+    issue_text = normalize_incident_issue(issue)
+    parts = [f"Yes, {date} was a service degradation"]
+    if location:
+        location_text = location
+        if not location_text.lower().startswith(("eu ", "europe ")):
+            location_text = f"EU {location_text}"
+        parts[0] += f" in {location_text}"
+    if issue_text:
+        parts.append(issue_text)
+    if duration:
+        parts.append(f"resolved in {normalize_incident_duration(duration)}")
+    return f"{parts[0]}: {', '.join(parts[1:])}." if len(parts) > 1 else f"{parts[0]}."
+
+
+def extract_first_match(text: str, patterns: tuple[str, ...]) -> str:
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return re.sub(r"\s+", " ", match.group(1)).strip(" -*:;,.")
+    return ""
+
+
+def normalize_incident_issue(issue: str) -> str:
+    cleaned = re.sub(r"\s+", " ", issue).strip(" -*:;,.")
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"\s+affecting\s+.*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+in\s+the\s+.*$", "", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+def normalize_incident_duration(duration: str) -> str:
+    cleaned = re.sub(r"\s+", " ", duration).strip(" -*:;,.")
+    cleaned = re.split(r"\b(?:Cause|Status|Issue|Most Recent Downtime)\s*:", cleaned, maxsplit=1, flags=re.IGNORECASE)[
+        0
+    ]
+    return cleaned.strip(" -*:;,.")
 
 
 def extract_plan_pricing_summary(text: str) -> str:
@@ -724,8 +808,6 @@ def extract_plan_pricing_summary(text: str) -> str:
             f"Call center functionality is included starting with {first[0]}, "
             f"which is ${first[1]} per agent per month, or ${first[2]} annually."
         )
-        for plan, monthly, annual, _included in included_plans[1:]:
-            parts.append(f"{plan} is ${monthly} monthly, or ${annual} annually.")
     excluded = [plan for plan in plans if not plan[3]]
     if excluded:
         parts.append(f"{excluded[0][0]} does not include call center functionality.")

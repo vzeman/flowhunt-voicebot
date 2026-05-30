@@ -358,6 +358,38 @@ class PlaybackControlTests(unittest.TestCase):
         finally:
             session.stop()
 
+    def test_call_control_ack_bypasses_active_caller_speech(self) -> None:
+        events = EventStore(max_context_events=30)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(deferred_response_wait_seconds=0.0),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"text": "please hang up"})
+            session._remember_response_generation(request.id)
+            session.recording_event.set()
+
+            session.submit_agent_response(
+                AgentResponse(
+                    "call-1",
+                    "Goodbye.",
+                    response_to_event_id=request.id,
+                    response_kind="call_control_ack",
+                )
+            )
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertNotIn("agent_response_deferred", event_types)
+            self.assertNotIn("agent_response_dropped", event_types)
+            self.assertIn("agent_response_queued", event_types)
+            self.assertTrue(session.playback.is_active())
+        finally:
+            session.stop()
+
     def test_call_control_ack_interrupts_generic_progress_ack(self) -> None:
         events = EventStore(max_context_events=30)
         tts = RecordingTTS()
@@ -408,6 +440,32 @@ class PlaybackControlTests(unittest.TestCase):
             )
 
             event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertNotIn("agent_response_dropped", event_types)
+            self.assertIn("agent_response_queued", event_types)
+            self.assertTrue(session.playback.is_active())
+        finally:
+            left.close()
+            right.close()
+
+    def test_call_session_call_control_ack_bypasses_active_caller_speech(self) -> None:
+        events = EventStore(max_context_events=30)
+        session, left, right = self.make_session("call-1", events)
+        try:
+            request = events.append("call-1", "agent_response_requested", {"text": "please hang up"})
+            session._remember_response_generation(request.id)
+            session.recording_event.set()
+
+            session.submit_agent_response(
+                AgentResponse(
+                    "call-1",
+                    "Goodbye.",
+                    response_to_event_id=request.id,
+                    response_kind="call_control_ack",
+                )
+            )
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertNotIn("agent_response_deferred", event_types)
             self.assertNotIn("agent_response_dropped", event_types)
             self.assertIn("agent_response_queued", event_types)
             self.assertTrue(session.playback.is_active())

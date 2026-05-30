@@ -234,6 +234,7 @@ class CallSession:
         )
         startup_response = self._is_startup_response(response.response_to_event_id)
         persistent_response = self._is_persistent_response(response)
+        bypass_speaking_deferral = self._bypasses_speaking_deferral(response)
         self._interrupt_progress_for_priority_response(response)
         if not startup_response and not persistent_response and self._has_active_persistent_response():
             self.events.append(
@@ -256,7 +257,7 @@ class CallSession:
             )
             return event
 
-        if self.recording_event.is_set() and not startup_response:
+        if self.recording_event.is_set() and not startup_response and not bypass_speaking_deferral:
             self._defer_until_caller_silence(response.response_to_event_id, "caller_is_speaking")
             if not self.recording_event.is_set() and (
                 persistent_response or not self._has_newer_user_activity(response.response_to_event_id)
@@ -322,7 +323,9 @@ class CallSession:
                         },
                     )
                     return event
-                if (self.recording_event.is_set() or request_generation != self._current_interrupt_generation()) and not startup_response:
+                if (
+                    self.recording_event.is_set() or request_generation != self._current_interrupt_generation()
+                ) and not startup_response and not bypass_speaking_deferral:
                     if not queued and self.recording_event.is_set():
                         self._defer_until_caller_silence(response.response_to_event_id, "caller_started_speaking_during_tts")
                     if (
@@ -775,6 +778,9 @@ class CallSession:
         return response.response_kind in {"call_control_ack", "colleague_result"} or self._should_defer_response(
             response.response_to_event_id
         )
+
+    def _bypasses_speaking_deferral(self, response: AgentResponse) -> bool:
+        return response.response_kind == "call_control_ack"
 
     def _interrupt_progress_for_priority_response(self, response: AgentResponse) -> None:
         if response.response_kind != "call_control_ack" or "progress_ack" not in self.playback.active_response_kinds():

@@ -1,3 +1,4 @@
+from .artifacts import ArtifactRecord, FilesystemArtifactStore, safe_artifact_id
 from .drivers import (
     StoreHealth,
     StorageDriverDefinition,
@@ -36,9 +37,11 @@ from .protocols import (
 
 __all__ = [
     "AgentTaskStoreProtocol",
+    "ArtifactRecord",
     "ArtifactStoreProtocol",
     "CallStateStoreProtocol",
     "EventStoreProtocol",
+    "FilesystemArtifactStore",
     "ProviderConfigStoreProtocol",
     "SessionLeaseStoreProtocol",
     "SipTrunkStoreProtocol",
@@ -63,6 +66,7 @@ __all__ = [
     "attach_storage_driver",
     "attached_storage_driver",
     "normalize_driver_name",
+    "safe_artifact_id",
     "storage_component_diagnostics",
     "storage_component_health",
 ]

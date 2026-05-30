@@ -54,3 +54,23 @@ def assert_agent_task_store_contract(testcase: Any, factory: Callable[[], Any]) 
     testcase.assertEqual(store.claim([3], "worker-1", 0.1), [3])
     time.sleep(0.12)
     testcase.assertTrue(store.is_pending(3))
+
+
+def assert_artifact_store_contract(testcase: Any, factory: Callable[[], Any]) -> None:
+    store = factory()
+
+    first = store.put(
+        "workspace/ws-1/cache item.bin",
+        b"first",
+        {"workspace_id": "ws-1", "voicebot_id": "bot-1", "kind": "test"},
+    )
+    testcase.assertEqual(store.get("workspace/ws-1/cache item.bin"), b"first")
+    testcase.assertEqual(first.metadata["workspace_id"], "ws-1")
+
+    second = store.put("workspace/ws-1/cache item.bin", b"second", {"workspace_id": "ws-1"})
+    testcase.assertEqual(store.get("workspace/ws-1/cache item.bin"), b"second")
+    testcase.assertEqual(first.path, second.path)
+    testcase.assertGreaterEqual(len(store.list()), 1)
+
+    testcase.assertTrue(store.delete("workspace/ws-1/cache item.bin"))
+    testcase.assertIsNone(store.get("workspace/ws-1/cache item.bin"))

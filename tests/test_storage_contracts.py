@@ -8,6 +8,7 @@ from voicebot.agent_tasks import AgentTaskTracker, JsonAgentTaskTracker
 from voicebot.call_state import CallStateStore, JsonCallStateStore
 from voicebot.events import EventStore, JsonEventStore
 from voicebot.storage import (
+    FilesystemArtifactStore,
     StorageConflict,
     StorageError,
     StorageNotFound,
@@ -17,6 +18,7 @@ from voicebot.storage import (
 
 from storage_contract_cases import (
     assert_agent_task_store_contract,
+    assert_artifact_store_contract,
     assert_call_state_store_contract,
     assert_event_store_contract,
 )
@@ -46,6 +48,10 @@ class StorageContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "agent_tasks.json"
             assert_agent_task_store_contract(self, lambda: JsonAgentTaskTracker(path))
+
+    def test_filesystem_artifact_store_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            assert_artifact_store_contract(self, lambda: FilesystemArtifactStore(directory))
 
     def test_storage_health_reports_recovery_warnings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

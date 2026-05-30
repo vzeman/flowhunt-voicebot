@@ -8,6 +8,7 @@ from .scaling import JsonWorkerQueueStore, JsonWorkerRegistry, WorkerQueueStore,
 from .session_leases import JsonSessionLeaseStore, SessionLeaseStore
 from .sip_trunks import SipTrunkStore
 from .storage import (
+    FilesystemArtifactStore,
     StorageDriverDefinition,
     StorageDriverSelection,
     StorageRegistry,
@@ -226,6 +227,20 @@ def build_subagent_task_store(settings: Settings) -> SubagentTaskStore:
     if driver == "memory":
         return attach_storage_driver(SubagentTaskStore(), selection)
     raise_unsupported_storage("VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER", settings.subagent_task_store_provider, selection)
+
+
+def build_audio_artifact_store(settings: Settings) -> FilesystemArtifactStore:
+    driver = normalize_driver_name(settings.audio_artifact_store_provider)
+    selection = storage_driver_selection(
+        "audio_artifacts",
+        driver,
+        settings.audio_artifact_store_provider,
+        settings.tts_cache_dir,
+        {"debug_audio_dir": settings.debug_audio_dir},
+    )
+    if driver == "filesystem":
+        return attach_storage_driver(FilesystemArtifactStore(settings.tts_cache_dir), selection)
+    raise_unsupported_storage("VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER", settings.audio_artifact_store_provider, selection)
 
 
 def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelection]:

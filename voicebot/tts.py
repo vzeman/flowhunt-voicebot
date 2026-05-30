@@ -7,8 +7,8 @@ import hashlib
 from io import BytesIO
 import json
 from pathlib import Path
-import tempfile
 import threading
+from typing import Protocol
 
 import numpy as np
 
@@ -30,6 +30,7 @@ except ModuleNotFoundError:
 from .audio import CALL_SAMPLE_RATE, resample_audio
 from .config import Settings
 from .providers import normalize_provider, provider_api_key, provider_base_url
+from .storage import ArtifactStoreProtocol, FilesystemArtifactStore
 
 OPENAI_TTS_PCM_SAMPLE_RATE = 24_000
 
@@ -52,23 +53,38 @@ class TTSCacheConfig:
     sample_rate: int = CALL_SAMPLE_RATE
 
 
+class _ArtifactReaderWriter(Protocol):
+    def get(self, artifact_id: str) -> bytes | None:
+        ...
+
+    def put(self, artifact_id: str, data: bytes, metadata: dict | None = None):
+        ...
+
+
 class CachedTTSProvider(TTSProvider):
-    def __init__(self, inner: TTSProvider, cache_dir: str, config: TTSCacheConfig) -> None:
+    def __init__(
+        self,
+        inner: TTSProvider,
+        cache_dir: str,
+        config: TTSCacheConfig,
+        artifact_store: ArtifactStoreProtocol | None = None,
+    ) -> None:
         self._inner = inner
         self._cache_dir = Path(cache_dir)
+        self._artifact_store: _ArtifactReaderWriter = artifact_store or FilesystemArtifactStore(cache_dir)
         self._config = config
         self._lock = threading.Lock()
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
     def synthesize(self, text: str) -> tuple[np.ndarray, float]:
         key = self._cache_key(text)
-        path = self._cache_dir / f"{key}.npz"
-        cached = self._read(path)
+        artifact_id = f"{key}.npz"
+        cached = self._read(artifact_id)
         if cached is not None:
             return cached
 
         audio, duration = self._inner.synthesize(text)
-        self._write(path, audio, duration)
+        self._write(artifact_id, audio, duration)
         return audio, duration
 
     def _cache_key(self, text: str) -> str:
@@ -86,25 +102,35 @@ class CachedTTSProvider(TTSProvider):
         serialized = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(serialized).hexdigest()
 
-    def _read(self, path: Path) -> tuple[np.ndarray, float] | None:
+    def _read(self, artifact_id: str) -> tuple[np.ndarray, float] | None:
         try:
             with self._lock:
-                if not path.exists():
+                cached_bytes = self._artifact_store.get(artifact_id)
+                if cached_bytes is None:
                     return None
-                with np.load(path) as cached:
+                with np.load(BytesIO(cached_bytes)) as cached:
                     audio = np.asarray(cached["audio"], dtype=np.float32)
                     duration = float(np.asarray(cached["duration"]).reshape(-1)[0])
         except (OSError, KeyError, ValueError):
             return None
         return audio, duration
 
-    def _write(self, path: Path, audio: np.ndarray, duration: float) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
+    def _write(self, artifact_id: str, audio: np.ndarray, duration: float) -> None:
         with self._lock:
-            with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".npz", delete=False) as tmp:
-                tmp_path = Path(tmp.name)
-                np.savez_compressed(tmp, audio=audio.astype(np.float32, copy=False), duration=np.asarray([duration]))
-            tmp_path.replace(path)
+            buffer = BytesIO()
+            np.savez_compressed(buffer, audio=audio.astype(np.float32, copy=False), duration=np.asarray([duration]))
+            self._artifact_store.put(
+                artifact_id,
+                buffer.getvalue(),
+                {
+                    "kind": "tts_cache",
+                    "provider": self._config.provider,
+                    "model": self._config.model,
+                    "voice": self._config.voice,
+                    "language": self._config.language,
+                    "sample_rate": self._config.sample_rate,
+                },
+            )
 
 
 class SupertonicTTSProvider(TTSProvider):

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 import tempfile
 from typing import Any
 
@@ -12,7 +11,7 @@ from .provider_catalog import provider_catalog
 from .config import Settings
 from .security_contract import security_contract_issues, security_contract_payload
 from .sip_media_plane import sip_media_plane_issues, sip_media_plane_payload
-from .storage import attached_storage_driver
+from .storage import storage_component_diagnostics
 from .storage_contracts import storage_contract_issues, storage_contracts_payload
 from .realtime_quality import realtime_audio_profile, realtime_audio_profile_issues
 from .webrtc_media_plane import webrtc_media_plane_issues, webrtc_media_plane_payload
@@ -221,73 +220,4 @@ def durable_storage_check(components: dict[str, Any]) -> HealthCheck:
 
 
 def store_diagnostics(component: Any) -> dict[str, Any]:
-    path = getattr(component, "path", None)
-    diagnostics = dict(getattr(component, "load_diagnostics", {}) or {})
-    snapshot = component_snapshot(component)
-    driver = attached_storage_driver(component)
-    details: dict[str, Any] = {
-        "kind": component.__class__.__name__,
-        "path": str(path) if path is not None else None,
-        "driver": driver.to_dict() if driver is not None else None,
-        "load_diagnostics": diagnostics,
-        "warning_count": recovery_warning_count(diagnostics),
-        "snapshot": snapshot,
-    }
-    if path is not None:
-        writable, error = path_is_writable(Path(path))
-        details["writable"] = writable
-        if error:
-            details["writable_error"] = error
-    return details
-
-
-def recovery_warning_count(diagnostics: dict[str, Any]) -> int:
-    count = 0
-    for name, value in diagnostics.items():
-        if name.startswith("skipped_") or name.startswith("requeued_"):
-            try:
-                count += int(value)
-            except (TypeError, ValueError):
-                continue
-    return count
-
-
-def component_snapshot(component: Any) -> dict[str, Any]:
-    if hasattr(component, "snapshot"):
-        snapshot = component.snapshot()
-        if isinstance(snapshot, dict):
-            return compact_snapshot(snapshot)
-    if hasattr(component, "list"):
-        try:
-            items = component.list()
-        except TypeError:
-            return {}
-        return {"count": len(items)}
-    return {}
-
-
-def compact_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
-    compact: dict[str, Any] = {}
-    if "responded_event_ids" in snapshot:
-        compact["responded_event_count"] = len(snapshot.get("responded_event_ids") or [])
-    if "claims" in snapshot:
-        compact["claim_count"] = len(snapshot.get("claims") or {})
-    if "pending" in snapshot:
-        compact["pending_count"] = sum(len(items) for items in (snapshot.get("pending") or {}).values())
-    if "claimed" in snapshot:
-        compact["claimed_count"] = len(snapshot.get("claimed") or [])
-    if "leases" in snapshot:
-        compact["lease_count"] = len(snapshot.get("leases") or [])
-    return compact or snapshot
-
-
-def path_is_writable(path: Path) -> tuple[bool, str | None]:
-    directory = path.parent if path.suffix else path
-    try:
-        directory.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(prefix=".health-", dir=directory, delete=True) as handle:
-            handle.write(b"ok")
-            handle.flush()
-        return True, None
-    except OSError as exc:
-        return False, str(exc)
+    return storage_component_diagnostics(component)

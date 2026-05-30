@@ -74,6 +74,28 @@ under `checks.durable_storage.stores[*].driver`. The `/storage/drivers` endpoint
 also reports selected-but-not-yet-constructed families such as `provider_config`
 and `audio_artifacts`.
 
+## Driver Health And Errors
+
+The storage abstraction layer defines shared health and error primitives so
+local and managed drivers report failures consistently:
+
+- `StoreHealth` describes whether a store is reachable, any warning counts, the
+  selected driver metadata, load diagnostics, path writability, and compact
+  runtime snapshots.
+- `StorageError` carries a stable `code`, optional `family`, optional `driver`,
+  a message, and structured details.
+- Specialized error codes are `unavailable`, `conflict`, `not_found`,
+  `validation_error`, `timeout`, and `corruption_warning`.
+
+Managed drivers should raise these storage errors at their API boundary instead
+of leaking backend-specific exceptions. API handlers and workers can then map
+errors consistently to retries, dead-lettering, readiness failures, or user-safe
+diagnostics.
+
+Reusable contract tests live in `tests/storage_contract_cases.py`. New drivers
+should run the same lifecycle tests as the local memory/JSON/JSONL drivers
+before they are enabled in production configuration.
+
 Retention and deletion policy is exposed separately by
 `GET /workspaces/{workspace_id}/security/retention`. The policy defines
 workspace-scoped deletion hooks for events, transcripts, recordings/debug

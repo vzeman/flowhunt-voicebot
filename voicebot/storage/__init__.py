@@ -7,6 +7,17 @@ from .drivers import (
     attached_storage_driver,
     normalize_driver_name,
 )
+from .errors import (
+    StorageConflict,
+    StorageCorruptionWarning,
+    StorageError,
+    StorageErrorCode,
+    StorageNotFound,
+    StorageTimeout,
+    StorageUnavailable,
+    StorageValidationError,
+)
+from .health import storage_component_diagnostics, storage_component_health
 from .protocols import (
     AgentTaskStoreProtocol,
     ArtifactStoreProtocol,
@@ -33,8 +44,16 @@ __all__ = [
     "SipTrunkStoreProtocol",
     "StorageDriverDefinition",
     "StorageDriverSelection",
+    "StorageError",
+    "StorageErrorCode",
     "StorageProtocol",
     "StorageRegistry",
+    "StorageConflict",
+    "StorageCorruptionWarning",
+    "StorageNotFound",
+    "StorageTimeout",
+    "StorageUnavailable",
+    "StorageValidationError",
     "StoreHealth",
     "SubagentTaskStoreProtocol",
     "TranscriptStoreProtocol",
@@ -44,4 +63,6 @@ __all__ = [
     "attach_storage_driver",
     "attached_storage_driver",
     "normalize_driver_name",
+    "storage_component_diagnostics",
+    "storage_component_health",
 ]

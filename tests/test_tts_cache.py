@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 
-from voicebot.tts import CachedTTSProvider, TTSCacheConfig
+from voicebot.tts import CALL_SAMPLE_RATE, OPENAI_TTS_PCM_SAMPLE_RATE, CachedTTSProvider, OpenAITTSProvider, TTSCacheConfig, pcm16le_bytes_to_float32
 
 
 class CountingTTS:
@@ -15,6 +15,40 @@ class CountingTTS:
     def synthesize(self, text: str):
         self.calls += 1
         return np.ones(80, dtype=np.float32) * self.calls, 0.01
+
+
+class _NoopLock:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakeStreamingResponse:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = chunks
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def iter_bytes(self, chunk_size: int):
+        _ = chunk_size
+        yield from self.chunks
+
+
+class _FakeSpeech:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = chunks
+        self.requests = []
+        self.with_streaming_response = self
+
+    def create(self, **kwargs):
+        self.requests.append(kwargs)
+        return _FakeStreamingResponse(self.chunks)
 
 
 class TTSCacheTests(unittest.TestCase):
@@ -54,6 +88,33 @@ class TTSCacheTests(unittest.TestCase):
 
         self.assertEqual(first_inner.calls, 1)
         self.assertEqual(second_inner.calls, 1)
+
+    def test_pcm16le_bytes_to_float32_ignores_trailing_odd_byte(self) -> None:
+        audio = pcm16le_bytes_to_float32(b"\x00\x40\xff")
+
+        self.assertEqual(audio.shape, (1,))
+        self.assertAlmostEqual(float(audio[0]), 0.5, places=4)
+
+    def test_openai_tts_streams_pcm_chunks_as_call_audio(self) -> None:
+        provider = OpenAITTSProvider.__new__(OpenAITTSProvider)
+        provider._model = "gpt-4o-mini-tts"
+        provider._voice = "alloy"
+        provider._lock = _NoopLock()
+        samples = (np.ones(OPENAI_TTS_PCM_SAMPLE_RATE // 10, dtype=np.int16) * 8192).astype("<i2")
+        speech = _FakeSpeech([samples.tobytes()[:101], samples.tobytes()[101:]])
+        provider._client = type("Client", (), {"audio": type("Audio", (), {"speech": speech})()})()
+
+        chunks = list(provider.synthesize_stream("Hello"))
+
+        self.assertGreaterEqual(len(chunks), 1)
+        audio = np.concatenate([chunk for chunk, _duration in chunks])
+        duration = sum(duration for _chunk, duration in chunks)
+        self.assertGreater(audio.size, 0)
+        self.assertAlmostEqual(duration, 0.1, places=2)
+        self.assertEqual(speech.requests[0]["response_format"], "pcm")
+        self.assertEqual(speech.requests[0]["model"], "gpt-4o-mini-tts")
+        self.assertEqual(speech.requests[0]["voice"], "alloy")
+        self.assertAlmostEqual(len(audio), CALL_SAMPLE_RATE // 10, delta=2)
 
 
 if __name__ == "__main__":

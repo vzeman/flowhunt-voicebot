@@ -121,6 +121,7 @@ from .transcripts import TranscriptStore
 from .transports import transport_catalog
 from .tools import tool_definitions_json_schema, tool_definitions_legacy
 from .webrtc import WebRTCSessionManager
+from .webrtc_media_plane import webrtc_media_plane_payload
 from .workspace_access import WorkspaceAccessPolicy, workspace_access_policy_from_settings
 from .workspace_model import ChannelResolver, VoicebotChannelBinding, VoicebotDefinition, VoicebotSessionStore, VoicebotStore
 
@@ -1097,6 +1098,10 @@ def create_app(
         if webrtc is None:
             raise HTTPException(status_code=503, detail="WebRTC transport is not configured")
         return {"sessions": webrtc.snapshots()}
+
+    @app.get("/webrtc/media-plane")
+    def get_webrtc_media_plane() -> dict[str, Any]:
+        return webrtc_media_plane_payload()
 
     @app.post("/webrtc/sessions")
     async def create_webrtc_session(request: WebRTCOfferRequest) -> dict[str, Any]:

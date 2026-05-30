@@ -114,6 +114,21 @@ block the caller for a full minute. If that fallback speech cannot be delivered
 because the call has already ended, the agent releases the claimed task instead
 of renewing it indefinitely.
 
+For ordinary caller requests, the communication agent also starts a delayed
+progress acknowledgement timer while the model is deciding what to do. If no
+answer or tool call is ready within roughly one second, the bot says a short
+"I am checking that" message without marking the caller task as answered. When
+the model later invokes a colleague/subagent tool, the wrapper suppresses the
+tool's default progress phrase so the caller does not hear duplicate waiting
+messages.
+
+Completed colleague/subagent results are normalized before speech. The
+communication layer strips provider greetings, internal task/status text,
+markdown, links, duplicated progress wording, and raw provider payloads, then
+turns the useful result into a short spoken answer. This keeps a FlowHunt or
+other colleague response from being read literally when it contains content
+meant for chat or internal logs.
+
 Before completed caller audio is sent to STT, the runtime trims trailing silence
 that was only needed for endpointing while keeping a short tail for recognition
 context. This reduces uploaded audio duration and avoids asking the STT provider

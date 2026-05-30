@@ -1345,6 +1345,9 @@ Supported tool names:
 | `transfer_call` | Transfer an active call to another extension or SIP target. |
 | `send_dtmf` | Send one DTMF digit into an active call. |
 | `stop_playback` | Stop queued or active bot playback. |
+| `delegate_to_subagent` | Delegate complex work to a registered colleague/subagent provider. |
+| `invoke_flowhunt_flow` | Invoke the configured FlowHunt flow for complex work. |
+| `create_flowhunt_project_issue` | Create a FlowHunt AI Project issue for complex work. |
 | `list_transcripts` | List call IDs with persisted transcripts. |
 | `list_transcript_summaries` | List transcript metadata. |
 | `get_transcript_stats` | Read aggregate transcript counts and corruption counters. |
@@ -1358,6 +1361,12 @@ Supported tool names:
 | `get_agent_task_summary` | Read agent task events with derived state. |
 
 Tool argument details are available from `GET /agent/tools/schema`.
+
+The colleague tools accept optional `suppress_progress`. When true, the tool
+schedules the delegated work without speaking its default progress phrase. The
+communication-agent worker uses this after it has already spoken a delayed
+acknowledgement, which avoids duplicate "I am checking" messages while keeping
+the tool safe for other agents that still need the built-in progress speech.
 
 The bundled `openai-agent` and `anthropic-agent` workers both use this same tool
 API. OpenAI tool schemas are returned directly from `/agent/tools/schema`; the

@@ -152,6 +152,26 @@ class AgentCoordinationTests(unittest.TestCase):
 
         self.assertEqual(answer, "LiveAgent has 1,950 sitemap pages. The sitemap index was counted directly.")
 
+    def test_colleague_result_strips_emoji_greeting_and_summarizes_status_page(self) -> None:
+        raw = """
+        👋 Hello and welcome to LiveAgent Support!
+        I'm AI chatbot assistant ready to assist with any questions about LiveAgent using our knowledge base.
+        Got any questions? Feel free to ask in your preferred language!
+
+        I checked **https://status.liveagent.com/** and it currently indicates **normal status**.
+        - Live status: Normal (operational)
+        - Downtime: No active downtime is shown
+        - Notable incidents: None visible
+        Reference: https://status.liveagent.com/
+        """
+
+        answer = customer_facing_colleague_text(raw)
+
+        self.assertEqual(
+            answer,
+            "The LiveAgent status page currently shows normal operation, with no active downtime or visible incidents.",
+        )
+
     def test_colleague_result_turns_pricing_table_into_customer_summary(self) -> None:
         raw = """
         Hello and welcome to LiveAgent Support!

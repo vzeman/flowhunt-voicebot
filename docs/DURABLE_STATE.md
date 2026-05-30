@@ -189,8 +189,12 @@ after service restart within the heartbeat TTL.
 
 - pending worker queue envelopes by queue name
 - active claims with owner and absolute expiration
-- expired claims requeued to pending on reload
-- load diagnostics for malformed JSON, invalid rows, and duplicate item ids
+- idempotency keys for duplicate active submission detection
+- retry counters, maximum attempts, last error, and dead-lettered terminal rows
+- expired claims requeued to pending on reload or dead-lettered when retry
+  attempts are exhausted
+- load diagnostics for malformed JSON, invalid rows, duplicate item ids, and
+  recovered dead-lettered rows
 
 The runtime selects the worker queue store with:
 
@@ -198,6 +202,8 @@ The runtime selects the worker queue store with:
 - `VOICEBOT_WORKER_QUEUE_STORE_PATH=/data/worker_queue.json`
 
 Docker defaults to `json`, so internal `/scaling/queue/*` work handoff survives
+local service restarts. Acknowledged items are removed from the local queue;
+pending, claimed, and dead-lettered items remain visible for diagnostics.
 local service restarts until production replaces it with Redis streams or
 FlowHunt shared queue infrastructure.
 

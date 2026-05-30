@@ -982,6 +982,8 @@ def create_app(
                     trace_id=request.trace_id,
                     created_at=request.created_at or datetime.now().astimezone().isoformat(),
                     attempt=request.attempt,
+                    idempotency_key=request.idempotency_key,
+                    max_attempts=request.max_attempts,
                 )
             )
         except ValueError as exc:
@@ -1001,6 +1003,18 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from None
         return {"items": [item.as_dict() for item in claimed]}
 
+    @app.post("/scaling/queue/renew")
+    def scaling_queue_renew(request: WorkerQueueItemRequest) -> dict[str, Any]:
+        if request.owner is None:
+            raise HTTPException(status_code=400, detail="owner is required")
+        try:
+            item = scaling_queue.renew(request.item_id, request.owner, ttl_seconds=request.ttl_seconds)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        if item is None:
+            raise HTTPException(status_code=404, detail="work item claim not found")
+        return {"item": item.as_dict(), "renewed": True}
+
     @app.post("/scaling/queue/ack")
     def scaling_queue_ack(request: WorkerQueueItemRequest) -> dict[str, Any]:
         item = scaling_queue.ack(request.item_id, owner=request.owner)
@@ -1010,10 +1024,14 @@ def create_app(
 
     @app.post("/scaling/queue/release")
     def scaling_queue_release(request: WorkerQueueItemRequest) -> dict[str, Any]:
-        item = scaling_queue.release(request.item_id, owner=request.owner)
+        item = scaling_queue.release(request.item_id, owner=request.owner, error=request.error)
         if item is None:
             raise HTTPException(status_code=404, detail="work item claim not found")
-        return {"item": item.as_dict(), "released": True}
+        return {"item": item.as_dict(), "released": item.failed_at is None, "dead_lettered": item.failed_at is not None}
+
+    @app.get("/scaling/queue/dead-letter")
+    def scaling_queue_dead_letter() -> dict[str, Any]:
+        return {"items": [item.as_dict() for item in scaling_queue.dead_lettered()]}
 
     def provider_choice_from_request(family: str, request, workspace_id: str) -> ProviderChoice:
         secret_ref = None

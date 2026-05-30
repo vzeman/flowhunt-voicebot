@@ -58,18 +58,20 @@ fits the current workspace/voicebot/provider limits. This is a planning surface
 for FlowHunt deployment orchestration; it does not enqueue work itself.
 
 `WorkerQueueEnvelope` defines the payload shape for future queue/stream
-handoff. Every queued item carries an item id, work kind, queue name, routing
-key with workspace/voicebot/session/provider fields, payload, trace id,
-creation timestamp, and retry attempt. The routing partition key keeps all work
-for a session addressable after worker restart, while the provider key supports
-provider-specific rate limits.
+handoff. Every queued item carries an item id, idempotency key, work kind,
+queue name, routing key with workspace/voicebot/session/provider fields,
+payload, trace id, creation timestamp, retry attempt, and maximum attempts. The
+routing partition key keeps all work for a session addressable after worker
+restart, while the provider key supports provider-specific rate limits.
 
 `WorkerQueueStore` is the local lifecycle contract for these envelopes. It can
-enqueue pending items, claim them by queue with an owner and TTL, acknowledge
-completed work, release work back to pending, expire abandoned claims, and
-produce grouped pending/claimed snapshots. It is intentionally in-memory; the
-same lifecycle should move to Redis streams, a database queue, or FlowHunt
-shared infrastructure for production.
+enqueue pending items, deduplicate active submissions by idempotency key, claim
+them by queue with an owner and TTL, renew claims, acknowledge completed work,
+release failed work back to pending, expire abandoned claims, dead-letter work
+after retry exhaustion, and produce grouped pending/claimed/dead-letter
+snapshots. It is intentionally in-memory; the same lifecycle should move to
+Redis streams, a database queue, or FlowHunt shared infrastructure for
+production.
 `JsonWorkerQueueStore` persists this local lifecycle for restart recovery during
 development and single-node deployments.
 
@@ -86,8 +88,10 @@ Internal queue endpoints expose this lifecycle for early worker separation:
 - `GET /scaling/queue`
 - `POST /scaling/queue/enqueue`
 - `POST /scaling/queue/claim`
+- `POST /scaling/queue/renew`
 - `POST /scaling/queue/ack`
 - `POST /scaling/queue/release`
+- `GET /scaling/queue/dead-letter`
 
 `POST /scaling/workers/heartbeat` records process-local worker presence for a
 worker id, role, queue, optional workspace/voicebot affinity, capacity, and

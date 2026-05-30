@@ -25,6 +25,8 @@ WorkItemKind = Literal[
     "tts_request",
     "external_task_poll",
     "session_event",
+    "summary",
+    "post_call",
 ]
 
 
@@ -333,17 +335,29 @@ class WorkerQueueEnvelope:
     trace_id: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     attempt: int = 0
+    idempotency_key: str | None = None
+    max_attempts: int = 3
+    last_error: str | None = None
+    failed_at: str | None = None
 
     def __post_init__(self) -> None:
         if not self.item_id.strip():
             raise ValueError("item_id is required")
+        if self.idempotency_key is None:
+            object.__setattr__(self, "idempotency_key", self.item_id)
+        if not str(self.idempotency_key).strip():
+            raise ValueError("idempotency_key is required")
         if self.kind not in get_args(WorkItemKind):
             raise ValueError(f"unsupported work item kind: {self.kind}")
         if not self.queue.strip():
             raise ValueError("queue is required")
         if self.attempt < 0:
             raise ValueError("attempt must be greater than or equal to 0")
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be greater than or equal to 1")
         _parse_time(self.created_at)
+        if self.failed_at is not None:
+            _parse_time(self.failed_at)
 
     def partition_key(self) -> str:
         return self.routing.partition_key()
@@ -365,6 +379,10 @@ class WorkerQueueEnvelope:
             "trace_id": self.trace_id,
             "created_at": self.created_at,
             "attempt": self.attempt,
+            "idempotency_key": self.idempotency_key,
+            "max_attempts": self.max_attempts,
+            "last_error": self.last_error,
+            "failed_at": self.failed_at,
         }
 
 
@@ -372,13 +390,21 @@ class WorkerQueueStore:
     def __init__(self) -> None:
         self._pending: dict[str, deque[WorkerQueueEnvelope]] = {}
         self._claimed: dict[str, tuple[WorkerQueueEnvelope, str, datetime]] = {}
+        self._dead_letter: dict[str, WorkerQueueEnvelope] = {}
         self._known_item_ids: set[str] = set()
+        self._known_idempotency_keys: dict[str, str] = {}
 
     def enqueue(self, envelope: WorkerQueueEnvelope) -> WorkerQueueEnvelope:
         if envelope.item_id in self._known_item_ids:
             raise ValueError(f"work item already exists: {envelope.item_id}")
+        existing_item_id = self._known_idempotency_keys.get(envelope.idempotency_key or envelope.item_id)
+        if existing_item_id is not None:
+            existing = self.get(existing_item_id)
+            if existing is not None:
+                return existing
         self._pending.setdefault(envelope.queue, deque()).append(envelope)
         self._known_item_ids.add(envelope.item_id)
+        self._known_idempotency_keys[envelope.idempotency_key or envelope.item_id] = envelope.item_id
         return envelope
 
     def claim(
@@ -409,6 +435,19 @@ class WorkerQueueStore:
             claimed.append(updated)
         return tuple(claimed)
 
+    def renew(self, item_id: str, owner: str, ttl_seconds: float = 30.0, now: datetime | None = None) -> WorkerQueueEnvelope | None:
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+        claim = self._claimed.get(item_id)
+        if claim is None:
+            return None
+        envelope, claim_owner, _expires_at = claim
+        if claim_owner != owner:
+            return None
+        current = now or datetime.now(UTC)
+        self._claimed[item_id] = (envelope, claim_owner, current + timedelta(seconds=ttl_seconds))
+        return envelope
+
     def ack(self, item_id: str, owner: str | None = None) -> WorkerQueueEnvelope | None:
         claim = self._claimed.get(item_id)
         if claim is None:
@@ -418,9 +457,11 @@ class WorkerQueueStore:
             return None
         self._claimed.pop(item_id, None)
         self._known_item_ids.discard(item_id)
+        if envelope.idempotency_key is not None:
+            self._known_idempotency_keys.pop(envelope.idempotency_key, None)
         return envelope
 
-    def release(self, item_id: str, owner: str | None = None) -> WorkerQueueEnvelope | None:
+    def release(self, item_id: str, owner: str | None = None, error: str | None = None) -> WorkerQueueEnvelope | None:
         claim = self._claimed.get(item_id)
         if claim is None:
             return None
@@ -428,8 +469,13 @@ class WorkerQueueStore:
         if owner is not None and claim_owner != owner:
             return None
         self._claimed.pop(item_id, None)
-        self._pending.setdefault(envelope.queue, deque()).appendleft(envelope)
-        return envelope
+        updated = replace(envelope, last_error=error or envelope.last_error)
+        if updated.attempt >= updated.max_attempts:
+            failed = replace(updated, failed_at=datetime.now(UTC).isoformat())
+            self._dead_letter[failed.item_id] = failed
+            return failed
+        self._pending.setdefault(updated.queue, deque()).appendleft(updated)
+        return updated
 
     def expire(self, now: datetime | None = None) -> tuple[WorkerQueueEnvelope, ...]:
         current = now or datetime.now(UTC)
@@ -438,9 +484,26 @@ class WorkerQueueStore:
             if expires_at > current:
                 continue
             self._claimed.pop(item_id, None)
+            if envelope.attempt >= envelope.max_attempts:
+                failed = replace(envelope, last_error="claim expired", failed_at=current.isoformat())
+                self._dead_letter[failed.item_id] = failed
+                expired.append(failed)
+                continue
             self._pending.setdefault(envelope.queue, deque()).appendleft(envelope)
             expired.append(envelope)
         return tuple(expired)
+
+    def get(self, item_id: str) -> WorkerQueueEnvelope | None:
+        claim = self._claimed.get(item_id)
+        if claim is not None:
+            return claim[0]
+        if item_id in self._dead_letter:
+            return self._dead_letter[item_id]
+        for queue in self._pending.values():
+            for envelope in queue:
+                if envelope.item_id == item_id:
+                    return envelope
+        return None
 
     def pending(self, queue: str | None = None) -> tuple[WorkerQueueEnvelope, ...]:
         if queue is not None:
@@ -466,6 +529,9 @@ class WorkerQueueStore:
             )
         return tuple(sorted(claims, key=lambda item: item["item"]["item_id"]))
 
+    def dead_lettered(self) -> tuple[WorkerQueueEnvelope, ...]:
+        return tuple(self._dead_letter[item_id] for item_id in sorted(self._dead_letter))
+
     def snapshot(self, now: datetime | None = None) -> dict[str, Any]:
         current = now or datetime.now(UTC)
         self.expire(current)
@@ -476,6 +542,7 @@ class WorkerQueueStore:
                 if envelopes
             },
             "claimed": list(self.claimed(now=current)),
+            "dead_lettered": [envelope.as_dict() for envelope in self.dead_lettered()],
         }
 
 
@@ -485,6 +552,7 @@ class JsonWorkerQueueStore(WorkerQueueStore):
         self.load_diagnostics: dict[str, int] = {
             "loaded_pending": 0,
             "loaded_claimed": 0,
+            "loaded_dead_lettered": 0,
             "requeued_expired_claims": 0,
             "skipped_malformed_json": 0,
             "skipped_invalid_items": 0,
@@ -511,13 +579,19 @@ class JsonWorkerQueueStore(WorkerQueueStore):
         self._save()
         return claimed
 
+    def renew(self, item_id: str, owner: str, ttl_seconds: float = 30.0, now: datetime | None = None) -> WorkerQueueEnvelope | None:
+        item = super().renew(item_id, owner, ttl_seconds=ttl_seconds, now=now)
+        if item is not None:
+            self._save()
+        return item
+
     def ack(self, item_id: str, owner: str | None = None) -> WorkerQueueEnvelope | None:
         item = super().ack(item_id, owner=owner)
         self._save()
         return item
 
-    def release(self, item_id: str, owner: str | None = None) -> WorkerQueueEnvelope | None:
-        item = super().release(item_id, owner=owner)
+    def release(self, item_id: str, owner: str | None = None, error: str | None = None) -> WorkerQueueEnvelope | None:
+        item = super().release(item_id, owner=owner, error=error)
         self._save()
         return item
 
@@ -545,8 +619,10 @@ class JsonWorkerQueueStore(WorkerQueueStore):
                 if envelope is None:
                     continue
                 self._pending.setdefault(str(queue), deque()).append(envelope)
-                self._known_item_ids.add(envelope.item_id)
-                self.load_diagnostics["loaded_pending"] += 1
+            self._known_item_ids.add(envelope.item_id)
+            if envelope.idempotency_key is not None:
+                self._known_idempotency_keys[envelope.idempotency_key] = envelope.item_id
+            self.load_diagnostics["loaded_pending"] += 1
         now = datetime.now(UTC)
         for claim in payload.get("claimed") or []:
             try:
@@ -559,12 +635,31 @@ class JsonWorkerQueueStore(WorkerQueueStore):
             if envelope is None:
                 continue
             if expires_at <= now:
-                self._pending.setdefault(envelope.queue, deque()).append(envelope)
-                self.load_diagnostics["requeued_expired_claims"] += 1
+                if envelope.attempt >= envelope.max_attempts:
+                    self._dead_letter[envelope.item_id] = replace(
+                        envelope,
+                        last_error=envelope.last_error or "claim expired on reload",
+                        failed_at=now.isoformat(),
+                    )
+                    self.load_diagnostics["loaded_dead_lettered"] += 1
+                else:
+                    self._pending.setdefault(envelope.queue, deque()).append(envelope)
+                    self.load_diagnostics["requeued_expired_claims"] += 1
             else:
                 self._claimed[envelope.item_id] = (envelope, owner, expires_at)
                 self.load_diagnostics["loaded_claimed"] += 1
             self._known_item_ids.add(envelope.item_id)
+            if envelope.idempotency_key is not None:
+                self._known_idempotency_keys[envelope.idempotency_key] = envelope.item_id
+        for item in payload.get("dead_lettered") or []:
+            envelope = self._load_envelope(item, seen)
+            if envelope is None:
+                continue
+            self._dead_letter[envelope.item_id] = envelope
+            self._known_item_ids.add(envelope.item_id)
+            if envelope.idempotency_key is not None:
+                self._known_idempotency_keys[envelope.idempotency_key] = envelope.item_id
+            self.load_diagnostics["loaded_dead_lettered"] += 1
 
     def _load_envelope(self, data: dict[str, Any], seen: set[str]) -> WorkerQueueEnvelope | None:
         try:
@@ -598,6 +693,7 @@ class JsonWorkerQueueStore(WorkerQueueStore):
                     key=lambda claim: claim[0].item_id,
                 )
             ],
+            "dead_lettered": [envelope.as_dict() for envelope in self.dead_lettered()],
         }
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
@@ -620,6 +716,10 @@ def worker_queue_envelope_from_dict(data: dict[str, Any]) -> WorkerQueueEnvelope
         trace_id=_optional_str(data.get("trace_id")),
         created_at=str(data["created_at"]),
         attempt=int(data.get("attempt") or 0),
+        idempotency_key=_optional_str(data.get("idempotency_key")),
+        max_attempts=int(data.get("max_attempts") or 3),
+        last_error=_optional_str(data.get("last_error")),
+        failed_at=_optional_str(data.get("failed_at")),
     )
 
 

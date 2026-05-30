@@ -108,6 +108,29 @@ class CallSessionPipelineTests(unittest.TestCase):
             left.close()
             right.close()
 
+    def test_session_snapshot_exposes_actor_lanes_and_playback_cancellation(self) -> None:
+        left, right = socket.socketpair()
+        try:
+            session = CallSession(
+                "call-1",
+                left,
+                Settings(),
+                EventStore(max_context_events=20),
+                FakeSTT(),
+                FakeTTS(),
+            )
+            session.playback.enqueue(np.ones(80, dtype=np.float32))
+
+            session.interrupt_playback("test")
+
+            actors = session.snapshot()["actors"]["lanes"]
+            self.assertIn("stt", actors)
+            self.assertEqual(actors["tts_playback"]["cancellation_generation"], 1)
+            self.assertEqual(actors["tts_playback"]["last_signal"]["reason"], "test")
+        finally:
+            left.close()
+            right.close()
+
     def test_audiosocket_uuid_lifecycle_events_use_transport_descriptor(self) -> None:
         left, right = socket.socketpair()
         events = EventStore(max_context_events=20)

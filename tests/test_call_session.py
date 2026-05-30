@@ -11,6 +11,7 @@ from voicebot.audio import MSG_SLIN8, MSG_TERMINATE, MSG_UUID, float32_to_pcm16_
 from voicebot.calls import AgentResponse, CallSession
 from voicebot.config import Settings
 from voicebot.events import EventStore
+from voicebot.pipeline_contract import PIPELINE_CONTRACT_VERSION
 from voicebot.processor_registry import ProcessorSpec
 
 
@@ -107,6 +108,7 @@ class CallSessionPipelineTests(unittest.TestCase):
             self.assertEqual([event.type for event in lifecycle[:2]], ["call_started", "call_connected"])
             self.assertEqual(lifecycle[0].data["transport"], "asterisk_audiosocket")
             self.assertEqual(lifecycle[0].data["sample_rate"], 8000)
+            self.assertEqual(lifecycle[0].data["pipeline_version"], PIPELINE_CONTRACT_VERSION)
             self.assertEqual(lifecycle[0].data["external_call_id"], str(call_uuid))
             self.assertEqual(lifecycle[0].data["metadata"], {"audiosocket_uuid": str(call_uuid)})
         finally:

@@ -28,6 +28,7 @@ from .config import Settings
 from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
+from .pipeline_contract import PIPELINE_CONTRACT_VERSION
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
 from .realtime_audio import AudioJitterBuffer, JitterBufferConfig, TurnDetector, trim_trailing_silence, turn_detection_config_from_settings
 from .spoken_text import limit_spoken_response_text, split_spoken_response_text
@@ -366,6 +367,7 @@ class CallSession:
             "stopped": self.stop_event.is_set(),
             "active_turn": self._current_turn(),
             "transport": self.descriptor.transport,
+            "pipeline_version": PIPELINE_CONTRACT_VERSION,
             "jitter_buffer": self._jitter_buffer_snapshot(),
             "route": self.descriptor.route.as_event_data(),
             "capabilities": {
@@ -405,7 +407,10 @@ class CallSession:
                 ).describe_session(self.call_id, {"external_call_id": audiosocket_uuid, "audiosocket_uuid": audiosocket_uuid})
                 if self._call_id_change_callback is not None:
                     self._call_id_change_callback(old_call_id, self)
-                lifecycle_data = self.descriptor.lifecycle_event_data()
+                lifecycle_data = {
+                    **self.descriptor.lifecycle_event_data(),
+                    "pipeline_version": PIPELINE_CONTRACT_VERSION,
+                }
                 self.events.append(self.call_id, "call_started", lifecycle_data)
                 connected = self.events.append(
                     self.call_id,

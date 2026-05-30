@@ -7,6 +7,7 @@ from typing import Any
 
 from .asterisk_control import AsteriskAMI
 from .event_catalog import event_catalog_integrity_issues, missing_catalog_event_types
+from .pipeline_contract import pipeline_contract_issues, pipeline_contract_payload
 from .provider_catalog import provider_catalog
 from .storage_contracts import storage_contract_issues, storage_contracts_payload
 from .transcripts import TranscriptStore
@@ -38,6 +39,7 @@ def readiness_report(
         "ami": ami_configuration_check(asterisk).to_dict(),
         "providers": provider_catalog_check().to_dict(),
         "event_catalog": event_catalog_check().to_dict(),
+        "pipeline_contract": pipeline_contract_check().to_dict(),
         "storage_contracts": storage_contract_check().to_dict(),
     }
     if storage_components is not None:
@@ -110,6 +112,16 @@ def storage_contract_check() -> HealthCheck:
     return HealthCheck(
         not issues,
         "storage contracts are valid" if not issues else "storage contracts have integrity issues",
+        {"issue_count": len(issues), "issues": issues, **payload},
+    )
+
+
+def pipeline_contract_check() -> HealthCheck:
+    issues = pipeline_contract_issues()
+    payload = pipeline_contract_payload()
+    return HealthCheck(
+        not issues,
+        "pipeline contract is valid" if not issues else "pipeline contract has integrity issues",
         {"issue_count": len(issues), "issues": issues, **payload},
     )
 

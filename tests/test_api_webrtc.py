@@ -12,6 +12,7 @@ from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
 from voicebot.config import Settings
 from voicebot.events import EventStore
+from voicebot.pipeline_contract import PIPELINE_CONTRACT_VERSION
 from voicebot.transcripts import TranscriptStore
 from voicebot.webrtc import WebRTCCallSession, WebRTCSessionManager, audio_frame_to_call_audio
 from voicebot.workspace_model import VoicebotSessionStore
@@ -227,10 +228,12 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertEqual([event.type for event in lifecycle], ["call_started", "call_connected"])
         self.assertEqual(lifecycle[0].data["transport"], "webrtc")
         self.assertEqual(lifecycle[0].data["sample_rate"], STT_SAMPLE_RATE)
+        self.assertEqual(lifecycle[0].data["pipeline_version"], PIPELINE_CONTRACT_VERSION)
         self.assertEqual(lifecycle[0].data["workspace_id"], "workspace-1")
         self.assertEqual(lifecycle[0].data["voicebot_id"], "voicebot-1")
         self.assertEqual(lifecycle[0].data["metadata"], {"source": "browser", "session_id": "session-1"})
         self.assertEqual(snapshot["route"]["workspace_id"], "workspace-1")
+        self.assertEqual(snapshot["pipeline_version"], PIPELINE_CONTRACT_VERSION)
         self.assertIn("hangup", snapshot["capabilities"]["call_control"])
 
     def test_webrtc_remote_audio_uses_jitter_buffer_before_vad(self) -> None:

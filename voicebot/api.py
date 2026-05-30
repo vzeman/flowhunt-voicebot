@@ -75,6 +75,7 @@ from .multimodal import (
     validate_multimodal_content,
 )
 from .observability import ConversationExpectation, build_timeline, evaluate_conversation
+from .pipeline_contract import pipeline_contract_payload
 from .provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities, provider_catalog
 from .provider_config import (
     ProviderChoice,
@@ -283,6 +284,10 @@ def create_app(
     @app.get("/storage/contracts")
     def storage_contracts() -> dict[str, Any]:
         return storage_contracts_payload()
+
+    @app.get("/pipeline/contract")
+    def pipeline_contract() -> dict[str, Any]:
+        return pipeline_contract_payload()
 
     @app.get("/calls")
     def list_calls() -> dict[str, Any]:

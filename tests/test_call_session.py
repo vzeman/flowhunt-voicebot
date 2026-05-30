@@ -8,7 +8,7 @@ import uuid
 import numpy as np
 
 from voicebot.audio import MSG_SLIN8, MSG_TERMINATE, MSG_UUID, float32_to_pcm16_bytes, write_audiosocket_message
-from voicebot.calls import CallSession
+from voicebot.calls import AgentResponse, CallSession
 from voicebot.config import Settings
 from voicebot.events import EventStore
 from voicebot.processor_registry import ProcessorSpec
@@ -28,6 +28,21 @@ class FakeTTS:
 
     def synthesize_stream(self, text: str):
         yield self.synthesize(text)
+
+
+class GatedStreamingTTS:
+    def __init__(self) -> None:
+        self.first_chunk_ready = threading.Event()
+        self.allow_second_chunk = threading.Event()
+
+    def synthesize(self, text: str):
+        return np.ones(160, dtype=np.float32), 0.02
+
+    def synthesize_stream(self, text: str):
+        yield np.ones(80, dtype=np.float32), 0.01
+        self.first_chunk_ready.set()
+        self.allow_second_chunk.wait(timeout=2.0)
+        yield np.ones(80, dtype=np.float32) * 0.5, 0.01
 
 
 class CallSessionPipelineTests(unittest.TestCase):
@@ -296,6 +311,36 @@ class CallSessionPipelineTests(unittest.TestCase):
                 [event.type for event in events.list_events(call_id="call-1")],
             )
         finally:
+            left.close()
+            right.close()
+
+    def test_audiosocket_streaming_tts_queues_first_chunk_before_synthesis_finishes(self) -> None:
+        left, right = socket.socketpair()
+        events = EventStore(max_context_events=30)
+        tts = GatedStreamingTTS()
+        try:
+            session = CallSession("call-1", left, Settings(greet_on_connect=False), events, FakeSTT(), tts)
+            request = events.append("call-1", "agent_response_requested", {"text": "question"})
+            worker = threading.Thread(
+                target=session.submit_agent_response,
+                args=(AgentResponse("call-1", "Stream this response.", response_to_event_id=request.id),),
+                daemon=True,
+            )
+
+            worker.start()
+            self.assertTrue(tts.first_chunk_ready.wait(timeout=1.0))
+
+            self.assertTrue(session.playback.is_active())
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertIn("tts_started", event_types)
+            self.assertIn("agent_response_queued", event_types)
+            self.assertNotIn("tts_finished", event_types)
+
+            tts.allow_second_chunk.set()
+            worker.join(timeout=1.0)
+            self.assertFalse(worker.is_alive())
+        finally:
+            tts.allow_second_chunk.set()
             left.close()
             right.close()
 

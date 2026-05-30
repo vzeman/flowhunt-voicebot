@@ -33,6 +33,21 @@ class FakeTTS:
         yield self.synthesize(text)
 
 
+class GatedStreamingTTS:
+    def __init__(self) -> None:
+        self.first_chunk_ready = threading.Event()
+        self.allow_second_chunk = threading.Event()
+
+    def synthesize(self, text: str):
+        return np.ones(160, dtype=np.float32), 0.02
+
+    def synthesize_stream(self, text: str):
+        yield np.ones(80, dtype=np.float32), 0.01
+        self.first_chunk_ready.set()
+        self.allow_second_chunk.wait(timeout=2.0)
+        yield np.ones(80, dtype=np.float32) * 0.5, 0.01
+
+
 class PlaybackControlTests(unittest.TestCase):
     def make_session(self, call_id: str, events: EventStore) -> tuple[CallSession, socket.socket, socket.socket]:
         left, right = socket.socketpair()
@@ -298,6 +313,82 @@ class PlaybackControlTests(unittest.TestCase):
             self.assertTrue(finished)
             self.assertEqual(data["response_to_event_id"], request.id)
         finally:
+            session.stop()
+
+    def test_webrtc_streaming_tts_queues_first_chunk_before_synthesis_finishes(self) -> None:
+        events = EventStore(max_context_events=30)
+        tts = GatedStreamingTTS()
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(),
+            events,
+            FakeSTT(),
+            tts,
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"text": "question"})
+            worker = threading.Thread(
+                target=session.submit_agent_response,
+                args=(AgentResponse("call-1", "Stream this response.", response_to_event_id=request.id),),
+                daemon=True,
+            )
+
+            worker.start()
+            self.assertTrue(tts.first_chunk_ready.wait(timeout=1.0))
+
+            self.assertTrue(session.playback.is_active())
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertIn("tts_started", event_types)
+            self.assertIn("agent_response_queued", event_types)
+            self.assertNotIn("tts_finished", event_types)
+
+            tts.allow_second_chunk.set()
+            worker.join(timeout=1.0)
+            self.assertFalse(worker.is_alive())
+            metric_names = [
+                event.data.get("name")
+                for event in events.list_events(call_id="call-1")
+                if event.type == "metrics"
+            ]
+            self.assertIn("tts_first_audio_latency_seconds", metric_names)
+            self.assertIn("tts_synthesis_latency_seconds", metric_names)
+        finally:
+            tts.allow_second_chunk.set()
+            session.stop()
+
+    def test_webrtc_streaming_tts_drops_remaining_chunks_after_barge_in(self) -> None:
+        events = EventStore(max_context_events=40)
+        tts = GatedStreamingTTS()
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(greet_on_connect=False, vad_start_ms=0, barge_in_threshold=0.08),
+            events,
+            FakeSTT(),
+            tts,
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"text": "question"})
+            session._remember_response_generation(request.id)
+            worker = threading.Thread(
+                target=session.submit_agent_response,
+                args=(AgentResponse("call-1", "Stream this response.", response_to_event_id=request.id),),
+                daemon=True,
+            )
+            worker.start()
+            self.assertTrue(tts.first_chunk_ready.wait(timeout=1.0))
+
+            session.process_audio_block(np.full(160, 0.12, dtype=np.float32))
+            tts.allow_second_chunk.set()
+            worker.join(timeout=1.0)
+
+            self.assertFalse(worker.is_alive())
+            self.assertFalse(session.playback.is_active())
+            dropped = [event for event in events.list_events(call_id="call-1") if event.type == "agent_response_dropped"]
+            self.assertEqual(dropped[-1].data["reason"], "stale_response_after_new_caller_speech")
+        finally:
+            tts.allow_second_chunk.set()
             session.stop()
 
     def test_spoken_response_text_is_limited(self) -> None:

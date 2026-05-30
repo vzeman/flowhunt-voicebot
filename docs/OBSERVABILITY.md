@@ -76,8 +76,10 @@ terminal subagent result is handed back to the communication agent. Use this
 metric to separate FlowHunt/provider execution time from internal handoff
 latency before the caller hears the final answer.
 
-TTS latency is split into two metrics:
+TTS latency is split into three metrics:
 
+- `tts_first_audio_latency_seconds` measures time until the first playable audio
+  chunk is ready and queued.
 - `tts_synthesis_latency_seconds` measures wall-clock time spent preparing audio.
 - `tts_duration_seconds` measures the generated audio length that will be played.
 

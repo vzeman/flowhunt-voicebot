@@ -398,6 +398,7 @@ VOICEBOT_STT_MODEL=
 VOICEBOT_OPENAI_STT_MODEL=gpt-4o-transcribe
 VOICEBOT_LANGUAGE=en
 VOICEBOT_STT_PROMPT=
+VOICEBOT_STT_TIMEOUT_SECONDS=8
 VOICEBOT_START_THRESHOLD=0.020
 VOICEBOT_STOP_THRESHOLD=0.010
 VOICEBOT_VAD_START_MS=60
@@ -433,6 +434,9 @@ STT, `VOICEBOT_LANGUAGE` pins the expected input language and
 `VOICEBOT_STT_PROMPT` can give the transcription model domain vocabulary that is
 commonly heard on calls. Keep it empty unless you have a measured need; prompts
 can leak into transcriptions when the input audio is unclear.
+`VOICEBOT_STT_TIMEOUT_SECONDS` bounds each provider transcription request; a
+timeout is recorded as `stt_failed` so stalled STT calls are visible in the
+event timeline instead of leaving the call silent.
 
 Provider names:
 

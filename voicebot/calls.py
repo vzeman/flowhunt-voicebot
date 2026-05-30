@@ -26,7 +26,7 @@ from .audio import (
 from .call_state import CallStateStore
 from .config import Settings
 from .events import EventStore, VoicebotEvent
-from .frames import AudioInputFrame, TextFrame, TranscriptionFrame
+from .frames import AudioInputFrame, ErrorFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
 from .pipeline_contract import PIPELINE_CONTRACT_VERSION
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
@@ -562,20 +562,36 @@ class CallSession:
             except queue.Empty:
                 continue
 
-            frames = asyncio.run(
-                self.stt_pipeline.push(
-                    AudioInputFrame(
-                        self.call_id,
-                        audio,
-                        CALL_SAMPLE_RATE,
-                        data={"turn_id": turn_id},
+            self.events.append(self.call_id, "stt_started", {"turn_id": turn_id})
+            stt_started_recorded = True
+            try:
+                frames = asyncio.run(
+                    self.stt_pipeline.push(
+                        AudioInputFrame(
+                            self.call_id,
+                            audio,
+                            CALL_SAMPLE_RATE,
+                            data={"turn_id": turn_id},
+                        )
                     )
                 )
-            )
+            except Exception as exc:
+                self.events.append(self.call_id, "stt_failed", {"turn_id": turn_id, "error": str(exc)})
+                continue
             transcript_event_ids: dict[str, int] = {}
             stale_turn = turn_generation != self._current_interrupt_generation()
             for frame in frames:
                 if not isinstance(frame, TranscriptionFrame):
+                    if isinstance(frame, ErrorFrame):
+                        self.events.append(
+                            self.call_id,
+                            "stt_failed",
+                            {
+                                "turn_id": turn_id,
+                                "error": frame.error,
+                                "processor": frame.data.get("processor"),
+                            },
+                        )
                     if isinstance(frame, TextFrame) and frame.kind == "agent_request":
                         transcript_frame_id = str(frame.data.get("transcript_frame_id", ""))
                         request = self.events.append(
@@ -592,7 +608,7 @@ class CallSession:
                         self._remember_response_generation(request.id)
                     continue
 
-                if frame.kind == "transcription_started":
+                if frame.kind == "transcription_started" and not stt_started_recorded:
                     self.events.append(self.call_id, "stt_started", {"turn_id": frame.turn_id})
                 elif frame.kind == "transcription_partial":
                     self.events.append(

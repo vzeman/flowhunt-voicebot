@@ -85,6 +85,29 @@ class CallSessionPipelineTests(unittest.TestCase):
             left.close()
             right.close()
 
+    def test_latency_metric_over_budget_emits_violation_event(self) -> None:
+        left, right = socket.socketpair()
+        events = EventStore(max_context_events=20)
+        try:
+            session = CallSession(
+                "call-1",
+                left,
+                Settings(latency_budget_agent_seconds=0.1),
+                events,
+                FakeSTT(),
+                FakeTTS(),
+            )
+
+            session._record_metric("agent_response_latency_seconds", 0.2, {"event_id": 42})
+
+            persisted = events.list_events(call_id="call-1")
+            self.assertEqual([event.type for event in persisted], ["metrics", "latency_budget_exceeded"])
+            self.assertEqual(persisted[0].data["budget_seconds"], 0.1)
+            self.assertEqual(persisted[1].data["metric_event_id"], persisted[0].id)
+        finally:
+            left.close()
+            right.close()
+
     def test_audiosocket_uuid_lifecycle_events_use_transport_descriptor(self) -> None:
         left, right = socket.socketpair()
         events = EventStore(max_context_events=20)

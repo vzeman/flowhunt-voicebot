@@ -105,6 +105,29 @@ chunk is available. Autoscaling and diagnostics also recognize
 `end_of_speech_to_playback_started_seconds` when emitted by a transport or
 worker, so STT, agent, TTS, and playback delay can be separated.
 
+## Latency Budgets
+
+Realtime budgets are explicit runtime settings. When a transport or API helper
+emits a latency metric with a configured budget, the metric includes
+`budget_seconds`. If the observed value exceeds the budget, the service also
+emits `latency_budget_exceeded` with the metric event id and the same
+correlation fields.
+
+Defaults:
+
+- `VOICEBOT_LATENCY_BUDGET_ACK_SECONDS=2`
+- `VOICEBOT_LATENCY_BUDGET_FIRST_AUDIO_SECONDS=2.5`
+- `VOICEBOT_LATENCY_BUDGET_STT_SECONDS=1.5`
+- `VOICEBOT_LATENCY_BUDGET_AGENT_SECONDS=1.2`
+- `VOICEBOT_LATENCY_BUDGET_TTS_FIRST_AUDIO_SECONDS=0.8`
+- `VOICEBOT_LATENCY_BUDGET_DELEGATED_PROGRESS_SECONDS=12`
+
+`GET /realtime/audio-profile`, `GET /observability/slo`, and timeline
+diagnostics expose these budgets and their current pass/fail state. The
+communication agent still uses its delayed acknowledgement timer for live
+filler speech; budget events make late stages visible to operators and future
+schedulers without changing caller-facing wording.
+
 ## Short Turn Coalescing
 
 Short adjacent final transcripts are preserved as separate raw

@@ -133,7 +133,7 @@ from .runtime_config import (
     VoicebotSubagentConfig,
     runtime_config_to_dict,
 )
-from .realtime_quality import realtime_audio_profile, realtime_audio_profile_issues
+from .realtime_quality import metric_latency_budget_seconds, realtime_audio_profile, realtime_audio_profile_issues
 from .routing_admission import IncomingSessionRequest, evaluate_incoming_session
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
@@ -2687,12 +2687,29 @@ def create_app(
                     {
                         "name": "colleague_result_to_agent_request_seconds",
                         "value": elapsed,
+                        "budget_seconds": runtime_settings.latency_budget_delegated_progress_seconds,
                         "source_event_id": source_event_id,
                         "event_id": requested.id,
                         "reason": reason,
                     },
                 )
                 await hub.broadcast(metric)
+                budget = metric_latency_budget_seconds(runtime_settings, "colleague_result_to_agent_request_seconds")
+                if budget is not None and elapsed > budget:
+                    exceeded = events.append(
+                        call_id,
+                        "latency_budget_exceeded",
+                        {
+                            "metric_event_id": metric.id,
+                            "name": "colleague_result_to_agent_request_seconds",
+                            "value": elapsed,
+                            "budget_seconds": budget,
+                            "source_event_id": source_event_id,
+                            "event_id": requested.id,
+                            "reason": reason,
+                        },
+                    )
+                    await hub.broadcast(exceeded)
 
     async def notify_subagent_terminal_task(task: SubagentTask, terminal_event: VoicebotEvent | None = None) -> None:
         if registry.get(task.session_id) is None:

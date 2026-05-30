@@ -5,6 +5,30 @@ from typing import Any
 from .config import Settings
 
 
+def latency_budget_defaults(settings: Settings) -> dict[str, float]:
+    return {
+        "acknowledgement_seconds": settings.latency_budget_ack_seconds,
+        "first_answer_audio_seconds": settings.latency_budget_first_audio_seconds,
+        "stt_seconds": settings.latency_budget_stt_seconds,
+        "agent_seconds": settings.latency_budget_agent_seconds,
+        "tts_first_audio_seconds": settings.latency_budget_tts_first_audio_seconds,
+        "delegated_progress_seconds": settings.latency_budget_delegated_progress_seconds,
+    }
+
+
+def metric_latency_budget_seconds(settings: Settings, metric_name: str) -> float | None:
+    budgets = {
+        "delayed_acknowledgement_seconds": settings.latency_budget_ack_seconds,
+        "end_of_speech_to_playback_started_seconds": settings.latency_budget_first_audio_seconds,
+        "stt_duration_seconds": settings.latency_budget_stt_seconds,
+        "speech_to_transcript_seconds": settings.latency_budget_stt_seconds,
+        "agent_response_latency_seconds": settings.latency_budget_agent_seconds,
+        "tts_first_audio_latency_seconds": settings.latency_budget_tts_first_audio_seconds,
+        "colleague_result_to_agent_request_seconds": settings.latency_budget_delegated_progress_seconds,
+    }
+    return budgets.get(metric_name)
+
+
 def realtime_audio_profile(settings: Settings) -> dict[str, Any]:
     return {
         "turn_detection": {
@@ -31,6 +55,7 @@ def realtime_audio_profile(settings: Settings) -> dict[str, Any]:
             "first_audio_metric": "tts_first_audio_latency_seconds",
             "end_to_end_first_audio_metric": "end_of_speech_to_playback_started_seconds",
         },
+        "latency_budgets": latency_budget_defaults(settings),
         "normalization": {
             "webrtc_jitter_buffer_enabled": settings.webrtc_jitter_buffer_enabled,
             "webrtc_jitter_target_delay_ms": settings.webrtc_jitter_target_delay_ms,
@@ -80,4 +105,7 @@ def realtime_audio_profile_issues(profile: dict[str, Any]) -> list[dict[str, Any
             issues.append({"issue": "jitter max delay is lower than target delay", "transport": prefix})
     if not profile.get("cache", {}).get("tts_cache_enabled"):
         issues.append({"issue": "tts cache is disabled"})
+    for name, value in (profile.get("latency_budgets") or {}).items():
+        if value <= 0:
+            issues.append({"issue": "latency budget must be positive", "budget": name})
     return issues

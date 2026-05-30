@@ -9,7 +9,7 @@ from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
 from voicebot.config import Settings
 from voicebot.events import EventStore
-from voicebot.realtime_quality import realtime_audio_profile, realtime_audio_profile_issues
+from voicebot.realtime_quality import latency_budget_defaults, metric_latency_budget_seconds, realtime_audio_profile, realtime_audio_profile_issues
 from voicebot.scaling import latency_metric_signals
 from voicebot.transcripts import TranscriptStore
 
@@ -21,6 +21,7 @@ class RealtimeQualityTests(unittest.TestCase):
         self.assertEqual(realtime_audio_profile_issues(profile), [])
         self.assertTrue(profile["cancellation"]["barge_in_interrupts_playback"])
         self.assertTrue(profile["streaming"]["tts_streaming_chunks_supported"])
+        self.assertEqual(profile["latency_budgets"]["agent_seconds"], 1.2)
         self.assertTrue(profile["normalization"]["webrtc_jitter_buffer_enabled"])
         self.assertTrue(profile["cache"]["tts_cache_enabled"])
 
@@ -39,6 +40,13 @@ class RealtimeQualityTests(unittest.TestCase):
         self.assertIn({"issue": "stop_threshold exceeds start_threshold"}, issues)
         self.assertIn({"issue": "tts_chunk_chars must be positive"}, issues)
         self.assertIn({"issue": "tts cache is disabled"}, issues)
+
+    def test_latency_budget_defaults_and_metric_mapping_are_configurable(self) -> None:
+        settings = Settings(latency_budget_agent_seconds=0.5, latency_budget_tts_first_audio_seconds=0.25)
+
+        self.assertEqual(latency_budget_defaults(settings)["agent_seconds"], 0.5)
+        self.assertEqual(metric_latency_budget_seconds(settings, "agent_response_latency_seconds"), 0.5)
+        self.assertEqual(metric_latency_budget_seconds(settings, "tts_first_audio_latency_seconds"), 0.25)
 
     def test_latency_metric_signals_include_first_audio_metrics(self) -> None:
         events = EventStore(max_context_events=20)

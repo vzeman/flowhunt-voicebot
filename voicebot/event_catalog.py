@@ -53,6 +53,7 @@ EVENT_CATALOG: tuple[EventCatalogEntry, ...] = (
     EventCatalogEntry("flowhunt_flow_updated", "agent_team", "FlowHunt Flow invocation returned an interim update."),
     EventCatalogEntry("flowhunt_flow_completed", "agent_team", "FlowHunt Flow invocation returned a result."),
     EventCatalogEntry("provider_call_failed", "providers", "Provider adapter call failed with typed error metadata."),
+    EventCatalogEntry("latency_budget_exceeded", "telemetry", "A realtime latency metric exceeded its configured budget."),
     EventCatalogEntry("runtime_config_updated", "config", "Workspace voicebot runtime config was validated and activated."),
     EventCatalogEntry("security_audit", "security", "Security-sensitive action was recorded with a redacted payload.", False),
     EventCatalogEntry("runtime_draining_started", "runtime", "Runtime started draining and should not accept new sessions."),

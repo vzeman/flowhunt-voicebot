@@ -11,6 +11,7 @@ from .pipeline_contract import pipeline_contract_issues, pipeline_contract_paylo
 from .provider_catalog import provider_catalog
 from .sip_media_plane import sip_media_plane_issues, sip_media_plane_payload
 from .storage_contracts import storage_contract_issues, storage_contracts_payload
+from .webrtc_media_plane import webrtc_media_plane_issues, webrtc_media_plane_payload
 from .transcripts import TranscriptStore
 
 
@@ -42,6 +43,7 @@ def readiness_report(
         "event_catalog": event_catalog_check().to_dict(),
         "pipeline_contract": pipeline_contract_check().to_dict(),
         "sip_media_plane": sip_media_plane_check().to_dict(),
+        "webrtc_media_plane": webrtc_media_plane_check().to_dict(),
         "storage_contracts": storage_contract_check().to_dict(),
     }
     if storage_components is not None:
@@ -134,6 +136,16 @@ def sip_media_plane_check() -> HealthCheck:
     return HealthCheck(
         not issues,
         "SIP media plane contract is valid" if not issues else "SIP media plane contract has integrity issues",
+        {"issue_count": len(issues), "issues": issues, **payload},
+    )
+
+
+def webrtc_media_plane_check() -> HealthCheck:
+    issues = webrtc_media_plane_issues()
+    payload = webrtc_media_plane_payload()
+    return HealthCheck(
+        not issues,
+        "WebRTC media plane contract is valid" if not issues else "WebRTC media plane contract has integrity issues",
         {"issue_count": len(issues), "issues": issues, **payload},
     )
 

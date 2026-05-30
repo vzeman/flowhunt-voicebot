@@ -1403,6 +1403,12 @@ Returns the SIP/Asterisk media-plane HA contract: local Docker behavior,
 Kubernetes target architecture, readiness dimensions, trunk routing scope,
 draining model, call-control routing, and the active-call failover boundary.
 
+### GET `/webrtc/media-plane`
+
+Returns the WebRTC scale contract: local browser test behavior, Kubernetes
+signaling target, workspace/voicebot/channel routing, TURN/STUN requirements,
+reconnect semantics, admission control, and quality metrics.
+
 ### GET `/scaling/topology`
 
 Returns worker roles, queue names, concurrency, shared state, and event bus

@@ -191,12 +191,6 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             ToolArgument("call_id", "Active call ID."),
             ToolArgument("message", "Caller request and relevant context to send to the FlowHunt Flow."),
             ToolArgument(
-                "flow_id",
-                "Optional FlowHunt Flow ID. Defaults to VOICEBOT_FLOWHUNT_FLOW_ID.",
-                required=False,
-                schema={"type": ["string", "null"]},
-            ),
-            ToolArgument(
                 "response_to_event_id",
                 "Optional event ID this answers.",
                 required=False,

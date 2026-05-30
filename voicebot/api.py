@@ -2544,7 +2544,7 @@ def create_app(
 
     async def tool_invoke_flowhunt_flow(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
-        flow_id = str(args.get("flow_id") or runtime_settings.flowhunt_flow_id)
+        flow_id = str(runtime_settings.flowhunt_flow_id or args.get("flow_id") or "")
         message = str(require_arg(args, "message"))
         response_to_event_id = args.get("response_to_event_id")
         duplicate = existing_flowhunt_request(call_id, response_to_event_id)
@@ -2594,6 +2594,8 @@ def create_app(
                 )
             )
             scheduled = subagent_lifecycle.schedule(task)
+            if scheduled.is_terminal():
+                await notify_subagent_terminal_task(scheduled)
             return {
                 "event": event_to_dict(invoked),
                 "task": subagent_task_to_dict(scheduled),

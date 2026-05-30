@@ -88,23 +88,30 @@ def run_communication_agent(
                     http_json("GET", f"{config.base_url}/agent/tools/schema").get("tools", [])
                 )
                 prompt = build_prompt(pending, response.get("context", {}), legacy_tools)
-                answer, tool_calls = run_model_turn(client, providers, config, prompt, pending, native_tools)
+                try:
+                    answer, tool_calls = run_model_turn(client, providers, config, prompt, pending, native_tools)
+                except Exception as exc:
+                    answer = provider_failure_answer(exc)
+                    tool_calls = []
+                    print(f"provider turn failed for event {latest['id']}: {exc}", flush=True)
 
                 tool_calls = attach_response_event_id(tool_calls, latest["id"])
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
                 tool_results = execute_tool_calls(config.base_url, tool_calls)
                 if tool_calls and needs_spoken_followup(tool_calls):
                     follow_up_prompt = build_tool_result_prompt(prompt, tool_results)
-                    raw_answer, _native_tool_calls = providers.run(
-                        client,
-                        config.provider,
-                        config.model,
-                        follow_up_prompt,
-                        config.timeout,
-                        config.max_output_tokens,
-                        None,
-                    )
-                    answer, _parsed_tool_calls = parse_agent_output(raw_answer)
+                    try:
+                        raw_answer, _native_tool_calls = run_provider_with_retry(
+                            client,
+                            providers,
+                            config,
+                            follow_up_prompt,
+                            None,
+                        )
+                        answer, _parsed_tool_calls = parse_agent_output(raw_answer)
+                    except Exception as exc:
+                        answer = provider_failure_answer(exc)
+                        print(f"provider follow-up failed for event {latest['id']}: {exc}", flush=True)
                 if answer:
                     execute_tool_call(
                         config.base_url,
@@ -152,30 +159,49 @@ def run_model_turn(
     pending: list[dict],
     native_tools: list[dict],
 ) -> tuple[str, list[dict]]:
-    raw_answer, native_tool_calls = providers.run(
-        client,
-        config.provider,
-        config.model,
-        prompt,
-        config.timeout,
-        config.max_output_tokens,
-        native_tools,
-    )
+    raw_answer, native_tool_calls = run_provider_with_retry(client, providers, config, prompt, native_tools)
     answer, parsed_tool_calls = parse_agent_output(raw_answer)
     tool_calls = [*native_tool_calls, *parsed_tool_calls]
     if answer and is_echo_answer(answer, pending):
         retry_prompt = build_retry_prompt(prompt, answer)
-        raw_answer, native_tool_calls = providers.run(
-            client,
-            config.provider,
-            config.model,
-            retry_prompt,
-            config.timeout,
-            config.max_output_tokens,
-            native_tools,
-        )
+        raw_answer, native_tool_calls = run_provider_with_retry(client, providers, config, retry_prompt, native_tools)
         answer, parsed_tool_calls = parse_agent_output(raw_answer)
         tool_calls = [*native_tool_calls, *parsed_tool_calls]
         if answer and is_echo_answer(answer, pending):
             raise RuntimeError(f"{config.echo_error_label} returned echo response twice: {answer}")
     return answer, tool_calls
+
+
+def run_provider_with_retry(
+    client: Any,
+    providers: AgentProviderRegistry,
+    config: CommunicationAgentConfig,
+    prompt: str,
+    native_tools: list[dict] | None,
+) -> tuple[str, list[dict]]:
+    try:
+        return providers.run(
+            client,
+            config.provider,
+            config.model,
+            prompt,
+            config.timeout,
+            config.max_output_tokens,
+            native_tools,
+        )
+    except Exception:
+        time.sleep(min(0.5, max(config.interval, 0.05)))
+        return providers.run(
+            client,
+            config.provider,
+            config.model,
+            prompt,
+            config.timeout,
+            config.max_output_tokens,
+            native_tools,
+        )
+
+
+def provider_failure_answer(exc: Exception) -> str:
+    _ = exc
+    return "I had a temporary AI error. Please repeat that once more."

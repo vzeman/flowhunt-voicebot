@@ -14,6 +14,7 @@ from voicebot.runtime_storage import (
     build_agent_task_tracker,
     build_audio_artifact_store,
     build_event_store,
+    build_provider_config_store,
     build_subagent_task_store,
     build_transcript_store,
     default_storage_registry,
@@ -69,6 +70,7 @@ class StorageDriverTests(unittest.TestCase):
             settings = Settings(
                 event_store_path=f"{directory}/events.jsonl",
                 transcript_dir=f"{directory}/transcripts",
+                provider_config_store_path=f"{directory}/provider_config.json",
                 agent_task_store_path=f"{directory}/agent_tasks.json",
                 subagent_task_store_path=f"{directory}/subagent_tasks.json",
                 tts_cache_dir=f"{directory}/tts-cache",
@@ -76,11 +78,13 @@ class StorageDriverTests(unittest.TestCase):
             transcripts = build_transcript_store(settings)
             events = build_event_store(settings, transcripts)
             agent_tasks = build_agent_task_tracker(settings)
+            provider_configs = build_provider_config_store(settings)
             subagent_tasks = build_subagent_task_store(settings)
             artifacts = build_audio_artifact_store(settings)
 
         self.assertEqual(attached_storage_driver(transcripts).family, "transcripts")
         self.assertEqual(attached_storage_driver(events).driver, "jsonl")
+        self.assertEqual(attached_storage_driver(provider_configs).family, "provider_config")
         self.assertEqual(attached_storage_driver(agent_tasks).family, "agent_tasks")
         self.assertEqual(attached_storage_driver(subagent_tasks).family, "subagent_tasks")
         self.assertEqual(attached_storage_driver(artifacts).family, "audio_artifacts")
@@ -114,7 +118,7 @@ class StorageDriverTests(unittest.TestCase):
         payload = response.json()
         self.assertIn("events", payload["registry"]["families"])
         self.assertEqual(payload["selected"]["events"]["driver"], "jsonl")
-        self.assertEqual(payload["selected"]["provider_config"]["driver"], "memory")
+        self.assertEqual(payload["selected"]["provider_config"]["driver"], "json")
 
 
 if __name__ == "__main__":

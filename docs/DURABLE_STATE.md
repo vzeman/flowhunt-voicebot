@@ -34,7 +34,7 @@ The current contract families are:
 | `worker_queue` | JSON or memory | Redis Streams, NATS JetStream, RabbitMQ, or FlowHunt queue | `idempotency_key` or `item_id` |
 | `worker_registry` | JSON or memory | Redis and/or FlowHunt DB | `worker_id` |
 | `call_states` | JSON or memory | Redis and/or FlowHunt DB | `call_id` |
-| `provider_config` | memory fallback | FlowHunt DB plus FlowHunt/Kubernetes secret references | `workspace_id + voicebot_id + config_version` |
+| `provider_config` | JSON or memory | FlowHunt DB plus FlowHunt/Kubernetes secret references | `workspace_id + voicebot_id + config_version` |
 | `sip_trunks` | JSON | FlowHunt DB plus secret storage | `trunk_id` |
 | `subagent_tasks` | JSON or memory | FlowHunt DB, Redis, and/or FlowHunt queue | `workspace_id + dedupe_key` |
 | `audio_artifacts` | filesystem | object storage plus DB metadata index | `artifact_id` or `content_hash` |
@@ -60,7 +60,7 @@ target, but only local drivers are implemented in this slice.
 | `worker_queue` | `VOICEBOT_WORKER_QUEUE_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_QUEUE_STORE_PATH` | `json`, `memory` | `redis_streams`, `nats_jetstream`, `rabbitmq`, `flowhunt_queue` |
 | `worker_registry` | `VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_REGISTRY_STORE_PATH` | `json`, `memory` | `redis`, `flowhunt_db` |
 | `call_states` | `VOICEBOT_CALL_STATE_STORE_PROVIDER` | `json` | `VOICEBOT_CALL_STATE_STORE_PATH` | `json`, `memory` | `redis`, `flowhunt_db` |
-| `provider_config` | internal | `memory` | environment/runtime config | `memory` | `flowhunt_db`, secret references |
+| `provider_config` | `VOICEBOT_PROVIDER_CONFIG_STORE_PROVIDER` | `json` | `VOICEBOT_PROVIDER_CONFIG_STORE_PATH` | `json`, `memory` | `flowhunt_db`, secret references |
 | `sip_trunks` | `VOICEBOT_SIP_TRUNK_STORE_PROVIDER` | `json` | `VOICEBOT_SIP_TRUNK_REGISTRY_PATH`, `VOICEBOT_SIP_TRUNK_PJSIP_INCLUDE_PATH` | `json` | `flowhunt_db`, secret references |
 | `subagent_tasks` | `VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER` | `json` | `VOICEBOT_SUBAGENT_TASK_STORE_PATH` | `json`, `memory` | `flowhunt_db`, `redis`, `flowhunt_queue` |
 | `audio_artifacts` | `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER` | `filesystem` | `VOICEBOT_TTS_CACHE_DIR`, `VOICEBOT_DEBUG_AUDIO_DIR` | `filesystem` | `object_storage`, CDN/cache |
@@ -159,6 +159,24 @@ whenever the transport route is known.
 
 `TranscriptStore` already persists per-call transcript/event JSONL files and
 reports corruption statistics. It remains the call transcript surface.
+
+## Provider Configuration
+
+`JsonProviderConfigStore` persists workspace/voicebot provider selections for
+STT, TTS, and the communication agent. It stores provider names, model choices,
+fallback providers, provider-specific config objects, and secret references. It
+does not store raw provider API keys.
+
+The runtime selects the provider configuration store with:
+
+- `VOICEBOT_PROVIDER_CONFIG_STORE_PROVIDER=json|memory`
+- `VOICEBOT_PROVIDER_CONFIG_STORE_PATH=/data/provider_config.json`
+
+Docker defaults to `json`, so provider selections changed through the
+workspace/voicebot provider API survive local service restarts. Production
+should replace this with FlowHunt database rows and FlowHunt secret references,
+with versioned activation so active calls keep the config version they started
+with.
 
 ## Sessions
 

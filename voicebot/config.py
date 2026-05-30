@@ -116,6 +116,8 @@ class Settings:
     pii_safe_logging_enabled: bool = env_bool("VOICEBOT_PII_SAFE_LOGGING_ENABLED", True)
     transcript_dir: str = os.getenv("VOICEBOT_TRANSCRIPT_DIR", "/data/transcripts")
     transcript_store_provider: str = os.getenv("VOICEBOT_TRANSCRIPT_STORE_PROVIDER", "jsonl").strip().lower()
+    provider_config_store_provider: str = os.getenv("VOICEBOT_PROVIDER_CONFIG_STORE_PROVIDER", "json").strip().lower()
+    provider_config_store_path: str = os.getenv("VOICEBOT_PROVIDER_CONFIG_STORE_PATH", "/data/provider_config.json")
     voicebot_session_store_provider: str = os.getenv("VOICEBOT_SESSION_STORE_PROVIDER", "json").strip().lower()
     voicebot_session_store_path: str = os.getenv("VOICEBOT_SESSION_STORE_PATH", "/data/voicebot_sessions.json")
     session_lease_store_provider: str = os.getenv("VOICEBOT_SESSION_LEASE_STORE_PROVIDER", "json").strip().lower()

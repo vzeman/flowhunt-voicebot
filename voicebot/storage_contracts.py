@@ -110,7 +110,7 @@ STORAGE_CONTRACTS: tuple[StorageContract, ...] = (
     StorageContract(
         name="provider_config",
         purpose="Workspace/voicebot provider selections, model choices, prompts, and secret references.",
-        local_providers=("memory",),
+        local_providers=LOCAL_JSON_PROVIDERS,
         production_backends=("flowhunt_db", "flowhunt_secret_store", "kubernetes_secret_projection"),
         required_scope_fields=("workspace_id", "voicebot_id", "config_version"),
         idempotency_fields=("workspace_id", "voicebot_id", "config_version"),

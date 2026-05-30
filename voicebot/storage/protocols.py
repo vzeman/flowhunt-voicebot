@@ -100,7 +100,13 @@ class CallStateStoreProtocol(Protocol):
 
 @runtime_checkable
 class ProviderConfigStoreProtocol(Protocol):
-    def get_active(self, workspace_id: str, voicebot_id: str) -> dict[str, Any] | None:
+    def save(self, config: Any) -> Any:
+        ...
+
+    def get(self, workspace_id: str, voicebot_id: str) -> Any | None:
+        ...
+
+    def list(self, workspace_id: str | None = None) -> list[Any]:
         ...
 
 

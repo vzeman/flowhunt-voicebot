@@ -528,6 +528,14 @@ class PlaybackControlTests(unittest.TestCase):
             ],
         )
 
+    def test_short_conversational_response_is_not_split_at_comma(self) -> None:
+        text = (
+            "I checked with a colleague. The LiveAgent status page currently shows normal operation, "
+            "with no active downtime or visible incidents."
+        )
+
+        self.assertEqual(split_spoken_response_text(text, 90), [text])
+
     def test_webrtc_synthesizes_long_response_in_short_spoken_chunks(self) -> None:
         events = EventStore(max_context_events=30)
         tts = RecordingTTS()
@@ -559,6 +567,38 @@ class PlaybackControlTests(unittest.TestCase):
                 ],
             )
             self.assertTrue(session.playback.is_active())
+        finally:
+            session.stop()
+
+    def test_nonpersistent_response_waits_behind_active_colleague_result(self) -> None:
+        events = EventStore(max_context_events=30)
+        tts = RecordingTTS()
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(),
+            events,
+            FakeSTT(),
+            tts,
+        )
+        try:
+            colleague_request = events.append("call-1", "agent_response_requested", {"reason": "colleague_result"})
+            normal_request = events.append("call-1", "agent_response_requested", {"text": "misrecognized waiting turn"})
+
+            session.submit_agent_response(
+                AgentResponse(
+                    "call-1",
+                    "I checked with a colleague. The result is ready.",
+                    response_to_event_id=colleague_request.id,
+                )
+            )
+            session.submit_agent_response(
+                AgentResponse("call-1", "This unrelated response should not compete.", response_to_event_id=normal_request.id)
+            )
+
+            dropped = [event for event in events.list_events(call_id="call-1") if event.type == "agent_response_dropped"]
+            self.assertEqual(dropped[-1].data["reason"], "active_colleague_result_playback")
+            self.assertEqual(tts.texts, ["I checked with a colleague. The result is ready."])
         finally:
             session.stop()
 

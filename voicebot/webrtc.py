@@ -253,6 +253,16 @@ class WebRTCCallSession:
         )
         startup_response = self._is_startup_response(response.response_to_event_id)
         persistent_response = self._should_defer_response(response.response_to_event_id)
+        if not startup_response and not persistent_response and self._has_active_persistent_response():
+            self.events.append(
+                self.call_id,
+                "agent_response_dropped",
+                {
+                    "reason": "active_colleague_result_playback",
+                    "response_to_event_id": response.response_to_event_id,
+                },
+            )
+            return event
         if self._has_newer_user_activity(response.response_to_event_id) and not startup_response and not persistent_response:
             self.events.append(
                 self.call_id,
@@ -682,6 +692,9 @@ class WebRTCCallSession:
             return False
         request = self.events.get_event(event_id)
         return request is not None and request.type == "agent_response_requested" and request.data.get("reason") == "colleague_result"
+
+    def _has_active_persistent_response(self) -> bool:
+        return any(self._should_defer_response(event_id) for event_id in self.playback.active_response_event_ids())
 
     def _has_newer_user_transcript(self, event_id: int | None) -> bool:
         if event_id is None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
+import threading
 from typing import Any, get_args
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -2154,7 +2155,7 @@ def create_app(
         if runtime_settings.flowhunt_complex_backend == "flow":
             return await tool_invoke_flowhunt_flow({**args, "message": description})
         if not args.get("suppress_progress"):
-            await speak_tool_progress(
+            schedule_tool_progress(
                 call_id,
                 "I will ask a colleague to check that and come back with the result.",
             )
@@ -2241,7 +2242,7 @@ def create_app(
             }
         scope = subagent_scope_from_call(call_id)
         if not args.get("suppress_progress"):
-            await speak_tool_progress(call_id, "I will ask a colleague to check that and come back with the result.")
+            schedule_tool_progress(call_id, "I will ask a colleague to check that and come back with the result.")
         tracker.mark_responded(response_to_event_id)
         requested = events.append(
             call_id,
@@ -2295,7 +2296,7 @@ def create_app(
                 "duplicate": True,
             }
         if not args.get("suppress_progress"):
-            await speak_tool_progress(
+            schedule_tool_progress(
                 call_id,
                 "I will ask a FlowHunt colleague to check that and come back with the result.",
             )
@@ -2449,14 +2450,17 @@ def create_app(
             "transport": "",
         }
 
-    async def speak_tool_progress(call_id: str, text: str) -> None:
+    def speak_tool_progress_sync(call_id: str, text: str) -> None:
         session = registry.get(call_id)
         if session is None:
             return
         try:
-            await asyncio.to_thread(session.submit_agent_response, AgentResponse(call_id=call_id, text=text))
+            session.submit_agent_response(AgentResponse(call_id=call_id, text=text))
         except Exception as exc:
             events.append(call_id, "agent_response_dropped", {"reason": "progress_playback_failed", "error": str(exc)})
+
+    def schedule_tool_progress(call_id: str, text: str) -> None:
+        threading.Thread(target=speak_tool_progress_sync, args=(call_id, text), daemon=True).start()
 
     async def request_communication_agent(
         call_id: str,

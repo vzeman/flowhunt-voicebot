@@ -3,14 +3,19 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import call, patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agents"))
 
 from local_command_agent import (
+    action_acknowledgement,
     colleague_update_answer,
     customer_facing_colleague_text,
+    ensure_action_acknowledgements,
+    execute_conversational_tool_calls,
     fast_tool_call,
+    fast_tool_calls,
     needs_spoken_followup,
     remove_colleague_reentrant_tool_calls,
 )
@@ -39,6 +44,67 @@ class AgentCoordinationTests(unittest.TestCase):
 
     def test_flowhunt_invocation_does_not_need_immediate_followup(self) -> None:
         self.assertFalse(needs_spoken_followup([{"name": "invoke_flowhunt_flow", "arguments": {}}]))
+
+    def test_hangup_fast_path_speaks_before_call_control(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {"text": "Please hang up the call."},
+        }
+
+        calls = fast_tool_calls(task)
+
+        self.assertEqual([call["name"] for call in calls], ["say", "hangup_call"])
+        self.assertEqual(calls[0]["arguments"]["text"], "Sure, I will hang up the call now. Goodbye.")
+        self.assertEqual(calls[0]["arguments"]["response_to_event_id"], 10)
+        self.assertEqual(calls[1]["arguments"]["response_to_event_id"], 10)
+
+    def test_action_acknowledgement_is_added_for_transfer(self) -> None:
+        action = {
+            "name": "transfer_call",
+            "arguments": {"call_id": "call-1", "target": "123", "response_to_event_id": 10},
+        }
+
+        calls = ensure_action_acknowledgements([action])
+
+        self.assertEqual([call["name"] for call in calls], ["say", "transfer_call"])
+        self.assertIn("transfer you to 123", calls[0]["arguments"]["text"])
+
+    def test_action_acknowledgement_uses_existing_say(self) -> None:
+        calls = ensure_action_acknowledgements(
+            [
+                {"name": "say", "arguments": {"call_id": "call-1", "text": "I will do that."}},
+                {"name": "hangup_call", "arguments": {"call_id": "call-1"}},
+            ]
+        )
+
+        self.assertEqual([call["name"] for call in calls], ["say", "hangup_call"])
+
+    def test_execute_conversational_tool_calls_waits_after_say_before_control(self) -> None:
+        calls = [
+            {"name": "say", "arguments": {"call_id": "call-1", "text": "Goodbye."}},
+            {"name": "hangup_call", "arguments": {"call_id": "call-1"}},
+        ]
+
+        with patch("local_command_agent.http_json") as http_json:
+            http_json.side_effect = [
+                {"ok": True},
+                {"call_id": "call-1", "playback_active": True},
+                {"call_id": "call-1", "playback_active": False},
+                {"ok": True},
+            ]
+
+            results = execute_conversational_tool_calls("http://voicebot", calls)
+
+        self.assertEqual([result["name"] for result in results], ["say", "hangup_call"])
+        http_json.assert_has_calls(
+            [
+                call("POST", "http://voicebot/agent/tools/say", {"arguments": calls[0]["arguments"]}),
+                call("GET", "http://voicebot/calls/call-1"),
+                call("GET", "http://voicebot/calls/call-1"),
+                call("POST", "http://voicebot/agent/tools/hangup_call", {"arguments": calls[1]["arguments"]}),
+            ]
+        )
 
     def test_colleague_result_text_is_not_treated_as_call_control(self) -> None:
         task = {

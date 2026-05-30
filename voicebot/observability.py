@@ -35,6 +35,7 @@ EVENT_CATEGORIES: dict[str, TimelineCategory] = {
     "stt_result_dropped": "stt",
     "user_transcript_partial": "stt",
     "user_transcript": "stt",
+    "turn_coalesced": "stt",
     "agent_response_requested": "agent",
     "agent_response_partial": "agent",
     "agent_response_received": "agent",

@@ -36,6 +36,7 @@ EVENT_CATALOG: tuple[EventCatalogEntry, ...] = (
     EventCatalogEntry("stt_result_dropped", "stt", "Speech-to-text result was intentionally not sent to the agent."),
     EventCatalogEntry("user_transcript_partial", "stt", "Partial recognized caller text from a streaming STT provider."),
     EventCatalogEntry("user_transcript", "stt", "Final recognized caller text."),
+    EventCatalogEntry("turn_coalesced", "stt", "Short adjacent caller transcripts were merged for one agent request."),
     EventCatalogEntry("agent_response_requested", "agent", "Agent should decide what to do for a call event or user turn."),
     EventCatalogEntry("agent_response_partial", "agent", "Partial text response from a streaming agent."),
     EventCatalogEntry("agent_response_received", "agent", "Service received a final response from an agent."),

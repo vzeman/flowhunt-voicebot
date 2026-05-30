@@ -22,6 +22,7 @@ from .pipeline_contract import PIPELINE_CONTRACT_VERSION
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
 from .realtime_audio import AudioJitterBuffer, JitterBufferConfig, TurnDetector, trim_trailing_silence, turn_detection_config_from_settings
 from .spoken_text import limit_spoken_response_text, split_spoken_response_text
+from .turn_coalescing import TurnCoalescer
 from .transports import WEBRTC_CAPABILITIES, StaticMediaTransport
 from .workspace_model import VoicebotSessionRecord, VoicebotSessionStore
 
@@ -115,6 +116,14 @@ class WebRTCCallSession:
             self.processor_registry.create_many(tts_pipeline_specs, processor_dependencies)
         )
         self.playback = PlaybackBuffer()
+        self._turn_coalescer = TurnCoalescer(
+            call_id=lambda: self.call_id,
+            events=self.events,
+            emit_request=self._emit_agent_request,
+            can_delay_or_merge=self._can_delay_or_merge_turns,
+            window_seconds=settings.turn_coalesce_window_ms / 1000,
+            max_chars=settings.turn_coalesce_max_chars,
+        )
         self.stop_event = threading.Event()
         self.recording_event = threading.Event()
         self.connection_state = "new"
@@ -476,6 +485,7 @@ class WebRTCCallSession:
     def stop(self) -> None:
         if self.stop_event.is_set():
             return
+        self._turn_coalescer.flush(reason="call_ended")
         self.stop_event.set()
         if self._jitter_buffer is not None:
             self._jitter_buffer.clear()
@@ -556,18 +566,15 @@ class WebRTCCallSession:
                         )
                     if isinstance(frame, TextFrame) and frame.kind == "agent_request":
                         transcript_frame_id = str(frame.data.get("transcript_frame_id", ""))
-                        request = self.events.append(
-                            self.call_id,
-                            "agent_response_requested",
+                        self._turn_coalescer.handle(
                             {
                                 **({"reason": "stale_transcript"} if stale_turn else {}),
                                 "turn_id": frame.data.get("turn_id"),
                                 "transcript_event_id": transcript_event_ids.get(transcript_frame_id),
                                 "text": frame.text,
                                 **({"stale": True, "stale_reason": "newer_caller_speech_started"} if stale_turn else {}),
-                            },
+                            }
                         )
-                        self._remember_response_generation(request.id)
                     continue
 
                 if frame.kind == "transcription_started" and not stt_started_recorded:
@@ -690,6 +697,14 @@ class WebRTCCallSession:
 
     def _record_metric(self, name: str, value: float, data: dict | None = None) -> None:
         self.events.append(self.call_id, "metrics", {"name": name, "value": value, **(data or {})})
+
+    def _emit_agent_request(self, data: dict) -> VoicebotEvent:
+        request = self.events.append(self.call_id, "agent_response_requested", data)
+        self._remember_response_generation(request.id)
+        return request
+
+    def _can_delay_or_merge_turns(self) -> bool:
+        return not self.playback.is_active()
 
     def _record_vad_decision(self, decision: str, level: float, block_ms: int, data: dict | None = None) -> None:
         self._record_metric(

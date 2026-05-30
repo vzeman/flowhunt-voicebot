@@ -2153,10 +2153,11 @@ def create_app(
             }
         if runtime_settings.flowhunt_complex_backend == "flow":
             return await tool_invoke_flowhunt_flow({**args, "message": description})
-        await speak_tool_progress(
-            call_id,
-            "I will ask a colleague to check that and come back with the result.",
-        )
+        if not args.get("suppress_progress"):
+            await speak_tool_progress(
+                call_id,
+                "I will ask a colleague to check that and come back with the result.",
+            )
         tracker.mark_responded(response_to_event_id)
         requested = events.append(
             call_id,
@@ -2239,7 +2240,8 @@ def create_app(
                 "duplicate": True,
             }
         scope = subagent_scope_from_call(call_id)
-        await speak_tool_progress(call_id, "I will ask a colleague to check that and come back with the result.")
+        if not args.get("suppress_progress"):
+            await speak_tool_progress(call_id, "I will ask a colleague to check that and come back with the result.")
         tracker.mark_responded(response_to_event_id)
         requested = events.append(
             call_id,
@@ -2292,10 +2294,11 @@ def create_app(
                 "message": "A FlowHunt colleague is already checking this request.",
                 "duplicate": True,
             }
-        await speak_tool_progress(
-            call_id,
-            "I will ask a FlowHunt colleague to check that and come back with the result.",
-        )
+        if not args.get("suppress_progress"):
+            await speak_tool_progress(
+                call_id,
+                "I will ask a FlowHunt colleague to check that and come back with the result.",
+            )
         tracker.mark_responded(response_to_event_id)
         invoked = events.append(
             call_id,

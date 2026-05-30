@@ -170,6 +170,12 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 required=False,
                 schema={"type": ["integer", "null"]},
             ),
+            ToolArgument(
+                "suppress_progress",
+                "When true, do not speak the default progress acknowledgement before scheduling the task.",
+                required=False,
+                schema={"type": ["boolean", "null"]},
+            ),
         ),
     ),
     ToolDefinition(
@@ -189,6 +195,12 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "Optional event ID this answers.",
                 required=False,
                 schema={"type": ["integer", "null"]},
+            ),
+            ToolArgument(
+                "suppress_progress",
+                "When true, do not speak the default progress acknowledgement before scheduling the task.",
+                required=False,
+                schema={"type": ["boolean", "null"]},
             ),
         ),
     ),
@@ -210,6 +222,12 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "Optional event ID this answers.",
                 required=False,
                 schema={"type": ["integer", "null"]},
+            ),
+            ToolArgument(
+                "suppress_progress",
+                "When true, do not speak the default progress acknowledgement before scheduling the task.",
+                required=False,
+                schema={"type": ["boolean", "null"]},
             ),
         ),
     ),

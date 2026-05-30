@@ -99,6 +99,13 @@ for Docker testing. It submits through `SubagentCoordinator`, so every provider
 uses the same validation, dedupe, lifecycle, terminal-event, and late-result
 behavior.
 
+The communication-agent worker starts a short delayed acknowledgement while its
+model decides whether a caller request needs colleague work. If that
+acknowledgement has already been spoken, the worker sets `suppress_progress` on
+the colleague tool call so the tool schedules work silently instead of repeating
+another waiting phrase. Other agents can omit `suppress_progress` and receive
+the default spoken progress update from the tool.
+
 The first adapter is `FlowHuntSubagentProvider`, with provider kinds:
 
 - `flowhunt_flow`
@@ -126,8 +133,9 @@ Event payloads use `SubagentTask.event_context()`, which exposes clean task
 status/result context and excludes raw provider payloads.
 
 Completed task results are re-entered as `agent_response_requested` events when
-the call is still active. The communication agent then decides how to phrase the
-answer naturally instead of reading raw provider payloads directly.
+the call is still active. The communication agent then normalizes greetings,
+provider status text, markdown, links, and raw payload details before phrasing a
+short spoken answer for the caller.
 
 Remaining production follow-up:
 

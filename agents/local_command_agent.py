@@ -559,7 +559,7 @@ def colleague_update_answer(task: dict) -> str:
     spoken = customer_facing_colleague_text(candidate)
     if not spoken:
         return "I checked with a colleague, but I do not have a clear customer-facing result yet."
-    return _speech_limit(f"I checked with a colleague. {spoken}", max_chars=260)
+    return _speech_limit(f"I checked with a colleague. {spoken}", max_chars=190)
 
 
 def customer_facing_colleague_text(text: str) -> str:
@@ -588,6 +588,7 @@ def strip_internal_colleague_text(text: str) -> str:
     kept_lines = []
     for raw_line in cleaned.splitlines():
         line = raw_line.strip(" -*\t#")
+        line = strip_leading_symbols(line)
         if not line:
             continue
         lowered = line.lower()
@@ -595,6 +596,8 @@ def strip_internal_colleague_text(text: str) -> str:
             line = re.sub(r"\byou can share with your colleague\b", "", line, flags=re.IGNORECASE).strip(" -:;,.")
             lowered = line.lower()
         if not line:
+            continue
+        if "taskstatus." in lowered:
             continue
         if lowered.startswith(
             (
@@ -612,12 +615,13 @@ def strip_internal_colleague_text(text: str) -> str:
                 "tool result",
                 "system:",
                 "assistant:",
-                "hello and welcome",
-                "i'm ai chatbot",
-                "i am ai chatbot",
-                "got any questions",
                 "reference:",
             )
+        ):
+            continue
+        if re.search(
+            r"\b(hello and welcome|i'?m ai chatbot|i am ai chatbot|got any questions|feel free to ask)\b",
+            lowered,
         ):
             continue
         kept_lines.append(line)
@@ -628,6 +632,9 @@ def conversationalize_colleague_text(text: str) -> str:
     pricing_summary = extract_plan_pricing_summary(text)
     if pricing_summary:
         return pricing_summary
+    status_summary = extract_status_page_summary(text)
+    if status_summary:
+        return status_summary
     cleaned = re.sub(r"https?://\S+", "", text)
     cleaned = re.sub(r"[*_`#]", "", cleaned)
     cleaned = cleaned.replace("\u2705", "included").replace("\u274c", "not included")
@@ -652,6 +659,26 @@ def conversationalize_colleague_text(text: str) -> str:
     if spoken and spoken[-1] not in ".!?":
         spoken = f"{spoken}."
     return spoken
+
+
+def strip_leading_symbols(text: str) -> str:
+    return re.sub(r"^[^\w$]+", "", text, flags=re.UNICODE).strip()
+
+
+def extract_status_page_summary(text: str) -> str:
+    lowered = text.lower()
+    if not ("status" in lowered and ("downtime" in lowered or "incident" in lowered or "operational" in lowered)):
+        return ""
+    normal = any(
+        phrase in lowered
+        for phrase in ("normal status", "operational", "no active downtime", "no ongoing incident")
+    )
+    if not normal:
+        return ""
+    subject = "The status page"
+    if "liveagent" in lowered:
+        subject = "The LiveAgent status page"
+    return f"{subject} currently shows normal operation, with no active downtime or visible incidents."
 
 
 def extract_plan_pricing_summary(text: str) -> str:

@@ -9,6 +9,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agents"))
 from agent_provider_registry import AgentProviderRegistry
 from communication_agent import (
     CommunicationAgentConfig,
+    has_colleague_tool_call,
+    should_send_delayed_acknowledgement,
+    suppress_colleague_tool_progress,
     has_http_failed_say,
     provider_failure_answer,
     run_provider_with_retry,
@@ -71,6 +74,33 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
     def test_failed_say_http_result_is_detected(self) -> None:
         self.assertTrue(has_http_failed_say([{"name": "say", "ok": False, "error": "HTTP Error 404"}]))
         self.assertFalse(has_http_failed_say([{"name": "say", "ok": True, "result": {"ok": False}}]))
+
+    def test_delayed_ack_is_only_for_caller_requests(self) -> None:
+        self.assertTrue(should_send_delayed_acknowledgement({"data": {"text": "Check status"}}))
+        self.assertFalse(
+            should_send_delayed_acknowledgement({"data": {"reason": "call_connected", "text": "connected"}})
+        )
+        self.assertFalse(
+            should_send_delayed_acknowledgement({"data": {"reason": "colleague_result", "text": "done"}})
+        )
+
+    def test_colleague_tool_progress_can_be_suppressed_after_delayed_ack(self) -> None:
+        calls = [
+            {
+                "name": "invoke_flowhunt_flow",
+                "arguments": {"call_id": "call-1", "message": "Check status."},
+            },
+            {"name": "say", "arguments": {"call_id": "call-1", "text": "Done."}},
+        ]
+
+        updated = suppress_colleague_tool_progress(calls)
+
+        self.assertTrue(updated[0]["arguments"]["suppress_progress"])
+        self.assertNotIn("suppress_progress", updated[1]["arguments"])
+
+    def test_colleague_tool_call_is_detected(self) -> None:
+        self.assertTrue(has_colleague_tool_call([{"name": "delegate_to_subagent", "arguments": {}}]))
+        self.assertFalse(has_colleague_tool_call([{"name": "say", "arguments": {}}]))
 
 
 if __name__ == "__main__":

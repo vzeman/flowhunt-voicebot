@@ -629,6 +629,38 @@ class ApiCallControlTests(unittest.TestCase):
         tasks = client.get("/subagent/tasks?workspace_id=workspace-1").json()["tasks"]
         self.assertEqual(tasks[0]["external_task_id"], "task-1")
 
+    def test_flowhunt_flow_tool_passes_detected_session_language_to_subagent(self) -> None:
+        provider = FakeSubagentProvider()
+        coordinator = SubagentCoordinator()
+        coordinator.register(provider)
+        settings = Settings(
+            flowhunt_api_key="key",
+            flowhunt_workspace_id="workspace-1",
+            flowhunt_flow_id="flow-1",
+            subagent_task_initial_poll_seconds=0.1,
+        )
+        client, events, _tracker = self.build_client(settings=settings, subagent_coordinator=coordinator)
+        events.append(
+            "call-1",
+            "user_transcript",
+            {"text": "Aká je cena inštalácie?", "turn_id": 1, "stale": False},
+        )
+
+        response = client.post(
+            "/agent/tools/invoke_flowhunt_flow",
+            json={
+                "arguments": {
+                    "call_id": "call-1",
+                    "message": "Review the caller website.",
+                    "response_to_event_id": 53,
+                }
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Caller language: sk.", provider.requests[0].input_text)
+        self.assertIn("Review the caller website.", provider.requests[0].input_text)
+
     def test_flowhunt_flow_tool_uses_configured_flow_id_over_model_argument(self) -> None:
         provider = FakeSubagentProvider()
         coordinator = SubagentCoordinator()

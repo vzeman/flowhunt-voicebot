@@ -125,6 +125,37 @@ The local Docker runtime still executes most lanes in-process, but the actor
 contract defines the state ownership expected when these lanes move to separate
 workers in Kubernetes.
 
+## Partial STT
+
+The STT contract supports provider-neutral partial transcript frames through
+`transcription_partial` and the persisted `user_transcript_partial` event. Final
+caller turns still produce `user_transcript`, and only final transcript frames
+create normal communication-agent requests by default.
+
+When `VOICEBOT_STT_PARTIAL_ENABLED=true`, SIP AudioSocket and WebRTC sessions
+take throttled snapshots of the active caller audio while VAD is still inside a
+speech turn. The snapshot is sent through the configured STT provider and, when
+it produces new text, the runtime emits `user_transcript_partial` with
+`metadata.source=partial_snapshot`. Snapshot partials are intentionally
+preparatory: they let downstream intent detection or future speculative work see
+stable caller intent before endpointing, but they do not duplicate the final
+agent request.
+
+Providers with native streaming STT can also emit `transcription_partial` from
+their STT processor. Providers without native streaming keep the existing
+endpointed behavior when partial snapshots are disabled.
+
+Partial STT settings:
+
+- `VOICEBOT_STT_PARTIAL_ENABLED`: enable active-turn partial snapshots. Default
+  `false`.
+- `VOICEBOT_STT_PARTIAL_INTERVAL_SECONDS`: minimum seconds between snapshots for
+  the same turn. Default `1.0`.
+- `VOICEBOT_STT_PARTIAL_MIN_SECONDS`: minimum active audio duration before a
+  snapshot is queued. Default `1.0`.
+- `VOICEBOT_STT_PARTIAL_MIN_CHARS`: minimum recognized text length before a
+  partial event is persisted. Default `4`.
+
 ## Ordering Rules
 
 Frames in these categories are session ordered:

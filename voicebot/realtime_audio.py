@@ -402,6 +402,11 @@ class TurnDetector:
             audio=audio,
         )
 
+    def current_audio(self) -> np.ndarray:
+        if not self.state.is_recording or not self.state.collected:
+            return np.zeros(0, dtype=np.float32)
+        return np.concatenate(self.state.collected).astype(np.float32, copy=False)
+
     def should_ignore_for_playback(self, activity: VoiceActivity, playback_active: bool) -> bool:
         return playback_active and not activity.active
 

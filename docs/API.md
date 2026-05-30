@@ -1369,7 +1369,7 @@ The exact metrics depend on emitted `metrics` events.
 
 Returns a categorized event timeline for debugging a call or workspace slice.
 The response includes event category counts, audio health counters, and provider
-latency/failure rollups.
+latency/failure rollups, latency breakdowns, and SLO checks.
 
 Query parameters:
 
@@ -1383,6 +1383,22 @@ Query parameters:
 ### POST `/observability/evaluate`
 
 Runs deterministic conversation checks against selected events.
+
+### GET `/observability/slo`
+
+Evaluates operational SLOs for the selected event slice. Optional filters match
+`/observability/timeline`: `call_id`, `workspace_id`, `voicebot_id`,
+`session_id`, and `limit`.
+
+SLO checks include call-to-greeting audio, speech-to-transcript,
+end-of-speech-to-first-audio, call setup rate, and provider error rate.
+
+### GET `/observability/diagnostics`
+
+Returns support-safe diagnostics for the selected event slice. The response
+contains trace field names, timeline health, SLO state, provider failure counts,
+slowest turn, category counts, and troubleshooting hints. Routine diagnostics do
+not include transcript text or secrets.
 
 Request:
 

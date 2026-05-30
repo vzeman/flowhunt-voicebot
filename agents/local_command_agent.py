@@ -17,6 +17,7 @@ stdout.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import difflib
 import json
 import os
@@ -273,6 +274,7 @@ def execute_tool_calls(base_url: str, calls: list[dict]) -> list[dict]:
 
 
 CALL_CONTROL_TOOL_NAMES = {"hangup_call", "transfer_call", "send_dtmf"}
+BACKGROUND_WORK_TOOL_NAMES = {"delegate_to_subagent", "invoke_flowhunt_flow", "create_flowhunt_project_issue"}
 
 
 def execute_conversational_tool_calls(base_url: str, calls: list[dict]) -> list[dict]:
@@ -280,13 +282,31 @@ def execute_conversational_tool_calls(base_url: str, calls: list[dict]) -> list[
         return []
     say_calls = [call for call in calls if call.get("name") == "say"]
     control_calls = [call for call in calls if call.get("name") in CALL_CONTROL_TOOL_NAMES]
-    other_calls = [call for call in calls if call.get("name") not in {"say", *CALL_CONTROL_TOOL_NAMES}]
-    ordered = [*say_calls, *other_calls]
-    results = execute_tool_calls(base_url, ordered)
+    background_calls = [call for call in calls if call.get("name") in BACKGROUND_WORK_TOOL_NAMES]
+    other_calls = [
+        call
+        for call in calls
+        if call.get("name") not in {"say", *CALL_CONTROL_TOOL_NAMES, *BACKGROUND_WORK_TOOL_NAMES}
+    ]
+    results = execute_speech_and_background_calls(base_url, say_calls, background_calls)
+    results.extend(execute_tool_calls(base_url, other_calls))
     if say_calls and control_calls:
         wait_for_spoken_acknowledgement(base_url, say_calls[-1])
     results.extend(execute_tool_calls(base_url, control_calls))
     return results
+
+
+def execute_speech_and_background_calls(base_url: str, say_calls: list[dict], background_calls: list[dict]) -> list[dict]:
+    if not say_calls:
+        return execute_tool_calls(base_url, background_calls)
+    if not background_calls:
+        return execute_tool_calls(base_url, say_calls)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        speech_future = executor.submit(execute_tool_calls, base_url, say_calls)
+        background_future = executor.submit(execute_tool_calls, base_url, background_calls)
+        speech_results = speech_future.result()
+        background_results = background_future.result()
+    return [*speech_results, *background_results]
 
 
 def wait_for_spoken_acknowledgement(base_url: str, say_call: dict, timeout_seconds: float = 4.0) -> None:

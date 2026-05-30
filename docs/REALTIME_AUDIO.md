@@ -129,6 +129,12 @@ the FlowHunt/subagent task. Only call-control actions that depend on sequencing,
 such as saying goodbye before hangup, wait for speech playback before executing
 the control action.
 
+The communication-agent tool executor separates speech intent from background
+work intent when both are returned in the same model turn. `say` calls and
+colleague/subagent work calls are dispatched concurrently; read-only tools still
+complete before spoken follow-up, and call-control tools remain sequenced after
+speech when an acknowledgement is required.
+
 Completed colleague/subagent results are normalized before speech. The
 communication layer strips provider greetings, internal task/status text,
 markdown, links, duplicated progress wording, and raw provider payloads, then

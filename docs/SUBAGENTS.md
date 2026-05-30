@@ -111,6 +111,11 @@ parallel with task creation. The caller can hear that work is starting while the
 subagent task is already being submitted or polled; the task lifecycle is not
 blocked by TTS generation or playback.
 
+When an agent model returns both a `say` call and a colleague/subagent work call
+in the same turn, the tool executor treats them as separate intents and
+dispatches them concurrently. This keeps customer-facing speech responsive
+without delaying task submission.
+
 The first adapter is `FlowHuntSubagentProvider`, with provider kinds:
 
 - `flowhunt_flow`

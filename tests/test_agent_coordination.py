@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import call, patch
@@ -105,6 +106,33 @@ class AgentCoordinationTests(unittest.TestCase):
                 call("POST", "http://voicebot/agent/tools/hangup_call", {"arguments": calls[1]["arguments"]}),
             ]
         )
+
+    def test_execute_conversational_tool_calls_runs_background_work_during_speech(self) -> None:
+        calls = [
+            {"name": "say", "arguments": {"call_id": "call-1", "text": "I am checking that."}},
+            {
+                "name": "invoke_flowhunt_flow",
+                "arguments": {"call_id": "call-1", "message": "Check status."},
+            },
+        ]
+        timings = {}
+
+        def fake_http_json(method, url, payload=None):
+            if url.endswith("/agent/tools/say"):
+                timings["say_start"] = time.monotonic()
+                time.sleep(0.25)
+                timings["say_end"] = time.monotonic()
+                return {"ok": True}
+            if url.endswith("/agent/tools/invoke_flowhunt_flow"):
+                timings["work_start"] = time.monotonic()
+                return {"ok": True}
+            raise AssertionError(url)
+
+        with patch("local_command_agent.http_json", side_effect=fake_http_json):
+            results = execute_conversational_tool_calls("http://voicebot", calls)
+
+        self.assertEqual([result["name"] for result in results], ["say", "invoke_flowhunt_flow"])
+        self.assertLess(timings["work_start"], timings["say_end"])
 
     def test_colleague_result_text_is_not_treated_as_call_control(self) -> None:
         task = {

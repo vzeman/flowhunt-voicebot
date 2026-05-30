@@ -220,9 +220,61 @@ class AgentCoordinationTests(unittest.TestCase):
             answer,
             "Call center functionality is included starting with Medium Business, "
             "which is $35 per agent per month, or $29 annually. "
-            "Large Business is $59 monthly, or $49 annually. "
-            "Enterprise is $85 monthly, or $69 annually. "
             "Small Business does not include call center functionality.",
+        )
+
+    def test_colleague_result_keeps_spoken_answer_short_and_drops_followup_prompts(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {
+                "reason": "colleague_result",
+                "data": {
+                    "summary": (
+                        "LiveAgent currently has normal status and no active incident is visible. "
+                        "The latest visible incident was resolved earlier. "
+                        "If you tell me which region you use, I can check more details. "
+                        "Internal note: raw monitoring response contained 25 checks."
+                    )
+                },
+            },
+        }
+
+        answer = colleague_update_answer(task)
+
+        self.assertLessEqual(len(answer), 190)
+        self.assertIn("normal operation", answer)
+        self.assertNotIn("If you tell me", answer)
+        self.assertNotIn("Internal note", answer)
+
+    def test_colleague_result_extracts_complete_incident_summary(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {
+                "reason": "colleague_result",
+                "data": {
+                    "summary": (
+                        "Based on the LiveAgent status page archive, I can confirm the following:\n\n"
+                        "May 6th, 2026 - Downtime Confirmed:\n"
+                        "Yes, there was a service incident on May 6th, 2026. It was an agent panel "
+                        "slowness in the Europe (Frankfurt) data center, not a complete outage.\n\n"
+                        "Details:\n"
+                        "Issue: Agent panel slowness affecting EU Frankfurt data center\n"
+                        "Duration: Resolved in 56 minutes\n"
+                        "Cause: A sick node in the infrastructure\n"
+                        "Status: Fully resolved\n"
+                    )
+                },
+            },
+        }
+
+        answer = colleague_update_answer(task)
+
+        self.assertEqual(
+            answer,
+            "I checked with a colleague. Yes, May 6th, 2026 was a service degradation in EU Frankfurt: "
+            "Agent panel slowness, resolved in 56 minutes.",
         )
 
     def test_colleague_progress_uses_canned_customer_update(self) -> None:

@@ -138,9 +138,11 @@ speech when an acknowledgement is required.
 Completed colleague/subagent results are normalized before speech. The
 communication layer strips provider greetings, internal task/status text,
 markdown, links, duplicated progress wording, and raw provider payloads, then
-turns the useful result into a short spoken answer. This keeps a FlowHunt or
-other colleague response from being read literally when it contains content
-meant for chat or internal logs.
+turns the useful result into a short spoken answer. Delegated result speech is
+budgeted to roughly one or two concise spoken sentences; longer detail remains
+in the transcript/task context for follow-up questions instead of being read in
+full. This keeps a FlowHunt or other colleague response from being read
+literally when it contains content meant for chat or internal logs.
 
 Before completed caller audio is sent to STT, the runtime trims trailing silence
 that was only needed for endpointing while keeping a short tail for recognition

@@ -145,7 +145,9 @@ status/result context and excludes raw provider payloads.
 Completed task results are re-entered as `agent_response_requested` events when
 the call is still active. The communication agent then normalizes greetings,
 provider status text, markdown, links, and raw payload details before phrasing a
-short spoken answer for the caller.
+short spoken answer for the caller. The full colleague content remains in task
+and transcript context, but the first spoken result is intentionally concise so
+the caller can ask for details instead of waiting through a long readout.
 
 Remaining production follow-up:
 

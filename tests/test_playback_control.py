@@ -362,6 +362,35 @@ class PlaybackControlTests(unittest.TestCase):
         finally:
             session.stop()
 
+    def test_webrtc_barge_in_interrupts_during_echo_tail(self) -> None:
+        events = EventStore(max_context_events=30)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(
+                greet_on_connect=False,
+                start_threshold=0.02,
+                barge_in_threshold=0.08,
+                echo_tail_ms=1000,
+                vad_start_ms=0,
+            ),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            session.playback.enqueue(np.ones(1600, dtype=np.float32))
+            session._set_echo_tail(1000)
+
+            session.process_audio_block(np.full(160, 0.12, dtype=np.float32))
+
+            self.assertTrue(session.recording_event.is_set())
+            self.assertFalse(session.playback.is_active())
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertIn("bot_playback_interrupted", event_types)
+        finally:
+            session.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

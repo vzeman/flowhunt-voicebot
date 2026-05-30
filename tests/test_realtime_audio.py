@@ -106,6 +106,41 @@ class RealtimeAudioTests(unittest.TestCase):
         self.assertEqual(result.decision, "speech_started")
         self.assertTrue(result.interrupt_playback)
 
+    def test_turn_detector_allows_barge_in_during_echo_tail(self) -> None:
+        detector = TurnDetector(config())
+
+        result = detector.process_block(
+            np.full(100, 0.6, dtype=np.float32),
+            playback_active=True,
+            echo_suppressed=True,
+        )
+
+        self.assertEqual(result.decision, "speech_started")
+        self.assertTrue(result.interrupt_playback)
+
+    def test_turn_detector_ignores_quiet_audio_during_echo_tail_after_playback(self) -> None:
+        detector = TurnDetector(config())
+
+        result = detector.process_block(
+            np.full(100, 0.3, dtype=np.float32),
+            playback_active=False,
+            echo_suppressed=True,
+        )
+
+        self.assertEqual(result.decision, "ignored")
+
+    def test_turn_detector_allows_loud_speech_during_echo_tail_after_playback(self) -> None:
+        detector = TurnDetector(config())
+
+        result = detector.process_block(
+            np.full(100, 0.6, dtype=np.float32),
+            playback_active=False,
+            echo_suppressed=True,
+        )
+
+        self.assertEqual(result.decision, "speech_started")
+        self.assertFalse(result.interrupt_playback)
+
     def test_turn_detector_marks_short_speech(self) -> None:
         short_config = replace(config(), min_seconds=0.5)
         detector = TurnDetector(short_config)
@@ -233,7 +268,7 @@ class RealtimeAudioTests(unittest.TestCase):
             {"min_seconds": -0.1},
             {"max_seconds": 0},
             {"min_seconds": 2.0, "max_seconds": 1.0},
-            {"barge_in_threshold": 0.1},
+            {"barge_in_threshold": -0.1},
         ]
 
         for overrides in invalid_configs:

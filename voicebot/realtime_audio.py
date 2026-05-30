@@ -51,8 +51,8 @@ class TurnDetectionConfig:
             raise ValueError("max_seconds must be greater than 0")
         if self.max_seconds < self.min_seconds:
             raise ValueError("max_seconds must be greater than or equal to min_seconds")
-        if self.barge_in_threshold < self.start_threshold:
-            raise ValueError("barge_in_threshold must be greater than or equal to start_threshold")
+        if self.barge_in_threshold < 0:
+            raise ValueError("barge_in_threshold must be greater than or equal to 0")
 
 
 def turn_detection_config_from_settings(settings, sample_rate: int) -> TurnDetectionConfig:
@@ -310,7 +310,7 @@ class TurnDetector:
             return TurnDetectionResult("silence", level, block_ms)
 
         if not self.state.is_recording:
-            if echo_suppressed or self.should_ignore_for_playback(activity, playback_active):
+            if self.should_suppress_input(activity, playback_active=playback_active, echo_suppressed=echo_suppressed):
                 self.state.reset_pending()
                 return TurnDetectionResult("ignored", level, block_ms)
             if not activity.active:
@@ -373,3 +373,16 @@ class TurnDetector:
 
     def should_ignore_for_playback(self, activity: VoiceActivity, playback_active: bool) -> bool:
         return playback_active and not activity.active
+
+    def should_suppress_input(
+        self,
+        activity: VoiceActivity,
+        *,
+        playback_active: bool,
+        echo_suppressed: bool,
+    ) -> bool:
+        if playback_active:
+            return not activity.active
+        if not echo_suppressed:
+            return False
+        return activity.level < self.config.barge_in_threshold

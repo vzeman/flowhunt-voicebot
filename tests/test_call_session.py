@@ -265,6 +265,40 @@ class CallSessionPipelineTests(unittest.TestCase):
             left.close()
             right.close()
 
+    def test_audiosocket_barge_in_interrupts_during_echo_tail(self) -> None:
+        left, right = socket.socketpair()
+        events = EventStore(max_context_events=20)
+        try:
+            session = CallSession(
+                "call-1",
+                left,
+                Settings(
+                    greet_on_connect=False,
+                    start_threshold=0.02,
+                    barge_in_threshold=0.08,
+                    echo_tail_ms=1000,
+                    vad_start_ms=0,
+                    audiosocket_jitter_buffer_enabled=False,
+                ),
+                events,
+                FakeSTT(),
+                FakeTTS(),
+            )
+            session.playback.enqueue(np.ones(800, dtype=np.float32))
+            session._set_echo_tail(1000)
+
+            session.process_remote_audio_block(np.full(80, 0.12, dtype=np.float32))
+
+            self.assertTrue(session.recording_event.is_set())
+            self.assertFalse(session.playback.is_active())
+            self.assertIn(
+                "bot_playback_interrupted",
+                [event.type for event in events.list_events(call_id="call-1")],
+            )
+        finally:
+            left.close()
+            right.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -69,6 +69,11 @@ playback is not active. Browser echo cancellation, the playback echo tail, and
 future echo-cancellation stages still carry part of the self-audio suppression
 responsibility, but live playback gating uses the stronger barge-in threshold.
 
+The echo-tail window after playback no longer suppresses all caller input. It
+suppresses quiet audio below `barge_in_threshold`, but loud speech can still
+start a turn. This prevents the bot from ignoring a real caller who begins
+speaking immediately after or during bot audio.
+
 SIP and WebRTC sessions also guard the output queue against stale responses. If
 a non-startup agent response is ready to play after a newer
 `user_speech_started` or `user_transcript` event already exists, the session
@@ -85,18 +90,24 @@ call setup and recording path settle.
 - `start_threshold`
 - `stop_threshold`
 - `vad_start_ms`
+  - Default: `60`. This keeps the speech-start confirmation short enough for
+    responsive barge-in while still rejecting single-frame noise spikes.
 - `silence_ms`
-  - Default: `700`. This endpointing delay is intentionally below one second
-    so short phone turns are not held unnecessarily before STT starts.
+  - Default: `450`. This endpointing delay favors lower latency for phone
+    turns while leaving enough trailing silence for STT.
 - `min_seconds`
+  - Default: `0.35`.
 - `max_seconds`
 - `barge_in_threshold`
+  - Default: `0.08`.
 
 Configuration is validated when constructed. Sample rate, silence, and max turn
 duration must be positive; stop threshold cannot exceed start threshold; max
 turn duration cannot be shorter than the minimum; and barge-in threshold cannot
-be below the start threshold. Invalid values should fail startup or voicebot
-config activation instead of producing unstable turn detection.
+be negative. Barge-in threshold is intentionally independent from the normal
+speech-start threshold so callers can interrupt more easily than they can start
+a new turn from silence. Invalid values should fail startup or voicebot config
+activation instead of producing unstable turn detection.
 When playback is active, the detector ignores audio below `barge_in_threshold`
 instead of the lower speech start threshold. That keeps generated speech or
 speaker echo from retriggering the bot while still allowing a louder caller

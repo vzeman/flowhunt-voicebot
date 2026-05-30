@@ -42,6 +42,8 @@ class CommunicationAgentConfig:
     max_output_tokens: int
     owner_prefix: str
     echo_error_label: str = "communication agent"
+    streaming_enabled: bool = False
+    streaming_chunk_chars: int = 90
 
 
 def run_communication_agent(
@@ -95,8 +97,20 @@ def run_communication_agent(
                 prompt = build_prompt(pending, response.get("context", {}), legacy_tools)
                 delayed_ack = DelayedProgressAcknowledgement(config.base_url, latest)
                 delayed_ack.start()
+                streamed_response = False
                 try:
-                    answer, tool_calls = run_model_turn(client, providers, config, prompt, pending, native_tools)
+                    if config.streaming_enabled:
+                        answer, tool_calls, streamed_response = run_model_turn_streaming(
+                            client,
+                            providers,
+                            config,
+                            prompt,
+                            pending,
+                            native_tools,
+                            latest,
+                        )
+                    else:
+                        answer, tool_calls = run_model_turn(client, providers, config, prompt, pending, native_tools)
                 except Exception as exc:
                     answer = provider_failure_answer(exc)
                     tool_calls = []
@@ -126,7 +140,7 @@ def run_communication_agent(
                     tool_calls = suppress_colleague_tool_progress(tool_calls)
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
                 tool_calls = ensure_action_acknowledgements(tool_calls)
-                initial_say = answer_as_say_call(answer, latest)
+                initial_say = None if streamed_response else answer_as_say_call(answer, latest)
                 if delayed_ack.delivered and has_colleague_tool_call(tool_calls):
                     initial_say = None
                     answer = ""
@@ -149,10 +163,12 @@ def run_communication_agent(
                     except Exception as exc:
                         answer = provider_failure_answer(exc)
                         print(f"provider follow-up failed for event {latest['id']}: {exc}", flush=True)
-                if answer:
+                if answer and not streamed_response:
                     tool_results.extend(
                         execute_conversational_tool_calls(config.base_url, [answer_as_say_call(answer, latest)])
                     )
+                elif streamed_response and not tool_calls:
+                    finalize_streamed_response(config.base_url, latest)
                 elif tool_results and needs_spoken_followup(tool_calls):
                     tool_results.extend(
                         execute_conversational_tool_calls(
@@ -208,6 +224,111 @@ def run_model_turn(
         if answer and is_echo_answer(answer, pending):
             raise RuntimeError(f"{config.echo_error_label} returned echo response twice: {answer}")
     return answer, tool_calls
+
+
+def run_model_turn_streaming(
+    client: Any,
+    providers: AgentProviderRegistry,
+    config: CommunicationAgentConfig,
+    prompt: str,
+    pending: list[dict],
+    native_tools: list[dict],
+    latest: dict,
+) -> tuple[str, list[dict], bool]:
+    raw_parts: list[str] = []
+    native_tool_calls: list[dict] = []
+    pending_text = ""
+    streamed = False
+    try:
+        chunks = providers.run_stream(
+            client,
+            config.provider,
+            config.model,
+            prompt,
+            config.timeout,
+            config.max_output_tokens,
+            native_tools,
+        )
+        for chunk in chunks:
+            if chunk.text:
+                raw_parts.append(chunk.text)
+                pending_text += chunk.text
+                ready, pending_text = split_stable_stream_text(pending_text, config.streaming_chunk_chars)
+                for text in ready:
+                    submit_stream_chunk(config.base_url, latest, text)
+                    streamed = True
+            native_tool_calls.extend({"name": call.name, "arguments": call.arguments} for call in chunk.tool_calls)
+        if pending_text.strip():
+            submit_stream_chunk(config.base_url, latest, pending_text.strip())
+            streamed = True
+    except Exception:
+        if streamed:
+            finalize_streamed_response(config.base_url, latest)
+            return "", [], True
+        raise
+
+    raw_answer = "".join(raw_parts)
+    answer, parsed_tool_calls = parse_agent_output(raw_answer)
+    tool_calls = [*native_tool_calls, *parsed_tool_calls]
+    if answer and is_echo_answer(answer, pending):
+        retry_prompt = build_retry_prompt(prompt, answer)
+        raw_answer, native_tool_calls = run_provider_with_retry(client, providers, config, retry_prompt, native_tools)
+        answer, parsed_tool_calls = parse_agent_output(raw_answer)
+        tool_calls = [*native_tool_calls, *parsed_tool_calls]
+        streamed = False
+        if answer and is_echo_answer(answer, pending):
+            raise RuntimeError(f"{config.echo_error_label} returned echo response twice: {answer}")
+    return ("" if streamed else answer), tool_calls, streamed
+
+
+def split_stable_stream_text(text: str, chunk_chars: int) -> tuple[list[str], str]:
+    ready: list[str] = []
+    buffer = text
+    while buffer:
+        boundary = max(buffer.rfind(". "), buffer.rfind("? "), buffer.rfind("! "), buffer.rfind("\n"))
+        if boundary >= 0:
+            chunk = buffer[: boundary + 1].strip()
+            if chunk:
+                ready.append(chunk)
+            buffer = buffer[boundary + 1 :].lstrip()
+            continue
+        if len(buffer) >= chunk_chars:
+            split_at = buffer.rfind(" ", 0, chunk_chars)
+            if split_at <= 0:
+                split_at = chunk_chars
+            ready.append(buffer[:split_at].strip())
+            buffer = buffer[split_at:].lstrip()
+            continue
+        break
+    return ready, buffer
+
+
+def submit_stream_chunk(base_url: str, task: dict, text: str) -> None:
+    if not text.strip():
+        return
+    http_json(
+        "POST",
+        f"{base_url}/calls/{task['call_id']}/responses",
+        {
+            "text": text.strip(),
+            "response_to_event_id": task["id"],
+            "response_kind": "stream_chunk",
+            "partial": True,
+        },
+    )
+
+
+def finalize_streamed_response(base_url: str, task: dict) -> None:
+    http_json(
+        "POST",
+        f"{base_url}/calls/{task['call_id']}/responses",
+        {
+            "text": "",
+            "response_to_event_id": task["id"],
+            "response_kind": "stream_finalized",
+            "finalize_only": True,
+        },
+    )
 
 
 def run_provider_with_retry(

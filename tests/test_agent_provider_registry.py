@@ -16,6 +16,21 @@ class FakeResponses:
 
     def create(self, **kwargs):
         self.kwargs = kwargs
+        if kwargs.get("stream"):
+            return iter(
+                [
+                    SimpleNamespace(type="response.output_text.delta", delta="Hel"),
+                    SimpleNamespace(type="response.output_text.delta", delta="lo."),
+                    SimpleNamespace(
+                        type="response.completed",
+                        response=SimpleNamespace(
+                            output=[
+                                SimpleNamespace(type="function_call", name="hangup_call", arguments='{"call_id":"call-1"}')
+                            ]
+                        ),
+                    ),
+                ]
+            )
         return SimpleNamespace(
             output_text=" done ",
             output=[
@@ -31,6 +46,13 @@ class FakeChatCompletions:
 
     def create(self, **kwargs):
         self.kwargs = kwargs
+        if kwargs.get("stream"):
+            return iter(
+                [
+                    SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="chat "))]),
+                    SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="answer"))]),
+                ]
+            )
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="chat answer"))])
 
 
@@ -89,6 +111,38 @@ class AgentProviderRegistryTests(unittest.TestCase):
         self.assertEqual(client.responses.kwargs["model"], "model-a")
         self.assertEqual(client.responses.kwargs["tools"], [{"type": "function", "name": "hangup_call"}])
         self.assertTrue(registry.describe("openai-responses").capabilities.native_tools)
+
+    def test_default_registry_streams_responses_provider_deltas_and_final_tools(self) -> None:
+        registry = default_agent_provider_registry()
+        client = FakeClient()
+
+        chunks = list(
+            registry.run_stream(
+                client,
+                "openai-responses",
+                "model-a",
+                "prompt",
+                2.0,
+                100,
+                [{"type": "function", "name": "hangup_call"}],
+            )
+        )
+
+        self.assertEqual([chunk.text for chunk in chunks[:2]], ["Hel", "lo."])
+        self.assertFalse(chunks[0].is_final)
+        self.assertTrue(chunks[-1].is_final)
+        self.assertEqual(chunks[-1].tool_calls[0].name, "hangup_call")
+        self.assertTrue(client.responses.kwargs["stream"])
+
+    def test_default_registry_streams_chat_compatible_deltas(self) -> None:
+        registry = default_agent_provider_registry()
+        client = FakeClient()
+
+        chunks = list(registry.run_stream(client, "openai-chat-compatible", "model-a", "prompt", 2.0, 100))
+
+        self.assertEqual("".join(chunk.text for chunk in chunks), "chat answer")
+        self.assertTrue(chunks[-1].is_final)
+        self.assertTrue(client.chat.completions.kwargs["stream"])
 
     def test_default_registry_runs_chat_compatible_provider(self) -> None:
         registry = default_agent_provider_registry()

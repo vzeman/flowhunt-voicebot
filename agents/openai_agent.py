@@ -62,6 +62,17 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(env_or_default("VOICEBOT_COMMUNICATION_AGENT_MAX_OUTPUT_TOKENS", "120")),
     )
+    parser.add_argument(
+        "--streaming",
+        action="store_true",
+        default=env_or_default("VOICEBOT_COMMUNICATION_AGENT_STREAMING_ENABLED", "false").lower()
+        in {"1", "true", "yes", "on"},
+    )
+    parser.add_argument(
+        "--streaming-chunk-chars",
+        type=int,
+        default=int(env_or_default("VOICEBOT_COMMUNICATION_AGENT_STREAMING_CHUNK_CHARS", "90")),
+    )
     return parser.parse_args()
 
 
@@ -93,6 +104,8 @@ def main() -> None:
             max_output_tokens=args.max_output_tokens,
             owner_prefix="communication-agent",
             echo_error_label="communication agent",
+            streaming_enabled=args.streaming,
+            streaming_chunk_chars=args.streaming_chunk_chars,
         ),
     )
 

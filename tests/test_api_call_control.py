@@ -59,6 +59,28 @@ class SlowProgressSession:
         self.responses.append(response)
 
 
+class RecordingResponseSession:
+    def __init__(self, call_id: str, events: EventStore) -> None:
+        self.call_id = call_id
+        self.events = events
+        self.responses = []
+
+    def snapshot(self):
+        return {"call_id": self.call_id, "transport": "webrtc", "session_id": "session-1"}
+
+    def submit_agent_response(self, response):
+        self.responses.append(response)
+        return self.events.append(
+            self.call_id,
+            "agent_response_partial" if response.partial else "agent_response_received",
+            {
+                "text": response.text,
+                "response_to_event_id": response.response_to_event_id,
+                "partial": response.partial,
+            },
+        )
+
+
 class FakeWebRTCManager:
     def __init__(self) -> None:
         self.closed_calls = []
@@ -171,6 +193,31 @@ class ApiCallControlTests(unittest.TestCase):
         self.assert_call_control_event_sequence(persisted, "hangup")
         self.assertFalse(persisted[2].data["ok"])
         self.assertEqual(persisted[2].data["message"], "Asterisk AMI control is not configured")
+
+    def test_partial_agent_response_does_not_mark_task_responded_until_finalize(self) -> None:
+        registry = CallRegistry()
+        client, events, tracker = self.build_client(registry=registry)
+        session = RecordingResponseSession("call-1", events)
+        registry.add(session)
+
+        partial = client.post(
+            "/calls/call-1/responses",
+            json={"text": "Hello.", "response_to_event_id": 42, "response_kind": "stream_chunk", "partial": True},
+        )
+        self.assertEqual(partial.status_code, 200)
+        self.assertNotIn(42, tracker.responded_event_ids)
+
+        final = client.post(
+            "/calls/call-1/responses",
+            json={"text": "", "response_to_event_id": 42, "response_kind": "stream_finalized", "finalize_only": True},
+        )
+
+        self.assertEqual(final.status_code, 200)
+        self.assertIn(42, tracker.responded_event_ids)
+        self.assertEqual(len(session.responses), 1)
+        self.assertTrue(session.responses[0].partial)
+        persisted = events.list_events(call_id="call-1")
+        self.assertEqual(persisted[-1].data["stream_finalized"], True)
 
     def test_call_control_records_failure_when_transfer_target_is_missing(self) -> None:
         client, events, tracker = self.build_client(asterisk=FakeAsterisk())

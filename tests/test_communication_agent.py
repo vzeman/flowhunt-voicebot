@@ -10,16 +10,21 @@ from agent_provider_registry import AgentProviderRegistry
 from communication_agent import (
     CommunicationAgentConfig,
     DelayedProgressAcknowledgement,
+    finalize_streamed_response,
     has_colleague_tool_call,
     parse_colleague_tool_recovery,
     preferred_colleague_tool_name,
     recover_missing_colleague_tool_call,
+    run_model_turn_streaming,
     should_send_delayed_acknowledgement,
+    split_stable_stream_text,
+    submit_stream_chunk,
     suppress_colleague_tool_progress,
     has_http_failed_say,
     provider_failure_answer,
     run_provider_with_retry,
 )
+from voicebot.agent import AgentOutput
 
 
 class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
@@ -77,6 +82,72 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
         self.assertEqual(answer, "ok")
         self.assertEqual(tool_calls, [])
         self.assertEqual(calls, 2)
+
+    def test_stable_stream_text_splits_on_sentence_or_size(self) -> None:
+        ready, pending = split_stable_stream_text("Hello caller. I can help", 90)
+
+        self.assertEqual(ready, ["Hello caller."])
+        self.assertEqual(pending, "I can help")
+
+        ready, pending = split_stable_stream_text("This is a longer chunk without punctuation", 12)
+
+        self.assertEqual(ready, ["This is a", "longer", "chunk", "without"])
+        self.assertEqual(pending, "punctuation")
+
+    def test_streaming_model_turn_posts_spoken_chunks_and_finalizes_task(self) -> None:
+        def provider(client, model, prompt, timeout, max_output_tokens, tools):
+            raise AssertionError("non-streaming provider should not be used")
+
+        def stream_provider(client, model, prompt, timeout, max_output_tokens, tools):
+            yield AgentOutput("Hello ", is_final=False)
+            yield AgentOutput("caller. ", is_final=False)
+            yield AgentOutput("I can help.", is_final=False)
+            yield AgentOutput(is_final=True)
+
+        registry = AgentProviderRegistry()
+        registry.register("test", provider)
+        registry.register_stream("test", stream_provider)
+        calls = []
+
+        with unittest.mock.patch("communication_agent.http_json", side_effect=lambda method, url, payload=None: calls.append((method, url, payload)) or {"ok": True}):
+            answer, tool_calls, streamed = run_model_turn_streaming(
+                object(),
+                registry,
+                CommunicationAgentConfig(
+                    base_url="http://voicebot",
+                    provider="test",
+                    model="model",
+                    interval=0.01,
+                    timeout=1.0,
+                    max_output_tokens=80,
+                    owner_prefix="test-agent",
+                    streaming_enabled=True,
+                    streaming_chunk_chars=90,
+                ),
+                "prompt",
+                [{"id": 42, "call_id": "call-1", "data": {"text": "hello"}}],
+                [],
+                {"id": 42, "call_id": "call-1"},
+            )
+
+        self.assertEqual(answer, "")
+        self.assertEqual(tool_calls, [])
+        self.assertTrue(streamed)
+        self.assertEqual(calls[0][1], "http://voicebot/calls/call-1/responses")
+        self.assertTrue(calls[0][2]["partial"])
+        self.assertEqual(calls[0][2]["text"], "Hello caller.")
+        self.assertNotIn("finalize_only", calls[-1][2])
+
+    def test_stream_chunk_and_finalize_use_response_protocol(self) -> None:
+        calls = []
+
+        with unittest.mock.patch("communication_agent.http_json", side_effect=lambda method, url, payload=None: calls.append((method, url, payload)) or {"ok": True}):
+            submit_stream_chunk("http://voicebot", {"id": 7, "call_id": "call-1"}, "Hi")
+            finalize_streamed_response("http://voicebot", {"id": 7, "call_id": "call-1"})
+
+        self.assertTrue(calls[0][2]["partial"])
+        self.assertEqual(calls[0][2]["response_kind"], "stream_chunk")
+        self.assertTrue(calls[1][2]["finalize_only"])
 
     def test_failed_say_http_result_is_detected(self) -> None:
         self.assertTrue(has_http_failed_say([{"name": "say", "ok": False, "error": "HTTP Error 404"}]))

@@ -546,25 +546,16 @@ class CallSession:
             for frame in frames:
                 if not isinstance(frame, TranscriptionFrame):
                     if isinstance(frame, TextFrame) and frame.kind == "agent_request":
-                        if stale_turn:
-                            self.events.append(
-                                self.call_id,
-                                "stt_result_dropped",
-                                {
-                                    "turn_id": frame.data.get("turn_id"),
-                                    "reason": "newer_caller_speech_started",
-                                    "text": frame.text,
-                                },
-                            )
-                            continue
                         transcript_frame_id = str(frame.data.get("transcript_frame_id", ""))
                         request = self.events.append(
                             self.call_id,
                             "agent_response_requested",
                             {
+                                **({"reason": "stale_transcript"} if stale_turn else {}),
                                 "turn_id": frame.data.get("turn_id"),
                                 "transcript_event_id": transcript_event_ids.get(transcript_frame_id),
                                 "text": frame.text,
+                                **({"stale": True, "stale_reason": "newer_caller_speech_started"} if stale_turn else {}),
                             },
                         )
                         self._remember_response_generation(request.id)

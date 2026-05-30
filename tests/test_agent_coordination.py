@@ -46,7 +46,7 @@ class AgentCoordinationTests(unittest.TestCase):
     def test_flowhunt_invocation_does_not_need_immediate_followup(self) -> None:
         self.assertFalse(needs_spoken_followup([{"name": "invoke_flowhunt_flow", "arguments": {}}]))
 
-    def test_hangup_fast_path_speaks_before_call_control(self) -> None:
+    def test_caller_text_is_not_interpreted_by_fast_path(self) -> None:
         task = {
             "id": 10,
             "call_id": "call-1",
@@ -55,10 +55,7 @@ class AgentCoordinationTests(unittest.TestCase):
 
         calls = fast_tool_calls(task)
 
-        self.assertEqual([call["name"] for call in calls], ["say", "hangup_call"])
-        self.assertEqual(calls[0]["arguments"]["text"], "Sure, I will hang up the call now. Goodbye.")
-        self.assertEqual(calls[0]["arguments"]["response_to_event_id"], 10)
-        self.assertEqual(calls[1]["arguments"]["response_to_event_id"], 10)
+        self.assertEqual(calls, [])
 
     def test_action_acknowledgement_is_added_for_transfer(self) -> None:
         action = {

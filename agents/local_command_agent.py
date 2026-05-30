@@ -61,6 +61,8 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
             label = "call event"
         elif reason in {"colleague_result", "colleague_progress"}:
             label = "colleague update"
+        elif reason == "stale_transcript":
+            label = "late transcript"
         else:
             label = "user said"
         pending_lines.append(
@@ -117,6 +119,12 @@ If the caller asks to end the call, call the hangup_call tool. If the caller
 asks to transfer the call, call transfer_call with the requested extension or
 target. If the caller asks you to press or send a keypad digit, call send_dtmf
 with one digit. Include response_to_event_id on every tool call.
+Some pending messages may have reason=stale_transcript. That only means the STT
+result arrived after newer caller audio started; it does not mean the text is
+wrong. Use normal language understanding, in the caller's language, to decide
+whether it is a still-actionable command or request. If it is just an obsolete
+fragment already superseded by a newer pending message, merge it into context
+or ignore it silently.
 Only call hangup_call when the caller explicitly asks you to disconnect,
 terminate, stop, or hang up the call. If a short transcript only says "bye" or
 "goodbye", speak a brief farewell instead of using a tool.
@@ -131,6 +139,11 @@ create_flowhunt_project_issue instead. When the tool or a later colleague update
 returns information, use it to prepare a polished answer for the caller. Never
 pretend you completed external work without a colleague result. Never answer by
 saying only that you heard the request.
+If a colleague result only says there were no incidents in a recent window, but
+the caller asks for the last historical downtime, treat that as unresolved and
+call invoke_flowhunt_flow again with an explicit archive/history request. Do
+not answer from the limited recent-window result as if it were the final
+historical answer.
 When creating a colleague issue, base the title and description only on the
 actual pending caller request and relevant conversation facts. Include the
 caller request verbatim in the description. Do not create an issue from STT
@@ -505,8 +518,6 @@ def fast_tool_calls(task: dict) -> list[dict]:
     data = task.get("data", {})
     event_id = task["id"]
     call_id = task["call_id"]
-    text = str(data.get("text", ""))
-    normalized = _normalize(text)
 
     if data.get("reason") == "call_connected":
         return [{
@@ -530,25 +541,6 @@ def fast_tool_calls(task: dict) -> list[dict]:
                 "response_to_event_id": event_id,
             },
         }]
-
-    if wants_hangup(normalized):
-        action = {
-            "name": "hangup_call",
-            "arguments": {"call_id": call_id, "response_to_event_id": event_id},
-        }
-        return ensure_action_acknowledgements([action])
-
-    transfer_target = requested_transfer_target(text)
-    if transfer_target:
-        action = {
-            "name": "transfer_call",
-            "arguments": {
-                "call_id": call_id,
-                "target": transfer_target,
-                "response_to_event_id": event_id,
-            },
-        }
-        return ensure_action_acknowledgements([action])
 
     return []
 
@@ -822,31 +814,6 @@ def _speech_limit(text: str, max_chars: int = 900) -> str:
     if len(truncated) < max_chars * 0.5:
         truncated = cleaned[:max_chars].rsplit(" ", 1)[0].strip()
     return f"{truncated}."
-
-
-def wants_hangup(normalized_text: str) -> bool:
-    phrases = (
-        "hang up",
-        "hangup",
-        "end the call",
-        "stop the call",
-        "disconnect",
-        "terminate the call",
-    )
-    return any(phrase in normalized_text for phrase in phrases)
-
-
-def requested_transfer_target(text: str) -> str | None:
-    patterns = (
-        r"\btransfer\b.*?\bto\s+(?:extension|number)\s+([A-Za-z0-9_.+-]+)",
-        r"\btransfer\b.*?\b(?:extension|number)\s+([A-Za-z0-9_.+-]+)",
-        r"\btransfer\b.*?\bto\s+([A-Za-z0-9_.+-]+)",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return match.group(1)
-    return None
 
 
 def is_echo_answer(answer: str, pending: list[dict]) -> bool:

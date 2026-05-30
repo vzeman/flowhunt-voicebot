@@ -158,17 +158,25 @@ cut in the middle. While a colleague result is actively queued for playback,
 ordinary non-persistent follow-up responses are dropped instead of competing
 with the result audio.
 
+Caller intent is not detected with hardcoded phrase lists in the media runtime
+or API. Caller transcripts, including late transcripts, are routed to the
+communication agent, and the agent chooses structured tool calls such as
+`hangup_call`, `transfer_call`, `send_dtmf`, or `invoke_flowhunt_flow`. This is
+required for multilingual calls and for future agent providers.
+
 Before completed caller audio is sent to STT, the runtime trims trailing silence
 that was only needed for endpointing while keeping a short tail for recognition
 context. This reduces uploaded audio duration and avoids asking the STT provider
 to transcribe long silence at the end of every turn.
 
 STT jobs carry the interruption generation from the speech turn they belong to.
-If the caller starts a newer turn before an older STT job finishes, the stale
-transcript can still be recorded for audit with `stale=true`, but it does not
-create a new `agent_response_requested` event. The runtime emits
-`stt_result_dropped` so operators can see that a recognized utterance was
-superseded by newer caller speech.
+If the caller starts a newer turn before an older STT job finishes, the
+recognized transcript is recorded with `stale=true` and is still routed as an
+`agent_response_requested` event with `reason=stale_transcript`. The media
+runtime does not inspect keywords or infer intent. The communication agent uses
+the language model and available tools to decide whether the late transcript is
+a still-actionable command/request, should be merged with adjacent caller
+messages, or should be ignored as an obsolete fragment.
 
 ## Configuration
 

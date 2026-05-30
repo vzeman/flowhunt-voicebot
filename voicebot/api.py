@@ -2147,11 +2147,6 @@ def create_app(
                 "message": "A FlowHunt colleague is already checking this request.",
                 "duplicate": True,
             }
-        if looks_like_vague_colleague_issue(title, description):
-            return {
-                "ok": False,
-                "message": "The colleague issue was not created because the request is only a vague topic list. Ask the caller for the specific question first.",
-            }
         if runtime_settings.flowhunt_complex_backend == "flow":
             return await tool_invoke_flowhunt_flow({**args, "message": description})
         if not args.get("suppress_progress"):
@@ -3033,22 +3028,6 @@ def validated_transfer_target(value: Any) -> str:
     if any(ord(char) < 32 or ord(char) == 127 for char in target):
         raise HTTPException(status_code=400, detail="transfer target must not contain control characters")
     return target
-
-
-def looks_like_vague_colleague_issue(title: str, description: str) -> bool:
-    text = f"{title}\n{description}".lower()
-    markers = (
-        "caller mentioned a range of topics",
-        "caller referenced multiple technologies",
-        "general support request",
-        "various technologies",
-        "may have questions or requests",
-        "need comprehensive support",
-    )
-    if not any(marker in text for marker in markers):
-        return False
-    concrete_markers = ("how ", "what ", "why ", "when ", "where ", "check ", "count ", "create ", "transfer ", "hang up")
-    return not any(marker in text for marker in concrete_markers)
 
 
 WEBRTC_TEST_PAGE = """<!doctype html>

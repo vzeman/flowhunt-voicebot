@@ -154,6 +154,19 @@ an ordinary stale answer before the caller has heard it.
 Short colleague-result answers are kept as a single TTS phrase when possible,
 and unrelated non-persistent responses are suppressed while the result is
 actively queued so the caller hears the colleague result cleanly.
+If a caller asks for historical information that was not answered by a recent
+window result, such as the last downtime after a "no incidents in 90 days"
+answer, the communication agent should re-delegate with an explicit archive or
+history request instead of treating the limited result as complete.
+
+Late STT results are delivered to the communication agent as
+`reason=stale_transcript` rather than being filtered by language-specific
+keywords in the media runtime. This keeps multilingual call-control commands
+and follow-up requests available to the model/tool-calling layer while still
+making it clear that newer caller audio had already started.
+The API also avoids language-specific vague-request filters for colleague
+delegation. The communication agent is responsible for producing a clear
+tool-call payload or asking the caller for clarification.
 
 Remaining production follow-up:
 

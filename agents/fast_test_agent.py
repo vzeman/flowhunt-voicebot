@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import time
 import urllib.request
 
@@ -38,27 +37,6 @@ def response_text(task: dict) -> str:
     if text:
         return f"I heard: {text}"
     return "I heard you, but I did not receive text."
-
-
-def control_tool(task: dict) -> tuple[str, dict] | None:
-    data = task.get("data", {})
-    text = data.get("text", "").lower()
-    call_id = task["call_id"]
-    event_id = task["id"]
-    if any(phrase in text for phrase in ("hang up", "hangup", "stop the call", "end the call")):
-        return "hangup_call", {"call_id": call_id, "response_to_event_id": event_id}
-
-    match = re.search(r"\btransfer\b.*?\b(?:to|extension)\s+([A-Za-z0-9_.+-]+)", text)
-    if match:
-        return (
-            "transfer_call",
-            {
-                "call_id": call_id,
-                "target": match.group(1),
-                "response_to_event_id": event_id,
-            },
-        )
-    return None
 
 
 def claim_tasks(base_url: str, tasks: list[dict], owner: str) -> list[dict]:
@@ -105,18 +83,12 @@ def main() -> None:
             claimed_pending = pending
 
             latest = pending[-1]
-            tool = control_tool(latest)
-            if tool is None:
-                tool_name = "say"
-                arguments = {
-                    "call_id": latest["call_id"],
-                    "text": response_text(latest),
-                    "response_to_event_id": latest["id"],
-                }
-            else:
-                tool_name, arguments = tool
-
-            http_json("POST", f"{args.base_url}/agent/tools/{tool_name}", {"arguments": arguments})
+            arguments = {
+                "call_id": latest["call_id"],
+                "text": response_text(latest),
+                "response_to_event_id": latest["id"],
+            }
+            http_json("POST", f"{args.base_url}/agent/tools/say", {"arguments": arguments})
             for task in pending:
                 seen.add(task["id"])
             claimed_pending = []

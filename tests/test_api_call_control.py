@@ -336,7 +336,7 @@ class ApiCallControlTests(unittest.TestCase):
         ])
         self.assertEqual(FakeFlowHuntClient.calls[0][1][0], "project-1")
 
-    def test_flowhunt_project_issue_tool_rejects_vague_topic_summary(self) -> None:
+    def test_flowhunt_project_issue_tool_does_not_use_english_vague_topic_filter(self) -> None:
         FakeFlowHuntClient.calls = []
         settings = Settings(
             flowhunt_api_key="key",
@@ -362,9 +362,12 @@ class ApiCallControlTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json()["ok"])
-        self.assertEqual(FakeFlowHuntClient.calls, [])
-        self.assertEqual(events.list_events(call_id="call-1"), [])
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(FakeFlowHuntClient.calls[0][1][0], "project-1")
+        self.assertEqual([event.type for event in events.list_events(call_id="call-1")], [
+            "flowhunt_issue_created",
+            "flowhunt_issue_completed",
+        ])
 
     def test_flowhunt_flow_tool_records_result(self) -> None:
         FakeFlowHuntClient.calls = []

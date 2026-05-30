@@ -80,6 +80,8 @@ class ScalingTests(unittest.TestCase):
             trace_id="trace-1",
             created_at="2026-05-28T00:00:00+00:00",
             attempt=1,
+            idempotency_key="session-1:turn-1:stt",
+            max_attempts=5,
         )
 
         data = envelope.as_dict()
@@ -88,6 +90,8 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(data["routing"]["provider_key"], "workspace-1:voicebot-1:openai")
         self.assertEqual(data["payload"], {"event_id": 42})
         self.assertEqual(data["attempt"], 1)
+        self.assertEqual(data["idempotency_key"], "session-1:turn-1:stt")
+        self.assertEqual(data["max_attempts"], 5)
 
     def test_worker_queue_envelope_rejects_invalid_records(self) -> None:
         valid = {
@@ -103,6 +107,8 @@ class ScalingTests(unittest.TestCase):
             ({**valid, "queue": ""}, "queue"),
             ({**valid, "created_at": "not-a-time"}, "Invalid isoformat"),
             ({**valid, "attempt": -1}, "attempt"),
+            ({**valid, "idempotency_key": " "}, "idempotency_key"),
+            ({**valid, "max_attempts": 0}, "max_attempts"),
         ]
 
         for kwargs, message in invalid_cases:
@@ -142,6 +148,32 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(acked.item_id if acked else None, "item-1")
         self.assertEqual([claim["item"]["item_id"] for claim in store.claimed()], ["item-2"])
 
+    def test_worker_queue_store_deduplicates_by_idempotency_key_and_renews_claims(self) -> None:
+        store = WorkerQueueStore()
+        first = WorkerQueueEnvelope(
+            item_id="item-1",
+            kind="agent_turn",
+            routing=RoutingKey("workspace-1", "voicebot-1", session_id="session-1"),
+            queue="voicebot.agent",
+            idempotency_key="session-1:event-42",
+        )
+        duplicate = WorkerQueueEnvelope(
+            item_id="item-2",
+            kind="agent_turn",
+            routing=RoutingKey("workspace-1", "voicebot-1", session_id="session-1"),
+            queue="voicebot.agent",
+            idempotency_key="session-1:event-42",
+        )
+        store.enqueue(first)
+
+        deduped = store.enqueue(duplicate)
+        claimed = store.claim("voicebot.agent", "worker-1", ttl_seconds=10)
+        renewed = store.renew("item-1", "worker-1", ttl_seconds=20)
+
+        self.assertEqual(deduped.item_id, "item-1")
+        self.assertEqual([item.item_id for item in claimed], ["item-1"])
+        self.assertEqual(renewed.item_id if renewed else None, "item-1")
+
     def test_worker_queue_store_expires_claims_back_to_pending(self) -> None:
         store = WorkerQueueStore()
         now = datetime(2026, 5, 28, tzinfo=UTC)
@@ -160,6 +192,26 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual([item.item_id for item in expired], ["item-1"])
         self.assertEqual(store.claimed(now=now + timedelta(seconds=2)), ())
         self.assertEqual([item.item_id for item in store.pending("voicebot.agent")], ["item-1"])
+
+    def test_worker_queue_store_dead_letters_after_retry_limit(self) -> None:
+        store = WorkerQueueStore()
+        now = datetime(2026, 5, 28, tzinfo=UTC)
+        envelope = WorkerQueueEnvelope(
+            item_id="item-1",
+            kind="tts_request",
+            routing=RoutingKey("workspace-1", "voicebot-1"),
+            queue="voicebot.tts",
+            max_attempts=1,
+            created_at=now.isoformat(),
+        )
+        store.enqueue(envelope)
+        store.claim("voicebot.tts", "worker-1", now=now)
+
+        released = store.release("item-1", owner="worker-1", error="provider timeout")
+
+        self.assertEqual(released.failed_at is not None if released else None, True)
+        self.assertEqual([item.item_id for item in store.dead_lettered()], ["item-1"])
+        self.assertEqual(store.snapshot(now=now)["dead_lettered"][0]["last_error"], "provider timeout")
 
     def test_worker_queue_store_rejects_duplicate_and_invalid_claim_requests(self) -> None:
         store = WorkerQueueStore()
@@ -552,6 +604,19 @@ class ScalingTests(unittest.TestCase):
                 "routing": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "session_id": "session-1"},
                 "queue": "voicebot.agent",
                 "payload": {"event_id": 42},
+                "idempotency_key": "session-1:event-42",
+                "max_attempts": 2,
+            },
+        )
+        duplicate = client.post(
+            "/scaling/queue/enqueue",
+            json={
+                "item_id": "item-2",
+                "kind": "agent_turn",
+                "routing": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "session_id": "session-1"},
+                "queue": "voicebot.agent",
+                "payload": {"event_id": 42},
+                "idempotency_key": "session-1:event-42",
             },
         )
         snapshot = client.get("/scaling/queue")
@@ -559,6 +624,7 @@ class ScalingTests(unittest.TestCase):
             "/scaling/queue/claim",
             json={"queue": "voicebot.agent", "owner": "worker-1", "ttl_seconds": 30},
         )
+        renew = client.post("/scaling/queue/renew", json={"item_id": "item-1", "owner": "worker-1", "ttl_seconds": 30})
         wrong_ack = client.post("/scaling/queue/ack", json={"item_id": "item-1", "owner": "worker-2"})
         release = client.post("/scaling/queue/release", json={"item_id": "item-1", "owner": "worker-1"})
         reclaim = client.post(
@@ -569,13 +635,40 @@ class ScalingTests(unittest.TestCase):
 
         self.assertEqual(enqueue.status_code, 200)
         self.assertEqual(enqueue.json()["item"]["routing"]["partition_key"], "workspace-1:voicebot-1:session-1")
+        self.assertEqual(enqueue.json()["item"]["idempotency_key"], "session-1:event-42")
+        self.assertEqual(duplicate.json()["item"]["item_id"], "item-1")
         self.assertEqual(snapshot.json()["pending"]["voicebot.agent"][0]["item_id"], "item-1")
         self.assertEqual([item["item_id"] for item in claim.json()["items"]], ["item-1"])
         self.assertEqual(claim.json()["items"][0]["attempt"], 1)
+        self.assertTrue(renew.json()["renewed"])
         self.assertEqual(wrong_ack.status_code, 404)
         self.assertTrue(release.json()["released"])
         self.assertEqual(reclaim.json()["items"][0]["attempt"], 2)
         self.assertTrue(ack.json()["acked"])
+
+    def test_scaling_queue_api_exposes_dead_lettered_work(self) -> None:
+        client = self.build_client()
+        client.post(
+            "/scaling/queue/enqueue",
+            json={
+                "item_id": "item-1",
+                "kind": "tts_request",
+                "routing": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "provider": "openai"},
+                "queue": "voicebot.tts",
+                "max_attempts": 1,
+            },
+        )
+        client.post("/scaling/queue/claim", json={"queue": "voicebot.tts", "owner": "worker-1"})
+        release = client.post(
+            "/scaling/queue/release",
+            json={"item_id": "item-1", "owner": "worker-1", "error": "tts failed"},
+        )
+        dead_letter = client.get("/scaling/queue/dead-letter")
+
+        self.assertFalse(release.json()["released"])
+        self.assertTrue(release.json()["dead_lettered"])
+        self.assertEqual(dead_letter.json()["items"][0]["item_id"], "item-1")
+        self.assertEqual(dead_letter.json()["items"][0]["last_error"], "tts failed")
 
     def test_scaling_queue_api_rejects_invalid_enqueue_and_claim_requests(self) -> None:
         client = self.build_client()

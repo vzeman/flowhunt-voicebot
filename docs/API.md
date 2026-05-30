@@ -1520,7 +1520,9 @@ Enqueues a worker item in the local queue lifecycle store.
   "routing": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "session_id": "session-1"},
   "queue": "voicebot.agent",
   "payload": {"event_id": 42},
-  "trace_id": "trace-1"
+  "trace_id": "trace-1",
+  "idempotency_key": "session-1:event-42",
+  "max_attempts": 3
 }
 ```
 
@@ -1537,6 +1539,14 @@ Claims pending worker items by queue.
 }
 ```
 
+### POST `/scaling/queue/renew`
+
+Renews the claim TTL for one claimed worker item.
+
+```json
+{"item_id": "item-1", "owner": "agent-worker-1", "ttl_seconds": 30}
+```
+
 ### POST `/scaling/queue/ack`
 
 Acknowledges a claimed worker item after successful processing.
@@ -1547,7 +1557,16 @@ Acknowledges a claimed worker item after successful processing.
 
 ### POST `/scaling/queue/release`
 
-Releases a claimed worker item back to pending.
+Releases a claimed worker item back to pending. If the item has reached
+`max_attempts`, it moves to the dead-letter set instead of pending.
+
+```json
+{"item_id": "item-1", "owner": "agent-worker-1", "error": "provider timeout"}
+```
+
+### GET `/scaling/queue/dead-letter`
+
+Returns terminal failed worker items with their last error and failed timestamp.
 
 ### POST `/scaling/workers/{worker_id}/drain`
 

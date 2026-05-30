@@ -70,6 +70,8 @@ class WorkerQueueEnqueueRequest(BaseModel):
     trace_id: str | None = None
     created_at: str | None = None
     attempt: int = 0
+    idempotency_key: str | None = None
+    max_attempts: int = 3
 
 
 class WorkerQueueClaimRequest(BaseModel):
@@ -82,6 +84,8 @@ class WorkerQueueClaimRequest(BaseModel):
 class WorkerQueueItemRequest(BaseModel):
     item_id: str
     owner: str | None = None
+    ttl_seconds: float = 30.0
+    error: str | None = None
 
 
 class MultimodalContentRequest(BaseModel):

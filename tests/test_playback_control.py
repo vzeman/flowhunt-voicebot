@@ -13,6 +13,7 @@ from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import AgentResponse, CallRegistry, CallSession, limit_spoken_response_text
 from voicebot.config import Settings
 from voicebot.events import EventStore
+from voicebot.spoken_text import split_spoken_response_text
 from voicebot.transcripts import TranscriptStore
 from voicebot.webrtc import WebRTCCallSession
 
@@ -69,6 +70,18 @@ class GatedStreamingTTS:
         self.first_chunk_ready.set()
         self.allow_second_chunk.wait(timeout=2.0)
         yield np.ones(80, dtype=np.float32) * 0.5, 0.01
+
+
+class RecordingTTS:
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    def synthesize(self, text: str):
+        self.texts.append(text)
+        return np.ones(80, dtype=np.float32), 0.01
+
+    def synthesize_stream(self, text: str):
+        yield self.synthesize(text)
 
 
 class PlaybackControlTests(unittest.TestCase):
@@ -456,6 +469,52 @@ class PlaybackControlTests(unittest.TestCase):
             limit_spoken_response_text(text, 55),
             "This is a long first sentence that should stay intact.",
         )
+
+    def test_spoken_response_text_is_split_for_tts(self) -> None:
+        text = "First answer sentence. This second answer sentence has enough detail to split by words safely."
+
+        self.assertEqual(
+            split_spoken_response_text(text, 45),
+            [
+                "First answer sentence.",
+                "This second answer sentence has enough.",
+                "detail to split by words safely.",
+            ],
+        )
+
+    def test_webrtc_synthesizes_long_response_in_short_spoken_chunks(self) -> None:
+        events = EventStore(max_context_events=30)
+        tts = RecordingTTS()
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(tts_chunk_chars=50),
+            events,
+            FakeSTT(),
+            tts,
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"text": "question"})
+
+            session.submit_agent_response(
+                AgentResponse(
+                    "call-1",
+                    "Here is the short result. This longer follow up should become another audio request.",
+                    response_to_event_id=request.id,
+                )
+            )
+
+            self.assertEqual(
+                tts.texts,
+                [
+                    "Here is the short result.",
+                    "This longer follow up should become another audio.",
+                    "request.",
+                ],
+            )
+            self.assertTrue(session.playback.is_active())
+        finally:
+            session.stop()
 
     def test_webrtc_barge_in_ignores_audio_below_barge_in_threshold(self) -> None:
         events = EventStore(max_context_events=30)

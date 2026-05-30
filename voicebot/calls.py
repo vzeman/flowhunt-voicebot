@@ -4,7 +4,6 @@ import asyncio
 from collections import deque
 from dataclasses import dataclass
 import queue
-import re
 import socket
 import threading
 import time
@@ -31,6 +30,7 @@ from .frames import AudioInputFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
 from .realtime_audio import AudioJitterBuffer, JitterBufferConfig, TurnDetector, trim_trailing_silence, turn_detection_config_from_settings
+from .spoken_text import limit_spoken_response_text, split_spoken_response_text
 from .transports import ASTERISK_AUDIOSOCKET_CAPABILITIES, StaticMediaTransport
 
 if TYPE_CHECKING:
@@ -47,22 +47,6 @@ class AgentResponse:
 
 DEFAULT_STT_PIPELINE = (ProcessorSpec("stt"), ProcessorSpec("agent-request"))
 DEFAULT_TTS_PIPELINE = (ProcessorSpec("tts"),)
-
-
-def limit_spoken_response_text(text: str, max_chars: int) -> str:
-    cleaned = re.sub(r"\s+", " ", text).strip()
-    if max_chars <= 0 or len(cleaned) <= max_chars:
-        return cleaned
-    truncated = cleaned[:max_chars]
-    sentence = re.split(r"(?<=[.!?])\s+", truncated)
-    if sentence and len(sentence[0]) >= max_chars * 0.45:
-        candidate = sentence[0].strip()
-    else:
-        candidate = truncated.rsplit(" ", 1)[0].strip()
-    candidate = candidate.strip(" -:;,")
-    if candidate and candidate[-1] not in ".!?":
-        candidate = f"{candidate}."
-    return candidate
 
 
 class PlaybackBuffer:
@@ -359,10 +343,11 @@ class CallSession:
 
     def _tts_audio_chunks(self, text: str):
         synthesize_stream = getattr(self.tts, "synthesize_stream", None)
-        if synthesize_stream is None:
-            yield self.tts.synthesize(text)
-            return
-        yield from synthesize_stream(text)
+        for chunk_text in split_spoken_response_text(text, self.settings.tts_chunk_chars):
+            if synthesize_stream is None:
+                yield self.tts.synthesize(chunk_text)
+            else:
+                yield from synthesize_stream(chunk_text)
 
     def interrupt_playback(self, reason: str = "agent_requested") -> VoicebotEvent:
         interrupted = self.playback.interrupt()

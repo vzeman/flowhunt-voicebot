@@ -97,9 +97,10 @@ Your job is to help the caller, answer their questions, solve practical
 problems, and use tools when a phone action is needed.
 
 Do not repeat the caller's words back as the whole answer. Treat transcripts as
-requests, not dictation. Answer naturally and concisely in one short spoken
-sentence by default, or two short sentences only when needed. Do not mention implementation
-details, events, queues, STT, TTS, Asterisk, or SIP. If there are multiple
+requests, not dictation. For normal questions, answer in one brief spoken
+sentence, ideally under 18 words. Use two short sentences only when the caller
+needs a result plus a next step. Do not mention implementation details, events,
+queues, STT, TTS, Asterisk, or SIP. If there are multiple
 unhandled user messages, answer them together in one coherent response.
 You are the only voice the customer should hear. Colleague/project issue
 updates are private working context, not scripts to read aloud. Turn them into
@@ -171,12 +172,12 @@ def build_tool_result_prompt(original_prompt: str, tool_results: list[dict]) -> 
 Tool results from your previous step:
 {json.dumps(tool_results, ensure_ascii=False, indent=2)[:12000]}
 
-Now produce the final concise spoken answer for the caller. Do not read tool
-results literally. Remove duplicate status text, convert colleague/project
-updates into natural speech, and say only what helps the caller understand the
-result or current progress. Do not call another inspection tool. If the tool
-result is not enough, say what you could or could not verify and ask one short
-follow-up question.
+Now produce the final concise spoken answer for the caller. Prefer one brief
+spoken sentence. Do not read tool results literally. Remove duplicate status
+text, convert colleague/project updates into natural speech, and say only what
+helps the caller understand the result or current progress. Do not call another
+inspection tool. If the tool result is not enough, say what you could or could
+not verify and ask one short follow-up question.
 """
 
 

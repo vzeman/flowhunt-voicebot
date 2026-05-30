@@ -50,7 +50,7 @@ class WhisperSTTProvider(STTProvider):
             raise RuntimeError("The whisper package is required when using local Whisper STT")
         print(f"Loading Whisper STT model: {settings.whisper_model}")
         self._model = whisper.load_model(settings.whisper_model)
-        self._language = settings.language
+        self._language = _stt_language_hint(settings.language)
         self._no_speech_threshold = settings.stt_no_speech_threshold
         self._logprob_threshold = settings.stt_logprob_threshold
         self._min_chars = settings.stt_min_chars
@@ -123,7 +123,7 @@ class OpenAISTTProvider(STTProvider):
         self._client = OpenAI(**client_kwargs)
         self._provider = provider
         self._model = model
-        self._language = settings.language
+        self._language = _stt_language_hint(settings.language)
         self._prompt = settings.stt_prompt
         self._min_chars = settings.stt_min_chars
         self._lock = threading.Lock()
@@ -207,6 +207,15 @@ def _average(values: list[float]) -> float | None:
     if not values:
         return None
     return float(sum(values) / len(values))
+
+
+def _stt_language_hint(language: str | None) -> str | None:
+    if language is None:
+        return None
+    normalized = language.strip().lower()
+    if normalized in {"", "auto", "detect", "detected", "multilingual", "any"}:
+        return None
+    return normalized
 
 
 def _normalize_for_similarity(text: str) -> str:

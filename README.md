@@ -207,7 +207,7 @@ default trunk when `/data/asterisk/pjsip-trunks.conf` is missing or empty.
 
 ```bash
 export VOICEBOT_WHISPER_MODEL=base
-export VOICEBOT_LANGUAGE=en
+export VOICEBOT_LANGUAGE=auto
 export PJSIP_BIND=0.0.0.0:5060
 ```
 
@@ -400,7 +400,7 @@ VOICEBOT_STT_API_KEY=
 VOICEBOT_STT_BASE_URL=
 VOICEBOT_STT_MODEL=
 VOICEBOT_OPENAI_STT_MODEL=gpt-4o-transcribe
-VOICEBOT_LANGUAGE=en
+VOICEBOT_LANGUAGE=auto
 VOICEBOT_STT_PROMPT=
 VOICEBOT_STT_TIMEOUT_SECONDS=8
 VOICEBOT_AGENT_MIN_TRANSCRIPT_CHARS=5
@@ -441,11 +441,15 @@ already have another `OPENAI_API_KEY` exported in the shell, unset it or start
 Compose from a clean shell so the project-local `.env` value is used.
 
 OpenAI model names are configurable so the same runtime can switch back to local
-Whisper/Supertonic or use newer OpenAI models without code changes. For OpenAI
-STT, `VOICEBOT_LANGUAGE` pins the expected input language and
-`VOICEBOT_STT_PROMPT` can give the transcription model domain vocabulary that is
-commonly heard on calls. Keep it empty unless you have a measured need; prompts
-can leak into transcriptions when the input audio is unclear.
+Whisper/Supertonic or use newer OpenAI models without code changes. For
+multilingual calls, keep `VOICEBOT_LANGUAGE=auto`; the STT adapter then avoids a
+fixed language hint and the communication agent mirrors the caller's language.
+Set `VOICEBOT_LANGUAGE` to a language code such as `sk` or `en` only for a
+single-language voicebot where both transcription and default responses should
+be pinned. `VOICEBOT_STT_PROMPT` can give the transcription model domain
+vocabulary that is commonly heard on calls. Keep it empty unless you have a
+measured need; prompts can leak into transcriptions when the input audio is
+unclear.
 `VOICEBOT_STT_TIMEOUT_SECONDS` bounds each provider transcription request; a
 timeout is recorded as `stt_failed` so stalled STT calls are visible in the
 event timeline instead of leaving the call silent.

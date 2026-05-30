@@ -60,7 +60,7 @@ class ConfigTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             settings = Settings()
 
-        self.assertEqual(settings.language, "en")
+        self.assertEqual(settings.language, "auto")
         self.assertEqual(settings.start_threshold, 0.020)
         self.assertEqual(settings.stop_threshold, 0.010)
         self.assertEqual(settings.vad_start_ms, 60)

@@ -120,6 +120,16 @@ class AgentCoordinationTests(unittest.TestCase):
         self.assertIn("Default response language: sk", prompt)
         self.assertIn("Use concise Slovak.", prompt)
 
+    def test_build_prompt_auto_language_instructs_mirroring_caller_language(self) -> None:
+        prompt = build_prompt(
+            [{"id": 10, "call_id": "call-1", "data": {"text": "Dobrý deň"}}],
+            {"voicebot_prompts": {"language": "auto"}},
+            [],
+        )
+
+        self.assertIn("Detect the caller's language", prompt)
+        self.assertIn("switch with them", prompt)
+
     def test_call_connected_with_custom_prompt_uses_model_turn(self) -> None:
         task = {
             "id": 10,

@@ -68,6 +68,17 @@ Channel types include SIP trunk bindings and WebRTC widget/token bindings.
 
 Provider config uses secret references and must validate before channel enable.
 
+## Security APIs
+
+- `GET /security/contract`
+- `GET /workspaces/{workspace_id}/security/retention`
+- `POST /workspaces/{workspace_id}/security/audit`
+
+`/security/contract` is an internal diagnostic endpoint. Workspace retention
+and audit endpoints are workspace-scoped and pass through the access policy.
+Audit payloads are recursively redacted before being stored as `security_audit`
+events.
+
 ## Transport APIs
 
 - `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/transports`

@@ -63,6 +63,7 @@ class ApiSurfaceTests(unittest.TestCase):
             "provider",
             "transport",
             "scaling",
+            "security",
             "multimodal",
             "testing",
         ):
@@ -98,6 +99,14 @@ class ApiSurfaceTests(unittest.TestCase):
 
         self.assertEqual(paths["/calls/{call_id}/multimodal"]["scope_source"], "route_binding")
         self.assertEqual(paths["/calls/{call_id}/multimodal/parts"]["scope_source"], "payload")
+
+    def test_security_endpoints_are_cataloged(self) -> None:
+        grouped = api_surface_by_area()
+        paths = {endpoint["path"]: endpoint for endpoint in grouped["security"]}
+
+        self.assertEqual(paths["/security/contract"]["scope_source"], "none")
+        self.assertEqual(paths["/workspaces/{workspace_id}/security/audit"]["scope_source"], "path")
+        self.assertTrue(paths["/workspaces/{workspace_id}/security/retention"]["workspace_scoped"])
 
     def test_api_surface_prototypes_endpoint_lists_prototypes(self) -> None:
         response = self.build_client().get("/api/surface/prototypes")

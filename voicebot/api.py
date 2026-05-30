@@ -32,6 +32,7 @@ from .api_models import (
     PlaybackInterruptRequest,
     ScalingAdmissionRequest,
     ScalingBackpressureRequest,
+    SecurityAuditRequest,
     ScalingWorkloadPlanRequest,
     SessionLeaseEnforceRequest,
     SessionLeaseReleaseRequest,
@@ -110,6 +111,7 @@ from .scaling import (
     default_deployment_topology,
 )
 from .session_leases import SessionLeaseStore
+from .security_contract import redact_sensitive_data, security_contract_issues, security_contract_payload
 from .sip_media_plane import sip_media_plane_payload
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .storage_contracts import storage_contracts_payload
@@ -244,6 +246,34 @@ def create_app(
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from None
 
+    def append_security_audit(
+        *,
+        workspace_id: str | None,
+        action: str,
+        actor: str = "runtime",
+        voicebot_id: str | None = None,
+        session_id: str | None = None,
+        call_id: str | None = None,
+        resource_type: str = "",
+        resource_id: str | None = None,
+        outcome: str = "requested",
+        metadata: dict[str, Any] | None = None,
+    ) -> VoicebotEvent:
+        payload = redact_sensitive_data(
+            {
+                "workspace_id": workspace_id,
+                "voicebot_id": voicebot_id,
+                "session_id": session_id,
+                "action": action,
+                "actor": actor,
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+                "outcome": outcome,
+                "metadata": metadata or {},
+            }
+        )
+        return events.append(call_id or session_id or "security", "security_audit", payload)
+
     def emit_subagent_terminal_event(event_type: TaskLifecycleEventType, task: SubagentTask) -> None:
         event = events.append_scoped(
             ExecutionScope(
@@ -294,6 +324,8 @@ def create_app(
                 **({"subagent_tasks": subagent_coordinator.store} if subagent_coordinator is not None else {}),
             },
             drain_state=drain_state.snapshot(),
+            settings=runtime_settings,
+            workspace_policy=workspace_access_policy,
         )
 
     @app.get("/health/liveness")
@@ -338,6 +370,37 @@ def create_app(
     @app.get("/storage/contracts")
     def storage_contracts() -> dict[str, Any]:
         return storage_contracts_payload()
+
+    @app.get("/security/contract")
+    def security_contract() -> dict[str, Any]:
+        return {
+            "contract": security_contract_payload(runtime_settings, workspace_access_policy),
+            "issues": security_contract_issues(runtime_settings, workspace_access_policy),
+        }
+
+    @app.get("/workspaces/{workspace_id}/security/retention")
+    def workspace_security_retention(workspace_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        contract = security_contract_payload(runtime_settings, workspace_access_policy)
+        return {"workspace_id": workspace_id, "retention": contract["retention"]}
+
+    @app.post("/workspaces/{workspace_id}/security/audit")
+    async def workspace_security_audit(workspace_id: str, request: SecurityAuditRequest) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        event = append_security_audit(
+            workspace_id=workspace_id,
+            voicebot_id=request.voicebot_id,
+            session_id=request.session_id,
+            call_id=request.call_id,
+            action=request.action,
+            actor=request.actor,
+            resource_type=request.resource_type,
+            resource_id=request.resource_id,
+            outcome=request.outcome,
+            metadata=request.metadata,
+        )
+        await hub.broadcast(event)
+        return {"event": event_to_dict(event)}
 
     @app.get("/pipeline/contract")
     def pipeline_contract() -> dict[str, Any]:
@@ -653,7 +716,7 @@ def create_app(
         }
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/transcript")
-    def get_voicebot_session_transcript(
+    async def get_voicebot_session_transcript(
         workspace_id: str,
         voicebot_id: str,
         session_id: str,
@@ -665,6 +728,19 @@ def create_app(
         if session is None or session.voicebot_id != voicebot_id:
             raise HTTPException(status_code=404, detail="Session not found")
         transcript = transcripts.read(session_id, after=after, limit=validated_limit(limit))
+        audit_event = append_security_audit(
+            workspace_id=workspace_id,
+            voicebot_id=voicebot_id,
+            session_id=session_id,
+            call_id=session_id,
+            action="transcript_read",
+            actor="api",
+            resource_type="transcript",
+            resource_id=session_id,
+            outcome="read",
+            metadata={"after": after, "limit": limit, "event_count": len(transcript)},
+        )
+        await hub.broadcast(audit_event)
         return {
             "workspace_id": workspace_id,
             "voicebot_id": voicebot_id,
@@ -746,6 +822,16 @@ def create_app(
                 "validation": [validation_issue_to_dict(issue) for issue in issues],
             }
         saved = provider_config_store.save(config)
+        append_security_audit(
+            workspace_id=workspace_id,
+            voicebot_id=voicebot_id,
+            action="provider_config_change",
+            actor="api",
+            resource_type="provider_config",
+            resource_id=voicebot_id,
+            outcome="saved",
+            metadata=provider_config_to_dict(saved),
+        )
         return {
             "ok": True,
             "config": provider_config_to_dict(saved),
@@ -822,7 +908,18 @@ def create_app(
                 "enabled": saved.enabled,
             },
         )
+        audit_event = append_security_audit(
+            workspace_id=workspace_id,
+            voicebot_id=voicebot_id,
+            action="runtime_config_change",
+            actor="api",
+            resource_type="runtime_config",
+            resource_id=voicebot_id,
+            outcome="saved",
+            metadata=runtime_config_to_dict(saved),
+        )
         await hub.broadcast(event)
+        await hub.broadcast(audit_event)
         return {
             "ok": True,
             "config": runtime_config_to_dict(saved),
@@ -1328,6 +1425,15 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from None
         result = reload_asterisk_pjsip()
         register_result = register_trunk(saved) if saved.enabled else None
+        append_security_audit(
+            workspace_id=None,
+            action="sip_trunk_secret_change",
+            actor="api",
+            resource_type="sip_trunk",
+            resource_id=saved.trunk_id,
+            outcome="saved",
+            metadata=saved.redacted_dict(),
+        )
         return {
             "trunk": saved.redacted_dict(),
             "reload": control_result_dict(result),
@@ -1346,6 +1452,15 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"SIP trunk not found: {trunk_id}")
         reload_result = reload_asterisk_pjsip()
         register_result = register_trunk(trunk)
+        append_security_audit(
+            workspace_id=None,
+            action="sip_trunk_connect",
+            actor="api",
+            resource_type="sip_trunk",
+            resource_id=trunk.trunk_id,
+            outcome="enabled",
+            metadata=trunk.redacted_dict(),
+        )
         return {
             "trunk": trunk.redacted_dict(),
             "reload": control_result_dict(reload_result),
@@ -1365,6 +1480,15 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         reload_result = reload_asterisk_pjsip()
+        append_security_audit(
+            workspace_id=None,
+            action="sip_trunk_disconnect",
+            actor="api",
+            resource_type="sip_trunk",
+            resource_id=trunk.trunk_id if trunk is not None else trunk_id,
+            outcome="disabled",
+            metadata=trunk.redacted_dict() if trunk is not None else {},
+        )
         return {
             "trunk": trunk.redacted_dict() if trunk is not None else None,
             "unregister": control_result_dict(unregister_result),
@@ -1384,6 +1508,15 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         reload_result = reload_asterisk_pjsip()
+        append_security_audit(
+            workspace_id=None,
+            action="sip_trunk_delete",
+            actor="api",
+            resource_type="sip_trunk",
+            resource_id=trunk_id,
+            outcome="deleted",
+            metadata=removed.redacted_dict() if removed is not None else {},
+        )
         return {
             "trunk": removed.redacted_dict() if removed is not None else None,
             "unregister": control_result_dict(unregister_result),
@@ -1705,6 +1838,25 @@ def create_app(
         requested = events.append(call_id, "call_control_requested", request.model_dump())
         active_session = registry.get(call_id)
         active_snapshot = active_session.snapshot() if active_session is not None else None
+        route = active_snapshot.get("route") if isinstance(active_snapshot, dict) else {}
+        if not isinstance(route, dict):
+            route = {}
+        audit_session_id = None
+        if isinstance(active_snapshot, dict):
+            audit_session_id = route.get("session_id") or active_snapshot.get("session_id")
+        audit_event = append_security_audit(
+            workspace_id=route.get("workspace_id"),
+            voicebot_id=route.get("voicebot_id"),
+            session_id=audit_session_id,
+            call_id=call_id,
+            action=f"call_control.{request.action}",
+            actor="agent_or_api",
+            resource_type="call",
+            resource_id=call_id,
+            outcome="requested",
+            metadata=request.model_dump(),
+        )
+        await hub.broadcast(audit_event)
         transport = active_snapshot.get("transport") if isinstance(active_snapshot, dict) else None
 
         if transport == "webrtc":

@@ -19,6 +19,7 @@ from voicebot.health import (
     readiness_report,
     sip_media_plane_check,
     storage_contract_check,
+    security_contract_check,
     webrtc_media_plane_check,
 )
 from voicebot.pipeline_contract import pipeline_contract_payload
@@ -46,6 +47,7 @@ class HealthTests(unittest.TestCase):
         self.assertTrue(report["checks"]["sip_media_plane"]["ok"])
         self.assertTrue(report["checks"]["webrtc_media_plane"]["ok"])
         self.assertTrue(report["checks"]["storage_contracts"]["ok"])
+        self.assertTrue(report["checks"]["security_contract"]["ok"])
         self.assertTrue(report["checks"]["drain"]["ok"])
         self.assertTrue(report["checks"]["durable_storage"]["ok"])
 
@@ -133,6 +135,7 @@ class HealthTests(unittest.TestCase):
                 "sip_media_plane",
                 "webrtc_media_plane",
                 "storage_contracts",
+                "security_contract",
                 "drain",
                 "durable_storage",
             },
@@ -194,6 +197,15 @@ class HealthTests(unittest.TestCase):
             self.assertTrue(contract["required_scope_fields"])
             self.assertTrue(contract["idempotency_fields"])
             self.assertTrue(contract["production_backends"])
+
+    def test_security_contract_check_reports_local_permissive_mode(self) -> None:
+        check = security_contract_check().to_dict()
+
+        self.assertTrue(check["ok"])
+        self.assertEqual(check["issue_count"], 0)
+        self.assertEqual(check["mode"], "local_permissive")
+        self.assertFalse(check["secret_handling"]["raw_secret_api_responses"])
+        self.assertIn("transcripts", {item["name"] for item in check["retention"]["classes"]})
 
     def test_storage_contract_endpoint_returns_contract_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

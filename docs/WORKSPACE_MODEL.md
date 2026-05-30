@@ -77,6 +77,22 @@ before they enter the resolver.
 Subagent and FlowHunt project/flow calls must run in the same `workspace_id` as
 the voicebot session. `require_same_workspace()` makes this invariant explicit.
 
+## Security And Audit
+
+`GET /security/contract` exposes the current workspace isolation contract.
+Local Docker mode is permissive by default, while production mode must enable
+workspace authorization. The readiness report includes `security_contract` so
+misconfigured production enforcement is visible before accepting sessions.
+
+Security-sensitive actions emit `security_audit` events with recursively
+redacted metadata. The current audit surface covers call control, provider and
+runtime config changes, workspace transcript reads, SIP trunk changes, and
+explicit workspace audit submissions.
+
+Retention classes for events, transcripts, recordings, cached TTS audio, and
+subagent tasks are returned by
+`GET /workspaces/{workspace_id}/security/retention`.
+
 ## Current Prototype Assumptions To Remove
 
 - Global `.env` provider choices instead of workspace/voicebot provider config
@@ -84,6 +100,7 @@ the voicebot session. `require_same_workspace()` makes this invariant explicit.
 - Local worker lease state for agent tasks
 - Local JSON stores for events and external task records
 - Prototype browser test endpoint outside workspace routing
+- Legacy local SIP trunk commands without workspace route binding
 
 ## Runtime Config Versioning
 
@@ -102,5 +119,6 @@ with for auditability and predictable call behavior.
 - Route SIP/WebRTC runtime sessions through channel bindings
 - Store active sessions, events, transcripts, and external tasks with
   `workspace_id`, `voicebot_id`, and `session_id`
-- Enforce FlowHunt workspace permissions on admin APIs
+- Replace the local workspace allow-list with FlowHunt's production permission
+  service
 - Move task leases and active session locks to shared storage

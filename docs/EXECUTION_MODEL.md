@@ -102,6 +102,29 @@ Both `asterisk_audiosocket` and `webrtc` map to this same conceptual pipeline.
 Transport-specific behavior belongs in adapters at the input/output edges, not
 inside STT, agent, subagent, or TTS orchestration.
 
+## Per-Call Actors
+
+Each active call owns a `CallActorCoordinator` with isolated lanes:
+
+- `audio_input`: caller audio and VAD turn detection owned by the transport
+  session.
+- `stt`: queued and active transcription jobs for caller turns.
+- `agent`: communication-agent work for caller requests and lifecycle events.
+- `tts_playback`: TTS generation plus queued/active playback for the transport.
+- `control`: hangup, transfer, DTMF, and stop-playback actions.
+- `background`: subagent polling, summaries, analytics, and post-call work.
+
+The coordinator records queued, started, completed, and cancelled signals per
+lane. Cancelling one lane clears only that lane's queued/active counters and
+increments that lane's cancellation generation. For example, a caller barge-in
+cancels `tts_playback` without cancelling the `stt` lane that is recognizing the
+new caller turn or the `background` lane that is watching a delegated task. SIP
+and WebRTC session snapshots expose this actor state under `actors`.
+
+The local Docker runtime still executes most lanes in-process, but the actor
+contract defines the state ownership expected when these lanes move to separate
+workers in Kubernetes.
+
 ## Ordering Rules
 
 Frames in these categories are session ordered:

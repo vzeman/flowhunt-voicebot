@@ -23,6 +23,7 @@ from .audio import (
     read_audiosocket_message,
     write_audiosocket_message,
 )
+from .call_actor import CallActorCoordinator
 from .call_state import CallStateStore
 from .config import Settings
 from .events import EventStore, VoicebotEvent
@@ -175,6 +176,7 @@ class CallSession:
             self.processor_registry.create_many(tts_pipeline_specs, processor_dependencies)
         )
         self.playback = PlaybackBuffer()
+        self.actors = CallActorCoordinator(call_id)
         self._turn_coalescer = TurnCoalescer(
             call_id=lambda: self.call_id,
             events=self.events,
@@ -420,6 +422,7 @@ class CallSession:
     def interrupt_playback(self, reason: str = "agent_requested") -> VoicebotEvent:
         interrupted = self.playback.interrupt()
         self._mark_interrupted(reason)
+        self.actors.cancel("tts_playback", reason=reason)
         return self.events.append(
             self.call_id,
             "bot_playback_interrupted",
@@ -441,6 +444,7 @@ class CallSession:
                 "call_control": sorted(self.descriptor.capabilities.call_control),
                 "modalities": self.descriptor.capabilities.modalities.to_dict(),
             },
+            "actors": self.actors.snapshot(),
         }
 
     def _jitter_buffer_snapshot(self) -> dict:
@@ -467,6 +471,7 @@ class CallSession:
                 audiosocket_uuid = str(uuid.UUID(bytes=payload)) if len(payload) == 16 else payload.hex()
                 old_call_id = self.call_id
                 self.call_id = audiosocket_uuid
+                self.actors.update_call_id(self.call_id)
                 self.descriptor = StaticMediaTransport(
                     "asterisk_audiosocket",
                     ASTERISK_AUDIOSOCKET_CAPABILITIES,
@@ -533,11 +538,13 @@ class CallSession:
         if result.started:
             self.recording_event.set()
             turn_id = self._new_turn()
+            self.actors.started("audio_input", correlation_id=str(turn_id), reason="speech_started")
             self.events.append(self.call_id, "user_speech_started", {"turn_id": turn_id, "level": result.level})
             self._record_vad_decision(result.decision, result.level, result.block_ms, {"turn_id": turn_id})
             self._mark_interrupted("user_speech_started")
 
             if result.interrupt_playback and self.playback.interrupt():
+                self.actors.cancel("tts_playback", reason="user_speech_started", correlation_id=str(turn_id))
                 self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "user_speech_started"})
             return
 
@@ -546,6 +553,7 @@ class CallSession:
 
         self.recording_event.clear()
         turn_id = self._current_turn()
+        self.actors.completed("audio_input", correlation_id=str(turn_id), reason="speech_finished")
         self.events.append(self.call_id, "user_speech_finished", {"turn_id": turn_id, "duration": result.duration})
         self._record_metric("speech_duration_seconds", result.duration, {"turn_id": turn_id})
         self._record_metric("silence_duration_seconds", result.silence_ms / 1000, {"turn_id": turn_id})
@@ -564,6 +572,7 @@ class CallSession:
             trimmed_seconds = max(0.0, (len(result.audio) - len(audio)) / CALL_SAMPLE_RATE)
             if trimmed_seconds > 0:
                 self._record_metric("stt_audio_trimmed_seconds", trimmed_seconds, {"turn_id": turn_id})
+            self.actors.queued("stt", correlation_id=str(turn_id), reason="speech_finished")
             self._speech_jobs.put((turn_id, audio, self._current_interrupt_generation()))
 
     def _speech_worker_loop(self) -> None:
@@ -575,6 +584,7 @@ class CallSession:
 
             self.events.append(self.call_id, "stt_started", {"turn_id": turn_id})
             stt_started_recorded = True
+            self.actors.started("stt", correlation_id=str(turn_id), reason="speech_job")
             try:
                 frames = asyncio.run(
                     self.stt_pipeline.push(
@@ -588,6 +598,7 @@ class CallSession:
                 )
             except Exception as exc:
                 self.events.append(self.call_id, "stt_failed", {"turn_id": turn_id, "error": str(exc)})
+                self.actors.completed("stt", correlation_id=str(turn_id), reason="stt_failed")
                 continue
             transcript_event_ids: dict[str, int] = {}
             stale_turn = turn_generation != self._current_interrupt_generation()
@@ -672,6 +683,7 @@ class CallSession:
                         },
                     )
                     transcript_event_ids[frame.frame_id] = transcript.id
+            self.actors.completed("stt", correlation_id=str(turn_id), reason="stt_done")
 
     def _send_loop(self) -> None:
         packet_samples = max(1, int(CALL_SAMPLE_RATE * self.settings.packet_ms / 1000))
@@ -689,6 +701,7 @@ class CallSession:
                     continue
                 if self.playback.interrupt():
                     self._mark_interrupted("caller_is_speaking")
+                    self.actors.cancel("tts_playback", reason="caller_is_speaking")
                     self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "caller_is_speaking"})
                 packet = np.zeros(packet_samples, dtype=np.float32)
                 try:

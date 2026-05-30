@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
         default=float(
             env_or_default(
                 "VOICEBOT_COMMUNICATION_AGENT_INTERVAL",
-                env_or_default("VOICEBOT_OPENAI_AGENT_INTERVAL", "0.5"),
+                env_or_default("VOICEBOT_OPENAI_AGENT_INTERVAL", "0.2"),
             )
         ),
     )
@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-output-tokens",
         type=int,
-        default=int(env_or_default("VOICEBOT_COMMUNICATION_AGENT_MAX_OUTPUT_TOKENS", "220")),
+        default=int(env_or_default("VOICEBOT_COMMUNICATION_AGENT_MAX_OUTPUT_TOKENS", "120")),
     )
     return parser.parse_args()
 

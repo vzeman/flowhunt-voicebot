@@ -84,6 +84,7 @@ class Settings:
     min_seconds: float = env_float("VOICEBOT_MIN_SECONDS", 0.35)
     max_seconds: float = env_float("VOICEBOT_MAX_SECONDS", 20.0)
     max_reply_chars: int = env_int("VOICEBOT_MAX_REPLY_CHARS", 240)
+    tts_chunk_chars: int = env_int("VOICEBOT_TTS_CHUNK_CHARS", 90)
     deferred_response_wait_seconds: float = env_float("VOICEBOT_DEFERRED_RESPONSE_WAIT_SECONDS", 30.0)
     packet_ms: int = env_int("VOICEBOT_PACKET_MS", 20)
     webrtc_jitter_buffer_enabled: bool = env_bool("VOICEBOT_WEBRTC_JITTER_BUFFER_ENABLED", True)

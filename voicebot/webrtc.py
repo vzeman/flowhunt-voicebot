@@ -13,13 +13,14 @@ import numpy as np
 from scipy.io import wavfile
 
 from .audio import CALL_SAMPLE_RATE, STT_SAMPLE_RATE, resample_audio, rms
-from .calls import AgentResponse, DEFAULT_STT_PIPELINE, DEFAULT_TTS_PIPELINE, PlaybackBuffer, limit_spoken_response_text
+from .calls import AgentResponse, DEFAULT_STT_PIPELINE, DEFAULT_TTS_PIPELINE, PlaybackBuffer
 from .config import Settings
 from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
 from .realtime_audio import AudioJitterBuffer, JitterBufferConfig, TurnDetector, trim_trailing_silence, turn_detection_config_from_settings
+from .spoken_text import limit_spoken_response_text, split_spoken_response_text
 from .transports import WEBRTC_CAPABILITIES, StaticMediaTransport
 from .workspace_model import VoicebotSessionRecord, VoicebotSessionStore
 
@@ -381,10 +382,11 @@ class WebRTCCallSession:
 
     def _tts_audio_chunks(self, text: str):
         synthesize_stream = getattr(self.tts, "synthesize_stream", None)
-        if synthesize_stream is None:
-            yield self.tts.synthesize(text)
-            return
-        yield from synthesize_stream(text)
+        for chunk_text in split_spoken_response_text(text, self.settings.tts_chunk_chars):
+            if synthesize_stream is None:
+                yield self.tts.synthesize(chunk_text)
+            else:
+                yield from synthesize_stream(chunk_text)
 
     def interrupt_playback(self, reason: str = "agent_requested") -> VoicebotEvent:
         interrupted = self.playback.interrupt()

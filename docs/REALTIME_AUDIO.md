@@ -97,6 +97,13 @@ that was only needed for endpointing while keeping a short tail for recognition
 context. This reduces uploaded audio duration and avoids asking the STT provider
 to transcribe long silence at the end of every turn.
 
+STT jobs carry the interruption generation from the speech turn they belong to.
+If the caller starts a newer turn before an older STT job finishes, the stale
+transcript can still be recorded for audit with `stale=true`, but it does not
+create a new `agent_response_requested` event. The runtime emits
+`stt_result_dropped` so operators can see that a recognized utterance was
+superseded by newer caller speech.
+
 ## Configuration
 
 `TurnDetectionConfig` contains:

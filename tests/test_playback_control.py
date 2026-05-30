@@ -25,6 +25,29 @@ class FakeSTT:
         raise AssertionError("not used")
 
 
+class FakeTranscriptionResult:
+    def __init__(self, text: str, is_final: bool = True) -> None:
+        self.text = text
+        self.is_final = is_final
+        self.reason = None
+        self.metadata = {}
+
+
+class GatedSTT:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def transcribe(self, call_audio, sample_rate=8000):
+        _ = call_audio, sample_rate
+        self.started.set()
+        self.release.wait(timeout=2.0)
+        return FakeTranscriptionResult("old question")
+
+    def transcribe_stream(self, call_audio, sample_rate=8000):
+        yield self.transcribe(call_audio, sample_rate)
+
+
 class FakeTTS:
     def synthesize(self, text: str):
         return np.zeros(80, dtype=np.float32), 0.01
@@ -389,6 +412,41 @@ class PlaybackControlTests(unittest.TestCase):
             self.assertEqual(dropped[-1].data["reason"], "stale_response_after_new_caller_speech")
         finally:
             tts.allow_second_chunk.set()
+            session.stop()
+
+    def test_webrtc_stale_stt_result_does_not_request_agent_response(self) -> None:
+        events = EventStore(max_context_events=40)
+        stt = GatedSTT()
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(greet_on_connect=False),
+            events,
+            stt,
+            FakeTTS(),
+        )
+        try:
+            session._speech_jobs.put((1, np.ones(160, dtype=np.float32), session._current_interrupt_generation()))
+            self.assertTrue(stt.started.wait(timeout=1.0))
+
+            session._mark_interrupted("newer_user_speech_started")
+            stt.release.set()
+
+            deadline = time.monotonic() + 1.0
+            event_types: list[str] = []
+            while time.monotonic() < deadline:
+                event_types = [event.type for event in events.list_events(call_id="call-1")]
+                if "stt_result_dropped" in event_types:
+                    break
+                time.sleep(0.01)
+
+            self.assertIn("user_transcript", event_types)
+            self.assertIn("stt_result_dropped", event_types)
+            self.assertNotIn("agent_response_requested", event_types)
+            transcript = [event for event in events.list_events(call_id="call-1") if event.type == "user_transcript"][-1]
+            self.assertTrue(transcript.data["stale"])
+        finally:
+            stt.release.set()
             session.stop()
 
     def test_spoken_response_text_is_limited(self) -> None:

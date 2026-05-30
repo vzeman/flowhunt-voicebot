@@ -176,7 +176,7 @@ class CallSession:
         self._response_request_times: dict[int, float] = {}
         self._startup_response_event_ids: set[int] = set()
         self._startup_playback_guard = False
-        self._speech_jobs: queue.Queue[tuple[int, np.ndarray]] = queue.Queue()
+        self._speech_jobs: queue.Queue[tuple[int, np.ndarray, int]] = queue.Queue()
         self._active_turn = 0
         self._active_turn_lock = threading.Lock()
         self._call_id_change_callback = None
@@ -507,12 +507,12 @@ class CallSession:
             trimmed_seconds = max(0.0, (len(result.audio) - len(audio)) / CALL_SAMPLE_RATE)
             if trimmed_seconds > 0:
                 self._record_metric("stt_audio_trimmed_seconds", trimmed_seconds, {"turn_id": turn_id})
-            self._speech_jobs.put((turn_id, audio))
+            self._speech_jobs.put((turn_id, audio, self._current_interrupt_generation()))
 
     def _speech_worker_loop(self) -> None:
         while not self.stop_event.is_set():
             try:
-                turn_id, audio = self._speech_jobs.get(timeout=0.2)
+                turn_id, audio, turn_generation = self._speech_jobs.get(timeout=0.2)
             except queue.Empty:
                 continue
 
@@ -527,9 +527,21 @@ class CallSession:
                 )
             )
             transcript_event_ids: dict[str, int] = {}
+            stale_turn = turn_generation != self._current_interrupt_generation()
             for frame in frames:
                 if not isinstance(frame, TranscriptionFrame):
                     if isinstance(frame, TextFrame) and frame.kind == "agent_request":
+                        if stale_turn:
+                            self.events.append(
+                                self.call_id,
+                                "stt_result_dropped",
+                                {
+                                    "turn_id": frame.data.get("turn_id"),
+                                    "reason": "newer_caller_speech_started",
+                                    "text": frame.text,
+                                },
+                            )
+                            continue
                         transcript_frame_id = str(frame.data.get("transcript_frame_id", ""))
                         request = self.events.append(
                             self.call_id,
@@ -595,6 +607,7 @@ class CallSession:
                             "turn_id": frame.turn_id,
                             "text": frame.text,
                             "elapsed": frame.data.get("elapsed"),
+                            "stale": stale_turn,
                         },
                     )
                     transcript_event_ids[frame.frame_id] = transcript.id

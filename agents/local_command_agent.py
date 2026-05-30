@@ -695,7 +695,7 @@ def colleague_update_answer(task: dict) -> str:
     data = task.get("data", {})
     reason = str(data.get("reason") or "")
     if reason == "colleague_progress":
-        return "I am still checking that with a colleague."
+        return "I am still checking it."
     if reason != "colleague_result":
         return ""
 
@@ -712,8 +712,8 @@ def colleague_update_answer(task: dict) -> str:
         return ""
     spoken = customer_facing_colleague_text(candidate)
     if not spoken:
-        return "I checked with a colleague, but I do not have a clear customer-facing result yet."
-    return _speech_limit(f"I checked with a colleague. {spoken}", max_chars=COLLEAGUE_SPOKEN_MAX_CHARS)
+        return "I do not have a clear customer-facing result yet."
+    return _speech_limit(spoken, max_chars=COLLEAGUE_SPOKEN_MAX_CHARS)
 
 
 def customer_facing_colleague_text(text: str) -> str:
@@ -817,7 +817,7 @@ def conversationalize_colleague_text(text: str) -> str:
     spoken = " ".join(useful) or cleaned
     if spoken and spoken[-1] not in ".!?":
         spoken = f"{spoken}."
-    return _speech_limit(spoken, max_chars=COLLEAGUE_SPOKEN_MAX_CHARS - len("I checked with a colleague. "))
+    return _speech_limit(spoken, max_chars=COLLEAGUE_SPOKEN_MAX_CHARS)
 
 
 def strip_leading_symbols(text: str) -> str:

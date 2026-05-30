@@ -324,7 +324,7 @@ class AgentCoordinationTests(unittest.TestCase):
 
         self.assertEqual(
             answer,
-            "I checked with a colleague. Connect the VoIP number first, then assign an IVR tree.",
+            "Connect the VoIP number first, then assign an IVR tree.",
         )
 
     def test_colleague_result_strips_internal_status_before_speaking(self) -> None:
@@ -432,8 +432,8 @@ class AgentCoordinationTests(unittest.TestCase):
 
         self.assertEqual(
             answer,
-            "I checked with a colleague. Yes, May 6th, 2026 was a service degradation in EU Frankfurt: "
-            "Agent panel slowness, resolved in 56 minutes.",
+            "Yes, May 6th, 2026 was a service degradation in EU Frankfurt: Agent panel slowness, "
+            "resolved in 56 minutes.",
         )
 
     def test_colleague_result_does_not_turn_normal_status_page_into_incident(self) -> None:
@@ -456,8 +456,7 @@ class AgentCoordinationTests(unittest.TestCase):
 
         self.assertEqual(
             answer,
-            "I checked with a colleague. The LiveAgent status page currently shows normal operation, "
-            "with no active downtime or visible incidents.",
+            "The LiveAgent status page currently shows normal operation, with no active downtime or visible incidents.",
         )
 
     def test_colleague_progress_uses_canned_customer_update(self) -> None:
@@ -470,7 +469,7 @@ class AgentCoordinationTests(unittest.TestCase):
             },
         }
 
-        self.assertEqual(colleague_update_answer(task), "I am still checking that with a colleague.")
+        self.assertEqual(colleague_update_answer(task), "I am still checking it.")
 
     def test_colleague_update_with_consume_prompt_uses_model_path(self) -> None:
         task = {

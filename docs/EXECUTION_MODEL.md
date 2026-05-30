@@ -156,6 +156,26 @@ Partial STT settings:
 - `VOICEBOT_STT_PARTIAL_MIN_CHARS`: minimum recognized text length before a
   partial event is persisted. Default `4`.
 
+## Streaming Agent To TTS
+
+Agent providers can expose a provider-neutral streaming response interface that
+yields text deltas and final tool-call metadata. When the communication-agent
+worker runs with `VOICEBOT_COMMUNICATION_AGENT_STREAMING_ENABLED=true`, stable
+sentences or phrase-sized chunks are posted to the voicebot as partial agent
+responses:
+
+- partial chunks persist as `agent_response_partial`;
+- each chunk immediately enters the normal TTS/playback path;
+- partial chunks do not mark the agent task complete;
+- the worker sends a stream-finalization request after all chunks are emitted;
+- if caller speech starts while chunks are being synthesized or queued, the
+  session's normal stale-generation and barge-in checks drop remaining chunks.
+
+This keeps the final task lifecycle explicit while letting simple spoken
+answers reach first audio before the full model response is available. OpenAI
+Responses and OpenAI-compatible chat adapters expose streaming deltas. Providers
+without streaming support fall back to one final response.
+
 ## Ordering Rules
 
 Frames in these categories are session ordered:

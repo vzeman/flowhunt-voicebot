@@ -574,7 +574,10 @@ Request:
 ```json
 {
   "text": "Hello, how can I help you?",
-  "response_to_event_id": 123
+  "response_to_event_id": 123,
+  "response_kind": "direct_answer",
+  "partial": false,
+  "finalize_only": false
 }
 ```
 
@@ -582,7 +585,14 @@ Fields:
 
 - `text`: required text to synthesize.
 - `response_to_event_id`: optional event ID this response answers. When present,
-  the agent task tracker marks that task as responded.
+  the agent task tracker marks that task as responded after a final response.
+- `response_kind`: optional label such as `direct_answer`, `progress_ack`,
+  `stream_chunk`, or `stream_finalized`.
+- `partial`: optional boolean. When `true`, the text is spoken and persisted as
+  `agent_response_partial`, but the task is not marked responded.
+- `finalize_only`: optional boolean. When `true`, no audio is synthesized; the
+  task identified by `response_to_event_id` is marked responded and a final
+  stream marker is recorded. This is used after all streaming chunks were sent.
 
 Response:
 
@@ -598,6 +608,28 @@ Response:
       "response_to_event_id": 123
     }
   }
+}
+```
+
+Streaming agents should send one or more partial chunks:
+
+```json
+{
+  "text": "I can check that.",
+  "response_to_event_id": 123,
+  "response_kind": "stream_chunk",
+  "partial": true
+}
+```
+
+Then finalize the task:
+
+```json
+{
+  "text": "",
+  "response_to_event_id": 123,
+  "response_kind": "stream_finalized",
+  "finalize_only": true
 }
 ```
 

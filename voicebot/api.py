@@ -2014,6 +2014,20 @@ def create_app(
         session = registry.get(call_id)
         if session is None:
             raise HTTPException(status_code=404, detail=f"Active call not found: {call_id}")
+        if request.finalize_only:
+            tracker.mark_responded(request.response_to_event_id)
+            event = events.append(
+                call_id,
+                "agent_response_received",
+                {
+                    "text": "",
+                    "response_to_event_id": request.response_to_event_id,
+                    "response_kind": request.response_kind or "stream_finalized",
+                    "stream_finalized": True,
+                },
+            )
+            await hub.broadcast(event)
+            return {"event": event_to_dict(event), "ok": True}
         try:
             event = await asyncio.to_thread(
                 session.submit_agent_response,
@@ -2022,10 +2036,12 @@ def create_app(
                     text=request.text,
                     response_to_event_id=request.response_to_event_id,
                     response_kind=request.response_kind,
+                    partial=request.partial,
                 ),
             )
         except Exception as exc:
-            tracker.mark_responded(request.response_to_event_id)
+            if not request.partial:
+                tracker.mark_responded(request.response_to_event_id)
             failed = events.append(
                 call_id,
                 "agent_response_dropped",
@@ -2037,7 +2053,8 @@ def create_app(
             )
             await hub.broadcast(failed)
             return {"event": event_to_dict(failed), "ok": False}
-        tracker.mark_responded(request.response_to_event_id)
+        if not request.partial:
+            tracker.mark_responded(request.response_to_event_id)
         await hub.broadcast(event)
         return {"event": event_to_dict(event), "ok": True}
 

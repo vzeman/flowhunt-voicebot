@@ -161,10 +161,14 @@ flowchart LR
    `agent_response_requested` task.
 7. **Agent processing**: the external agent polls `/agent/tasks`, receives the
    latest task with compacted call context, decides what to do, and either posts
-   text to `/calls/{call_id}/responses` or invokes a tool endpoint.
-8. **Speech response**: text responses produce `agent_response_received`,
-   `tts_started`, `tts_finished`, and playback events. The generated audio is
-   streamed back through AudioSocket into Asterisk and then to the caller.
+   final text or streaming partial chunks to `/calls/{call_id}/responses`, or
+   invokes a tool endpoint.
+8. **Speech response**: final text responses produce `agent_response_received`;
+   streaming chunks produce `agent_response_partial` until a stream-finalization
+   request marks the task complete. Both paths enter TTS/playback immediately,
+   producing `tts_started`, `tts_finished`, and playback events. The generated
+   audio is streamed back through AudioSocket into Asterisk and then to the
+   caller.
 9. **Tool actions**: agent tool calls emit `call_control_requested`, execute the
    requested Asterisk action through AMI, then emit `call_control_completed`.
 10. **Call end**: when the call disconnects, voicebot emits `call_ended`, closes
@@ -420,6 +424,8 @@ VOICEBOT_AGENT_TASK_RESPONDED_EVENT_RETENTION=10000
 VOICEBOT_AGENT_PROVIDER=openai-responses
 VOICEBOT_AGENT_API_KEY=
 VOICEBOT_OPENAI_AGENT_MODEL=gpt-4.1-nano
+VOICEBOT_COMMUNICATION_AGENT_STREAMING_ENABLED=false
+VOICEBOT_COMMUNICATION_AGENT_STREAMING_CHUNK_CHARS=90
 ```
 
 Start the full online-provider stack:
@@ -501,6 +507,13 @@ python agents/anthropic_agent.py \
 
 The worker supports native tool calls from Anthropic and the fallback JSON tool
 format used by the local command agent.
+
+When `VOICEBOT_COMMUNICATION_AGENT_STREAMING_ENABLED=true`, OpenAI Responses and
+OpenAI-compatible chat agents can stream stable text chunks to the call before
+the full model turn is complete. The voicebot accepts those chunks as
+`agent_response_partial` events, starts TTS immediately for each chunk, and marks
+the task complete only after the stream is finalized. Leave this disabled for a
+provider until its output format has been verified with your prompts and tools.
 
 ## Pipeline Configuration
 

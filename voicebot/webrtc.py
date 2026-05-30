@@ -292,13 +292,15 @@ class WebRTCCallSession:
     def submit_agent_response(self, response: AgentResponse) -> VoicebotEvent:
         text = limit_spoken_response_text(response.text, self.settings.max_reply_chars)
         self._record_agent_latency(response.response_to_event_id)
+        event_type = "agent_response_partial" if response.partial else "agent_response_received"
         event = self.events.append(
             self.call_id,
-            "agent_response_received",
+            event_type,
             {
                 "text": text,
                 "response_to_event_id": response.response_to_event_id,
                 "response_kind": response.response_kind,
+                "partial": response.partial,
             },
         )
         startup_response = self._is_startup_response(response.response_to_event_id)

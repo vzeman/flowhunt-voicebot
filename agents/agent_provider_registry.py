@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 import json
 
+from voicebot.agent import AgentOutput
 from voicebot.providers import (
     AGENT_CHAT_COMPATIBLE_PROVIDERS,
     SUPPORTED_AGENT_PROVIDERS,
@@ -16,11 +17,13 @@ from voicebot.providers import (
 
 
 AgentRunFactory = Callable[[Any, str, str, float, int, list[dict] | None], tuple[str, list[dict]]]
+AgentStreamFactory = Callable[[Any, str, str, float, int, list[dict] | None], Iterable[AgentOutput]]
 
 
 @dataclass
 class AgentProviderRegistry:
     factories: dict[str, AgentRunFactory] = field(default_factory=dict)
+    stream_factories: dict[str, AgentStreamFactory] = field(default_factory=dict)
     descriptors: dict[str, ProviderDescriptor] = field(default_factory=dict)
 
     def register(
@@ -32,6 +35,16 @@ class AgentProviderRegistry:
         normalized = normalize_provider(provider)
         self.factories[normalized] = factory
         self.descriptors[normalized] = descriptor or default_agent_descriptor(normalized)
+
+    def register_stream(
+        self,
+        provider: str,
+        factory: AgentStreamFactory,
+        descriptor: ProviderDescriptor | None = None,
+    ) -> None:
+        normalized = normalize_provider(provider)
+        self.stream_factories[normalized] = factory
+        self.descriptors[normalized] = descriptor or default_agent_descriptor(normalized, streaming=True)
 
     def describe(self, provider: str) -> ProviderDescriptor | None:
         return self.descriptors.get(normalize_provider(provider))
@@ -70,17 +83,40 @@ class AgentProviderRegistry:
             )
         raise RuntimeError(f"unsupported agent provider: {provider}")
 
+    def run_stream(
+        self,
+        client: Any,
+        provider: str,
+        model: str,
+        prompt: str,
+        timeout: float,
+        max_output_tokens: int,
+        tools: list[dict] | None = None,
+    ) -> Iterable[AgentOutput]:
+        provider = normalize_provider(provider)
+        factory = self.stream_factories.get(provider)
+        if factory is not None:
+            return factory(client, model, prompt, timeout, max_output_tokens, tools)
+
+        def fallback() -> Iterable[AgentOutput]:
+            text, tool_calls = self.run(client, provider, model, prompt, timeout, max_output_tokens, tools)
+            yield AgentOutput(text=text, tool_calls=[agent_tool_call(call) for call in tool_calls], is_final=True)
+
+        return fallback()
+
 
 def default_agent_provider_registry() -> AgentProviderRegistry:
     registry = AgentProviderRegistry()
     registry.register("anthropic", run_anthropic_agent)
     registry.register("openai-responses", run_responses_agent)
+    registry.register_stream("openai-responses", run_responses_agent_stream)
     for provider in AGENT_CHAT_COMPATIBLE_PROVIDERS:
         registry.register(provider, run_chat_agent)
+        registry.register_stream(provider, run_chat_agent_stream)
     return registry
 
 
-def default_agent_descriptor(provider: str) -> ProviderDescriptor:
+def default_agent_descriptor(provider: str, *, streaming: bool = False) -> ProviderDescriptor:
     adapter = "chat_compatible"
     native_tools = False
     if provider in {"anthropic", "openai-responses"}:
@@ -96,6 +132,7 @@ def default_agent_descriptor(provider: str) -> ProviderDescriptor:
             latency_profile="interactive",
             usage_metadata=("input_tokens", "output_tokens", "tool_calls") if native_tools else ("input_tokens", "output_tokens"),
             native_tools=native_tools,
+            streaming=streaming,
         ),
     )
 
@@ -120,6 +157,34 @@ def run_responses_agent(
     return response.output_text.strip(), extract_responses_tool_calls(response)
 
 
+def run_responses_agent_stream(
+    client: Any,
+    model: str,
+    prompt: str,
+    timeout: float,
+    max_output_tokens: int,
+    tools: list[dict] | None = None,
+) -> Iterable[AgentOutput]:
+    kwargs = {
+        "model": model,
+        "input": prompt,
+        "max_output_tokens": max_output_tokens,
+        "timeout": timeout,
+        "stream": True,
+    }
+    if tools:
+        kwargs["tools"] = tools
+    for event in client.responses.create(**kwargs):
+        event_type = getattr(event, "type", "")
+        if event_type == "response.output_text.delta":
+            delta = getattr(event, "delta", "")
+            if delta:
+                yield AgentOutput(text=delta, is_final=False)
+        elif event_type == "response.completed":
+            response = getattr(event, "response", None)
+            yield AgentOutput(tool_calls=[agent_tool_call(call) for call in extract_responses_tool_calls(response)], is_final=True)
+
+
 def run_chat_agent(
     client: Any,
     model: str,
@@ -136,6 +201,33 @@ def run_chat_agent(
         timeout=timeout,
     )
     return (response.choices[0].message.content or "").strip(), []
+
+
+def run_chat_agent_stream(
+    client: Any,
+    model: str,
+    prompt: str,
+    timeout: float,
+    max_output_tokens: int,
+    tools: list[dict] | None = None,
+) -> Iterable[AgentOutput]:
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=max_output_tokens,
+        temperature=0,
+        timeout=timeout,
+        stream=True,
+    )
+    for chunk in response:
+        choices = getattr(chunk, "choices", []) or []
+        if not choices:
+            continue
+        delta = getattr(choices[0], "delta", None)
+        text = getattr(delta, "content", "") if delta is not None else ""
+        if text:
+            yield AgentOutput(text=text, is_final=False)
+    yield AgentOutput(is_final=True)
 
 
 def run_anthropic_agent(
@@ -217,3 +309,9 @@ def extract_responses_tool_calls(response: Any) -> list[dict]:
         if name:
             calls.append({"name": name, "arguments": arguments})
     return calls
+
+
+def agent_tool_call(call: dict) -> Any:
+    from voicebot.agent import AgentToolCall
+
+    return AgentToolCall(name=str(call.get("name") or ""), arguments=dict(call.get("arguments") or {}))

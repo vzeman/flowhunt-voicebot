@@ -14,6 +14,9 @@ class SessionLease:
     session_id: str
     owner: str
     expires_at: str
+    call_id: str | None = None
+    transport: str | None = None
+    metadata: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.workspace_id.strip():
@@ -38,6 +41,9 @@ class SessionLease:
             "owner": self.owner,
             "expires_at": self.expires_at,
             "lease_key": self.lease_key,
+            "call_id": self.call_id,
+            "transport": self.transport,
+            "metadata": dict(self.metadata or {}),
         }
 
 
@@ -52,6 +58,9 @@ class SessionLeaseStore:
         session_id: str,
         owner: str,
         ttl_seconds: float,
+        call_id: str | None = None,
+        transport: str | None = None,
+        metadata: dict[str, Any] | None = None,
         now: datetime | None = None,
     ) -> SessionLease | None:
         if ttl_seconds <= 0:
@@ -68,6 +77,9 @@ class SessionLeaseStore:
             session_id=session_id,
             owner=owner,
             expires_at=(current + timedelta(seconds=ttl_seconds)).isoformat(),
+            call_id=call_id or (existing.call_id if existing is not None else None),
+            transport=transport or (existing.transport if existing is not None else None),
+            metadata=dict(metadata if metadata is not None else (existing.metadata if existing is not None else {}) or {}),
         )
         self._leases[key] = lease
         return lease
@@ -79,6 +91,9 @@ class SessionLeaseStore:
         session_id: str,
         owner: str,
         ttl_seconds: float,
+        call_id: str | None = None,
+        transport: str | None = None,
+        metadata: dict[str, Any] | None = None,
         now: datetime | None = None,
     ) -> SessionLease | None:
         key = lease_key(workspace_id, voicebot_id, session_id)
@@ -87,7 +102,17 @@ class SessionLeaseStore:
         existing = self._leases.get(key)
         if existing is None or existing.owner != owner:
             return None
-        return self.acquire(workspace_id, voicebot_id, session_id, owner, ttl_seconds, now=current)
+        return self.acquire(
+            workspace_id,
+            voicebot_id,
+            session_id,
+            owner,
+            ttl_seconds,
+            call_id=call_id,
+            transport=transport,
+            metadata=metadata,
+            now=current,
+        )
 
     def release(self, workspace_id: str, voicebot_id: str, session_id: str, owner: str | None = None) -> SessionLease | None:
         key = lease_key(workspace_id, voicebot_id, session_id)
@@ -97,6 +122,10 @@ class SessionLeaseStore:
         if owner is not None and existing.owner != owner:
             return None
         return self._leases.pop(key)
+
+    def get(self, workspace_id: str, voicebot_id: str, session_id: str, now: datetime | None = None) -> SessionLease | None:
+        self.expire(now)
+        return self._leases.get(lease_key(workspace_id, voicebot_id, session_id))
 
     def expire(self, now: datetime | None = None) -> tuple[SessionLease, ...]:
         current = now or datetime.now(UTC)
@@ -199,6 +228,9 @@ def session_lease_from_dict(data: dict[str, Any]) -> SessionLease:
         session_id=str(data["session_id"]),
         owner=str(data["owner"]),
         expires_at=str(data["expires_at"]),
+        call_id=_optional_str(data.get("call_id")),
+        transport=_optional_str(data.get("transport")),
+        metadata=dict(data.get("metadata") or {}),
     )
 
 
@@ -208,3 +240,10 @@ def lease_key(workspace_id: str, voicebot_id: str, session_id: str) -> str:
 
 def _parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

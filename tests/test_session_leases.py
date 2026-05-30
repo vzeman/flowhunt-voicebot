@@ -17,12 +17,39 @@ from voicebot.session_leases import JsonSessionLeaseStore, SessionLeaseStore
 from voicebot.transcripts import TranscriptStore
 
 
+class FakeSession:
+    def __init__(self, call_id: str = "call-1") -> None:
+        self.call_id = call_id
+        self.stopped = False
+
+    def snapshot(self) -> dict:
+        return {
+            "call_id": self.call_id,
+            "session_id": "session-1",
+            "transport": "webrtc",
+            "route": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"},
+        }
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
 class SessionLeaseStoreTests(unittest.TestCase):
     def test_session_lease_store_acquires_renews_releases_and_expires(self) -> None:
         store = SessionLeaseStore()
         now = datetime(2026, 5, 29, tzinfo=UTC)
 
-        lease = store.acquire("workspace-1", "voicebot-1", "session-1", "worker-1", 10, now=now)
+        lease = store.acquire(
+            "workspace-1",
+            "voicebot-1",
+            "session-1",
+            "worker-1",
+            10,
+            call_id="call-1",
+            transport="webrtc",
+            metadata={"pod": "voicebot-1"},
+            now=now,
+        )
         blocked = store.acquire("workspace-1", "voicebot-1", "session-1", "worker-2", 10, now=now)
         renewed = store.renew("workspace-1", "voicebot-1", "session-1", "worker-1", 20, now=now)
         wrong_release = store.release("workspace-1", "voicebot-1", "session-1", owner="worker-2")
@@ -31,6 +58,9 @@ class SessionLeaseStoreTests(unittest.TestCase):
         expired = store.expire(now + timedelta(seconds=2))
 
         self.assertEqual(lease.owner if lease else None, "worker-1")
+        self.assertEqual(lease.call_id if lease else None, "call-1")
+        self.assertEqual(lease.transport if lease else None, "webrtc")
+        self.assertEqual(lease.metadata if lease else None, {"pod": "voicebot-1"})
         self.assertIsNone(blocked)
         self.assertEqual(renewed.owner if renewed else None, "worker-1")
         self.assertIsNone(wrong_release)
@@ -60,7 +90,7 @@ class SessionLeaseStoreTests(unittest.TestCase):
                 f"""
                 {{
                   "leases": [
-                    {{"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "session_id": "session-1", "owner": "worker-1", "expires_at": "{current}"}},
+                    {{"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "session_id": "session-1", "owner": "worker-1", "expires_at": "{current}", "call_id": "call-1", "transport": "webrtc", "metadata": {{"pod": "voicebot-1"}}}},
                     {{"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "session_id": "session-1", "owner": "worker-2", "expires_at": "{current}"}},
                     {{"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "session_id": "session-2", "owner": "worker-1", "expires_at": "{expired}"}},
                     {{"workspace_id": "", "voicebot_id": "voicebot-1", "session_id": "session-3", "owner": "worker-1", "expires_at": "{current}"}}
@@ -90,8 +120,9 @@ class SessionLeaseStoreTests(unittest.TestCase):
 
 class SessionLeaseApiTests(unittest.TestCase):
     def test_session_lease_api_acquires_renews_releases_and_lists(self) -> None:
+        events = EventStore(max_context_events=20)
         app = create_app(
-            EventStore(max_context_events=20),
+            events,
             CallRegistry(),
             AgentTaskTracker(),
             WebSocketHub(),
@@ -105,6 +136,9 @@ class SessionLeaseApiTests(unittest.TestCase):
             "session_id": "session-1",
             "owner": "worker-1",
             "ttl_seconds": 30,
+            "call_id": "call-1",
+            "transport": "webrtc",
+            "metadata": {"pod": "voicebot-1"},
         }
 
         acquired = client.post("/scaling/session-leases/acquire", json=request)
@@ -114,10 +148,47 @@ class SessionLeaseApiTests(unittest.TestCase):
         released = client.post("/scaling/session-leases/release", json={**request, "owner": "worker-1"})
 
         self.assertTrue(acquired.json()["acquired"])
+        self.assertEqual(acquired.json()["lease"]["call_id"], "call-1")
+        self.assertEqual(acquired.json()["lease"]["transport"], "webrtc")
         self.assertFalse(blocked.json()["acquired"])
         self.assertEqual([lease["session_id"] for lease in listed.json()["leases"]], ["session-1"])
         self.assertTrue(renewed.json()["renewed"])
         self.assertTrue(released.json()["released"])
+        self.assertEqual(
+            [event.type for event in events.list_events(call_id="call-1")],
+            ["session_lease_acquired", "session_lease_renewed", "session_lease_released"],
+        )
+
+    def test_session_lease_api_expires_and_enforces_active_session_ownership(self) -> None:
+        events = EventStore(max_context_events=50)
+        registry = CallRegistry()
+        session = FakeSession("call-1")
+        registry.add(session)
+        app = create_app(
+            events,
+            registry,
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+        )
+        client = TestClient(app)
+
+        expired = client.post("/scaling/session-leases/expire")
+        enforced = client.post(
+            "/scaling/session-leases/enforce",
+            json={"owner": "worker-1", "stop_unleased_sessions": True, "recover_non_media_work": True},
+        )
+
+        self.assertEqual(expired.status_code, 200)
+        self.assertEqual(expired.json()["expired"], [])
+        self.assertEqual(enforced.status_code, 200)
+        self.assertTrue(session.stopped)
+        self.assertEqual([event["type"] for event in enforced.json()["recovered"]], ["session_recovered"])
+        self.assertEqual([event["type"] for event in enforced.json()["interrupted"]], ["session_interrupted"])
+        event_types = [event.type for event in events.list_events(call_id="call-1")]
+        self.assertIn("session_lease_lost", event_types)
+        self.assertIn("session_interrupted", event_types)
 
 
 if __name__ == "__main__":

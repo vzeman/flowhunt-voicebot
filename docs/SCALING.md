@@ -142,6 +142,13 @@ On worker restart:
 - completed late subagent results are stored as late results, not spoken into
   closed calls
 
+Session ownership is represented by `/scaling/session-leases/*`. Lease records
+include workspace, voicebot, session, owner, expiry, and optional call/transport
+metadata. Local Docker can explicitly expire abandoned leases and enforce owner
+loss with `/scaling/session-leases/enforce`. Enforcement stops live media that
+cannot be safely recovered, emits `session_interrupted`, and emits
+`session_recovered` for non-media work that can continue on another worker.
+
 ## Media Nodes
 
 Media nodes should be disposable. They should announce presence through shared

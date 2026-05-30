@@ -80,6 +80,8 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("POST", "/scaling/session-leases/acquire", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Acquire active session lease."),
     ApiEndpointSpec("POST", "/scaling/session-leases/renew", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Renew active session lease."),
     ApiEndpointSpec("POST", "/scaling/session-leases/release", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Release active session lease."),
+    ApiEndpointSpec("POST", "/scaling/session-leases/expire", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Expire abandoned session leases and emit recovery events."),
+    ApiEndpointSpec("POST", "/scaling/session-leases/enforce", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Stop active media sessions that no longer have a valid owner lease."),
     ApiEndpointSpec("POST", "/scaling/backpressure/acquire", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Acquire workspace voicebot/provider capacity."),
     ApiEndpointSpec("POST", "/scaling/backpressure/release", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Release workspace voicebot/provider capacity."),
     ApiEndpointSpec("GET", "/scaling/queue", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Inspect local worker queue."),

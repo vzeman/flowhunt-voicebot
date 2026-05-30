@@ -783,6 +783,19 @@ class CallRegistry:
             self._calls.pop(call_id, None)
         self.state_store.end(call_id)
 
+    def stop(self, call_id: str) -> bool:
+        with self._lock:
+            session = self._calls.pop(call_id, None)
+        if session is None:
+            return False
+        stop = getattr(session, "stop", None)
+        if stop is not None:
+            stop()
+        else:
+            session.stop_event.set()
+        self.state_store.end(call_id)
+        return True
+
     def get(self, call_id: str) -> CallSession | None:
         with self._lock:
             return self._calls.get(call_id)

@@ -30,6 +30,7 @@ from .api_models import (
     PlaybackInterruptRequest,
     ScalingBackpressureRequest,
     ScalingWorkloadPlanRequest,
+    SessionLeaseEnforceRequest,
     SessionLeaseReleaseRequest,
     SessionLeaseRequest,
     SipTrunkRequest,
@@ -855,9 +856,14 @@ def create_app(
                 request.session_id,
                 request.owner,
                 request.ttl_seconds,
+                call_id=request.call_id,
+                transport=request.transport,
+                metadata=request.metadata,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
+        if lease is not None:
+            events.append(lease.call_id or lease.session_id, "session_lease_acquired", lease.as_dict())
         return {"acquired": lease is not None, "lease": lease.as_dict() if lease is not None else None}
 
     @app.post("/scaling/session-leases/renew")
@@ -869,9 +875,14 @@ def create_app(
                 request.session_id,
                 request.owner,
                 request.ttl_seconds,
+                call_id=request.call_id,
+                transport=request.transport,
+                metadata=request.metadata,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
+        if lease is not None:
+            events.append(lease.call_id or lease.session_id, "session_lease_renewed", lease.as_dict())
         return {"renewed": lease is not None, "lease": lease.as_dict() if lease is not None else None}
 
     @app.post("/scaling/session-leases/release")
@@ -882,7 +893,54 @@ def create_app(
             request.session_id,
             owner=request.owner,
         )
+        if lease is not None:
+            events.append(lease.call_id or lease.session_id, "session_lease_released", lease.as_dict())
         return {"released": lease is not None, "lease": lease.as_dict() if lease is not None else None}
+
+    @app.post("/scaling/session-leases/expire")
+    def scaling_session_lease_expire() -> dict[str, Any]:
+        expired = session_lease_store.expire()
+        for lease in expired:
+            events.append(lease.call_id or lease.session_id, "session_lease_expired", lease.as_dict())
+        return {"expired": [lease.as_dict() for lease in expired]}
+
+    @app.post("/scaling/session-leases/enforce")
+    def scaling_session_lease_enforce(request: SessionLeaseEnforceRequest) -> dict[str, Any]:
+        expired = session_lease_store.expire()
+        for lease in expired:
+            events.append(lease.call_id or lease.session_id, "session_lease_expired", lease.as_dict())
+        interrupted = []
+        recovered = []
+        for snapshot in registry.snapshots():
+            identity = session_identity_from_snapshot(snapshot)
+            if identity is None:
+                continue
+            lease = session_lease_store.get(identity["workspace_id"], identity["voicebot_id"], identity["session_id"])
+            if lease is not None and lease.owner == request.owner:
+                continue
+            loss_data = {
+                **identity,
+                "expected_owner": request.owner,
+                "current_owner": lease.owner if lease is not None else None,
+                "reason": "lease_owner_mismatch" if lease is not None else "lease_missing",
+            }
+            events.append(identity["call_id"], "session_lease_lost", loss_data)
+            if request.recover_non_media_work:
+                recovered_event = events.append(
+                    identity["call_id"],
+                    "session_recovered",
+                    {**loss_data, "recovered_work": ["subagent_polling", "transcript_storage", "late_task_results"]},
+                )
+                recovered.append(event_to_dict(recovered_event))
+            if request.stop_unleased_sessions:
+                stopped = registry.stop(identity["call_id"])
+                interrupted_event = events.append(identity["call_id"], "session_interrupted", {**loss_data, "stopped": stopped})
+                interrupted.append(event_to_dict(interrupted_event))
+        return {
+            "expired": [lease.as_dict() for lease in expired],
+            "recovered": recovered,
+            "interrupted": interrupted,
+        }
 
     @app.post("/scaling/backpressure/acquire")
     def scaling_backpressure_acquire(request: ScalingBackpressureRequest) -> dict[str, Any]:
@@ -988,6 +1046,28 @@ def create_app(
             provider=request.provider,
         )
         return routing.provider_key() if request.provider else routing.partition_key()
+
+    def session_identity_from_snapshot(snapshot: dict[str, Any]) -> dict[str, str] | None:
+        route = snapshot.get("route") if isinstance(snapshot.get("route"), dict) else {}
+        workspace_id = non_empty_str(route.get("workspace_id") or snapshot.get("workspace_id"))
+        voicebot_id = non_empty_str(route.get("voicebot_id") or snapshot.get("voicebot_id"))
+        call_id = non_empty_str(snapshot.get("call_id"))
+        if workspace_id is None or voicebot_id is None or call_id is None:
+            return None
+        session_id = non_empty_str(snapshot.get("session_id")) or call_id
+        return {
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "session_id": session_id,
+            "call_id": call_id,
+            "transport": str(snapshot.get("transport") or ""),
+        }
+
+    def non_empty_str(value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
     @app.get("/config")
     def config() -> dict[str, Any]:

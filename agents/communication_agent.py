@@ -121,19 +121,30 @@ def run_communication_agent(
                         answer = provider_failure_answer(exc)
                         print(f"provider follow-up failed for event {latest['id']}: {exc}", flush=True)
                 if answer:
-                    execute_conversational_tool_calls(config.base_url, [answer_as_say_call(answer, latest)])
-                elif tool_results and needs_spoken_followup(tool_calls):
-                    execute_tool_call(
-                        config.base_url,
-                        {
-                            "name": "say",
-                            "arguments": {
-                                "call_id": latest["call_id"],
-                                "text": "I asked a FlowHunt colleague to check that and I am waiting for the result.",
-                                "response_to_event_id": latest["id"],
-                            },
-                        },
+                    tool_results.extend(
+                        execute_conversational_tool_calls(config.base_url, [answer_as_say_call(answer, latest)])
                     )
+                elif tool_results and needs_spoken_followup(tool_calls):
+                    tool_results.extend(
+                        execute_conversational_tool_calls(
+                            config.base_url,
+                            [
+                                {
+                                    "name": "say",
+                                    "arguments": {
+                                        "call_id": latest["call_id"],
+                                        "text": "I asked a FlowHunt colleague to check that and I am waiting for the result.",
+                                        "response_to_event_id": latest["id"],
+                                    },
+                                }
+                            ],
+                        )
+                    )
+                if has_http_failed_say(tool_results):
+                    release_tasks(config.base_url, pending, owner)
+                    claimed_pending = []
+                    print(f"released {len(pending)} pending event(s) after failed speech delivery", flush=True)
+                    continue
             for task in pending:
                 seen.add(task["id"])
             claimed_pending = []
@@ -187,7 +198,9 @@ def run_provider_with_retry(
             config.max_output_tokens,
             native_tools,
         )
-    except Exception:
+    except Exception as exc:
+        if is_realtime_terminal_provider_error(exc):
+            raise
         time.sleep(min(0.5, max(config.interval, 0.05)))
         return providers.run(
             client,
@@ -200,6 +213,15 @@ def run_provider_with_retry(
         )
 
 
+def is_realtime_terminal_provider_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "error code: 500" in text or "server_error" in text
+
+
 def provider_failure_answer(exc: Exception) -> str:
     _ = exc
     return "I had a temporary AI error. Please repeat that once more."
+
+
+def has_http_failed_say(results: list[dict]) -> bool:
+    return any(result.get("name") == "say" and not result.get("ok") for result in results)

@@ -134,6 +134,18 @@ class ApiWebRTCTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_webrtc_test_page_closes_on_backend_hangup_event(self) -> None:
+        client, _manager = self.build_client(FakeWebRTCManager())
+
+        response = client.get("/webrtc/test")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.text
+        self.assertIn("/ws/events", html)
+        self.assertIn('event.type === "call_control_completed"', html)
+        self.assertIn('event.data?.action === "hangup"', html)
+        self.assertIn("closeLocalPeer();", html)
+
     def test_webrtc_manager_persists_routed_session_lifecycle(self) -> None:
         events = EventStore(max_context_events=20)
         store = VoicebotSessionStore()

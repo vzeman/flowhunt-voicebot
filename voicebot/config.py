@@ -86,6 +86,8 @@ class Settings:
     max_seconds: float = env_float("VOICEBOT_MAX_SECONDS", 20.0)
     max_reply_chars: int = env_int("VOICEBOT_MAX_REPLY_CHARS", 240)
     tts_chunk_chars: int = env_int("VOICEBOT_TTS_CHUNK_CHARS", 90)
+    turn_coalesce_window_ms: int = env_int("VOICEBOT_TURN_COALESCE_WINDOW_MS", 250)
+    turn_coalesce_max_chars: int = env_int("VOICEBOT_TURN_COALESCE_MAX_CHARS", 80)
     deferred_response_wait_seconds: float = env_float("VOICEBOT_DEFERRED_RESPONSE_WAIT_SECONDS", 30.0)
     packet_ms: int = env_int("VOICEBOT_PACKET_MS", 20)
     webrtc_jitter_buffer_enabled: bool = env_bool("VOICEBOT_WEBRTC_JITTER_BUFFER_ENABLED", True)

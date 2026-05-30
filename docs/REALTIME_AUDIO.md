@@ -105,6 +105,27 @@ chunk is available. Autoscaling and diagnostics also recognize
 `end_of_speech_to_playback_started_seconds` when emitted by a transport or
 worker, so STT, agent, TTS, and playback delay can be separated.
 
+## Short Turn Coalescing
+
+Short adjacent final transcripts are preserved as separate raw
+`user_transcript` events, but the runtime can briefly delay the
+`agent_response_requested` event for short turns so a follow-up fragment can be
+merged into one agent request. This helps when VAD splits one intent into two
+small utterances, for example a short question followed immediately by a domain
+name or qualifier.
+
+Configuration:
+
+- `VOICEBOT_TURN_COALESCE_WINDOW_MS=250`
+- `VOICEBOT_TURN_COALESCE_MAX_CHARS=80`
+
+Only non-stale transcripts at or below the character limit are delayed. If the
+bot is already playing audio, the runtime does not delay or merge the new turn;
+the caller turn is sent to the agent immediately so barge-in and stale-response
+handling keep their current behavior. When two turns are merged, the service
+emits `turn_coalesced` with both transcript event ids and sends one
+`agent_response_requested` containing the merged customer text.
+
 Communication-agent provider failures are treated as realtime failures, not
 background job failures. The agent retries a transient provider failure once
 inside the same live voice turn, including OpenAI-compatible `server_error` and

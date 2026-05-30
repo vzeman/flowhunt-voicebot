@@ -60,6 +60,7 @@ EVENT_CATALOG: tuple[EventCatalogEntry, ...] = (
     EventCatalogEntry("session_lease_lost", "session_ownership", "Runtime detected that a live media session no longer has a valid owner lease."),
     EventCatalogEntry("session_recovered", "session_ownership", "Non-media session work was recovered after owner loss or restart."),
     EventCatalogEntry("session_interrupted", "session_ownership", "Live media was interrupted because active session ownership could not be recovered."),
+    EventCatalogEntry("session_admission_decided", "routing", "Runtime accepted, rejected, queued, or fallback-routed an incoming session."),
     EventCatalogEntry("subagent_task_requested", "agent_team", "Delegated subagent task was requested."),
     EventCatalogEntry("subagent_task_deduplicated", "agent_team", "Delegated subagent task reused an existing task."),
     EventCatalogEntry("subagent_task_updated", "agent_team", "Delegated subagent task changed state or progress."),

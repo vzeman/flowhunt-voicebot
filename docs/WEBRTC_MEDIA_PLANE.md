@@ -26,6 +26,11 @@ The API should check workspace/voicebot capacity before allocating an
 or redirected before browser media resources and model/provider resources are
 reserved.
 
+`POST /routing/admission` implements the routed preflight for WebRTC widgets.
+When capacity is unavailable, the fallback contract is a structured HTTP error
+before SDP answer, so the browser can show a user-friendly unavailable state
+without creating a peer connection.
+
 ## ICE And Secrets
 
 STUN can be environment configured for local and staging use. TURN is required

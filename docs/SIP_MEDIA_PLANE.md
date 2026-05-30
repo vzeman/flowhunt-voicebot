@@ -55,6 +55,11 @@ trunks. Existing calls may finish if the pod remains alive long enough. New
 calls route to another ready media worker or to the configured overflow/reject
 policy.
 
+`POST /routing/admission` implements the routed preflight for SIP trunks. When
+capacity is unavailable, the fallback contract includes busy/unavailable SIP
+responses and optional transfer to a configured fallback extension or human
+queue.
+
 ## Call Control
 
 Call control actions such as hangup, transfer, DTMF, and playback interruption

@@ -26,6 +26,7 @@ from .api_models import (
     CallControlRequest,
     CompactContextRequest,
     ConversationEvaluationRequest,
+    IncomingSessionAdmissionRequest,
     MultimodalContentRequest,
     PlaybackInterruptRequest,
     ScalingAdmissionRequest,
@@ -119,6 +120,7 @@ from .runtime_config import (
     VoicebotSubagentConfig,
     runtime_config_to_dict,
 )
+from .routing_admission import IncomingSessionRequest, evaluate_incoming_session
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
 from .tool_executor import AgentToolExecutor
@@ -128,7 +130,7 @@ from .tools import tool_definitions_json_schema, tool_definitions_legacy
 from .webrtc import WebRTCSessionManager
 from .webrtc_media_plane import webrtc_media_plane_payload
 from .workspace_access import WorkspaceAccessPolicy, workspace_access_policy_from_settings
-from .workspace_model import ChannelResolver, VoicebotChannelBinding, VoicebotDefinition, VoicebotSessionStore, VoicebotStore
+from .workspace_model import ChannelKind, ChannelResolver, VoicebotChannelBinding, VoicebotDefinition, VoicebotSessionStore, VoicebotStore
 
 _MODALITIES = set(get_args(Modality))
 _CONTENT_DIRECTIONS = set(get_args(ContentDirection))
@@ -854,6 +856,57 @@ def create_app(
                 },
             )
         return decision
+
+    @app.post("/routing/admission")
+    def routing_admission(request: IncomingSessionAdmissionRequest) -> dict[str, Any]:
+        try:
+            admission_request = IncomingSessionRequest(
+                channel_kind=validated_channel_kind(request.channel_kind),
+                external_id=request.external_id,
+                session_id=request.session_id,
+                owner=request.owner,
+                transport=request.transport,
+                call_id=request.call_id,
+                acquire_lease=request.acquire_lease,
+                lease_ttl_seconds=request.lease_ttl_seconds,
+                max_concurrent_sessions=request.max_concurrent_sessions,
+                burst_sessions=request.burst_sessions,
+            )
+            decision = evaluate_incoming_session(
+                admission_request,
+                channel_resolver=channel_resolver,
+                voicebot_store=voicebot_store,
+                provider_config_store=provider_config_store,
+                runtime_config_store=runtime_config_store,
+                workspace_access_policy=workspace_access_policy,
+                session_lease_store=session_lease_store,
+                active_session_snapshots=registry.snapshots(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        event = events.append(
+            decision.get("call_id") or decision.get("session_id") or request.external_id,
+            "session_admission_decided",
+            {
+                key: value
+                for key, value in decision.items()
+                if key not in {"lease"}
+            },
+        )
+        if not decision["allowed"]:
+            events.append(
+                decision.get("workspace_id") or request.external_id,
+                "metrics",
+                {
+                    "name": "capacity_rejection",
+                    "value": 1.0,
+                    "reason": decision["reason"],
+                    "workspace_id": decision.get("workspace_id"),
+                    "voicebot_id": decision.get("voicebot_id"),
+                    "transport": request.transport,
+                },
+            )
+        return {"event_id": event.id, **decision}
 
     @app.post("/scaling/workers/heartbeat")
     def scaling_worker_heartbeat(request: WorkerHeartbeatRequest) -> dict[str, Any]:
@@ -2534,6 +2587,12 @@ def validated_worker_status(value: str):
     if value not in {"active", "draining"}:
         raise ValueError(f"unsupported worker status: {value}")
     return value
+
+
+def validated_channel_kind(value: str) -> ChannelKind:
+    if value not in get_args(ChannelKind):
+        raise ValueError(f"unsupported channel kind: {value}")
+    return value  # type: ignore[return-value]
 
 
 def optional_int_arg(args: dict[str, Any], name: str, default: int) -> int:

@@ -1466,6 +1466,44 @@ expensive media and provider resources.
 
 The response returns `decision=accept`, `queue_or_overflow`, or `reject`.
 
+### POST `/routing/admission`
+
+Resolves an incoming SIP/WebRTC channel to a workspace voicebot and performs
+the full routed admission preflight before expensive media/provider resources
+are allocated.
+
+The runtime checks:
+
+- channel or trunk/widget route
+- workspace access
+- voicebot enabled state
+- provider or runtime config availability
+- workspace/voicebot capacity
+- optional session lease acquisition
+
+Request:
+
+```json
+{
+  "channel_kind": "webrtc_widget",
+  "external_id": "widget-1",
+  "session_id": "session-1",
+  "owner": "voicebot-pod-1",
+  "transport": "webrtc",
+  "call_id": "call-1",
+  "acquire_lease": true,
+  "lease_ttl_seconds": 30,
+  "max_concurrent_sessions": 100,
+  "burst_sessions": 20
+}
+```
+
+Accepted sessions return `allowed=true`, route scope, capacity details, and the
+lease when acquired. Rejected sessions return a deterministic reason and a
+transport-specific fallback description. SIP fallbacks include busy/unavailable
+or transfer options; WebRTC fallbacks use a structured HTTP error before SDP
+answer.
+
 ### POST `/scaling/workers/heartbeat`
 
 Records or refreshes a worker presence record.

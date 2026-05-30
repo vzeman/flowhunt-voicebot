@@ -2928,6 +2928,10 @@ def create_app(
     ) -> None:
         if registry.get(call_id) is None:
             return
+        if reason in {"colleague_result", "colleague_progress"} and "session_language" not in data:
+            session_language = session_language_for_call(call_id)
+            if session_language:
+                data["session_language"] = session_language
         requested = events.append(
             call_id,
             "agent_response_requested",

@@ -69,6 +69,18 @@ class DrainRequest(BaseModel):
     interrupt_active_sessions: bool = False
 
 
+class SecurityAuditRequest(BaseModel):
+    action: str
+    actor: str = "api"
+    voicebot_id: str | None = None
+    session_id: str | None = None
+    call_id: str | None = None
+    resource_type: str = ""
+    resource_id: str | None = None
+    outcome: str = "requested"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ScalingBackpressureRequest(BaseModel):
     workspace_id: str
     voicebot_id: str

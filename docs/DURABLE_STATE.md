@@ -38,6 +38,13 @@ Every production implementation must preserve the same public semantics as the
 local provider: workspace-scoped reads, idempotent retries where expected,
 diagnostics for skipped/recovered rows, and no raw secrets in API responses.
 
+Retention and deletion policy is exposed separately by
+`GET /workspaces/{workspace_id}/security/retention`. The policy defines
+workspace-scoped deletion hooks for events, transcripts, recordings/debug
+audio, cached TTS audio, and delegated task state. Local JSON/filesystem stores
+only expose the contract; FlowHunt production storage must implement these hooks
+against database rows, object storage metadata, and cache indexes.
+
 ## Event Log
 
 `JsonEventStore` persists every event as JSONL and reloads it on startup. It

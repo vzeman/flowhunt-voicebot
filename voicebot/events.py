@@ -43,6 +43,7 @@ EventType = Literal[
     "flowhunt_flow_completed",
     "provider_call_failed",
     "runtime_config_updated",
+    "security_audit",
     "runtime_draining_started",
     "runtime_draining_stopped",
     "session_lease_acquired",

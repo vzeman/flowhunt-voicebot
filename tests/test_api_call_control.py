@@ -133,6 +133,15 @@ class ApiCallControlTests(unittest.TestCase):
         )
         return TestClient(app), events, tracker
 
+    def assert_call_control_event_sequence(self, persisted, action: str):
+        self.assertEqual(
+            [event.type for event in persisted],
+            ["call_control_requested", "security_audit", "call_control_completed"],
+        )
+        self.assertEqual(persisted[1].data["action"], f"call_control.{action}")
+        self.assertEqual(persisted[1].data["resource_type"], "call")
+        self.assertEqual(persisted[1].data["resource_id"], "call-1")
+
     def test_call_control_records_failure_when_ami_is_not_configured(self) -> None:
         client, events, tracker = self.build_client(asterisk=None)
 
@@ -144,9 +153,9 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertIn(42, tracker.responded_event_ids)
         persisted = events.list_events(call_id="call-1")
-        self.assertEqual([event.type for event in persisted], ["call_control_requested", "call_control_completed"])
-        self.assertFalse(persisted[1].data["ok"])
-        self.assertEqual(persisted[1].data["message"], "Asterisk AMI control is not configured")
+        self.assert_call_control_event_sequence(persisted, "hangup")
+        self.assertFalse(persisted[2].data["ok"])
+        self.assertEqual(persisted[2].data["message"], "Asterisk AMI control is not configured")
 
     def test_call_control_records_failure_when_transfer_target_is_missing(self) -> None:
         client, events, tracker = self.build_client(asterisk=FakeAsterisk())
@@ -159,9 +168,9 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn(43, tracker.responded_event_ids)
         persisted = events.list_events(call_id="call-1")
-        self.assertEqual([event.type for event in persisted], ["call_control_requested", "call_control_completed"])
-        self.assertFalse(persisted[1].data["ok"])
-        self.assertEqual(persisted[1].data["message"], "transfer requires target")
+        self.assert_call_control_event_sequence(persisted, "transfer")
+        self.assertFalse(persisted[2].data["ok"])
+        self.assertEqual(persisted[2].data["message"], "transfer requires target")
 
     def test_call_control_records_successful_result(self) -> None:
         client, events, tracker = self.build_client(asterisk=FakeAsterisk())
@@ -174,9 +183,9 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(44, tracker.responded_event_ids)
         persisted = events.list_events(call_id="call-1")
-        self.assertEqual([event.type for event in persisted], ["call_control_requested", "call_control_completed"])
-        self.assertTrue(persisted[1].data["ok"])
-        self.assertEqual(persisted[1].data["message"], "transferred call-1 to 123")
+        self.assert_call_control_event_sequence(persisted, "transfer")
+        self.assertTrue(persisted[2].data["ok"])
+        self.assertEqual(persisted[2].data["message"], "transferred call-1 to 123")
 
     def test_call_control_records_ami_exception_as_failed_result(self) -> None:
         client, events, tracker = self.build_client(asterisk=BrokenAsterisk())
@@ -189,9 +198,9 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(49, tracker.responded_event_ids)
         persisted = events.list_events(call_id="call-1")
-        self.assertEqual([event.type for event in persisted], ["call_control_requested", "call_control_completed"])
-        self.assertFalse(persisted[1].data["ok"])
-        self.assertIn("Asterisk AMI request failed", persisted[1].data["message"])
+        self.assert_call_control_event_sequence(persisted, "hangup")
+        self.assertFalse(persisted[2].data["ok"])
+        self.assertIn("Asterisk AMI request failed", persisted[2].data["message"])
 
     def test_webrtc_hangup_closes_webrtc_session(self) -> None:
         registry = CallRegistry()
@@ -222,7 +231,9 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "transfer target must not contain control characters")
         self.assertNotIn(48, tracker.responded_event_ids)
-        self.assertEqual([event.type for event in events.list_events(call_id="call-1")], ["call_control_requested"])
+        persisted = events.list_events(call_id="call-1")
+        self.assertEqual([event.type for event in persisted], ["call_control_requested", "security_audit"])
+        self.assertEqual(persisted[1].data["action"], "call_control.transfer")
 
     def test_call_control_records_send_dtmf_result(self) -> None:
         client, events, tracker = self.build_client(asterisk=FakeAsterisk())
@@ -235,9 +246,9 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(45, tracker.responded_event_ids)
         persisted = events.list_events(call_id="call-1")
-        self.assertEqual([event.type for event in persisted], ["call_control_requested", "call_control_completed"])
-        self.assertTrue(persisted[1].data["ok"])
-        self.assertEqual(persisted[1].data["message"], "sent DTMF 1 to call-1")
+        self.assert_call_control_event_sequence(persisted, "send_dtmf")
+        self.assertTrue(persisted[2].data["ok"])
+        self.assertEqual(persisted[2].data["message"], "sent DTMF 1 to call-1")
 
     def test_send_dtmf_tool_requires_digit(self) -> None:
         client, events, tracker = self.build_client(asterisk=FakeAsterisk())
@@ -262,7 +273,9 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "digit must be one DTMF character: 0-9, *, #, A-D")
         self.assertNotIn(47, tracker.responded_event_ids)
-        self.assertEqual([event.type for event in events.list_events(call_id="call-1")], ["call_control_requested"])
+        persisted = events.list_events(call_id="call-1")
+        self.assertEqual([event.type for event in persisted], ["call_control_requested", "security_audit"])
+        self.assertEqual(persisted[1].data["action"], "call_control.send_dtmf")
 
     def test_send_dtmf_normalizes_letter_digit(self) -> None:
         client, events, _tracker = self.build_client(asterisk=FakeAsterisk())

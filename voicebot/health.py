@@ -9,10 +9,13 @@ from .asterisk_control import AsteriskAMI
 from .event_catalog import event_catalog_integrity_issues, missing_catalog_event_types
 from .pipeline_contract import pipeline_contract_issues, pipeline_contract_payload
 from .provider_catalog import provider_catalog
+from .config import Settings
+from .security_contract import security_contract_issues, security_contract_payload
 from .sip_media_plane import sip_media_plane_issues, sip_media_plane_payload
 from .storage_contracts import storage_contract_issues, storage_contracts_payload
 from .webrtc_media_plane import webrtc_media_plane_issues, webrtc_media_plane_payload
 from .transcripts import TranscriptStore
+from .workspace_access import WorkspaceAccessPolicy, workspace_access_policy_from_settings
 
 
 @dataclass(frozen=True)
@@ -36,7 +39,11 @@ def readiness_report(
     active_call_ids: list[str],
     storage_components: dict[str, Any] | None = None,
     drain_state: dict[str, Any] | None = None,
+    settings: Settings | None = None,
+    workspace_policy: WorkspaceAccessPolicy | None = None,
 ) -> dict[str, Any]:
+    runtime_settings = settings or Settings()
+    access_policy = workspace_policy or workspace_access_policy_from_settings(runtime_settings)
     checks = {
         "transcripts": transcript_store_check(transcripts).to_dict(),
         "ami": ami_configuration_check(asterisk).to_dict(),
@@ -46,6 +53,7 @@ def readiness_report(
         "sip_media_plane": sip_media_plane_check().to_dict(),
         "webrtc_media_plane": webrtc_media_plane_check().to_dict(),
         "storage_contracts": storage_contract_check().to_dict(),
+        "security_contract": security_contract_check(runtime_settings, access_policy).to_dict(),
         "drain": drain_check(drain_state).to_dict(),
     }
     if storage_components is not None:
@@ -118,6 +126,18 @@ def storage_contract_check() -> HealthCheck:
     return HealthCheck(
         not issues,
         "storage contracts are valid" if not issues else "storage contracts have integrity issues",
+        {"issue_count": len(issues), "issues": issues, **payload},
+    )
+
+
+def security_contract_check(settings: Settings | None = None, workspace_policy: WorkspaceAccessPolicy | None = None) -> HealthCheck:
+    runtime_settings = settings or Settings()
+    access_policy = workspace_policy or workspace_access_policy_from_settings(runtime_settings)
+    issues = security_contract_issues(runtime_settings, access_policy)
+    payload = security_contract_payload(runtime_settings, access_policy)
+    return HealthCheck(
+        not issues,
+        "security contract is valid" if not issues else "security contract has enforcement issues",
         {"issue_count": len(issues), "issues": issues, **payload},
     )
 

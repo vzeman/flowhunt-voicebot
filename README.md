@@ -74,6 +74,8 @@ The FlowHunt product API surface is documented in
 [docs/FLOWHUNT_API_SURFACE.md](docs/FLOWHUNT_API_SURFACE.md).
 Workspace-based multitenancy and channel resolution are documented in
 [docs/WORKSPACE_MODEL.md](docs/WORKSPACE_MODEL.md).
+Security isolation, audit, secret redaction, and retention contracts are
+documented in [docs/SECURITY_AND_RETENTION.md](docs/SECURITY_AND_RETENTION.md).
 
 ## Architecture Schema
 

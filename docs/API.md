@@ -172,6 +172,62 @@ Response:
 }
 ```
 
+### GET `/security/contract`
+
+Returns the active workspace-isolation, audit, secret-redaction, retention, and
+network-policy contract. This is an internal diagnostic endpoint.
+
+Response:
+
+```json
+{
+  "contract": {
+    "mode": "local_permissive",
+    "workspace_access": {
+      "enabled": false,
+      "mandatory_outside_local": true,
+      "production_ready": true
+    },
+    "secret_handling": {
+      "raw_secret_api_responses": false
+    },
+    "audit": {
+      "event_type": "security_audit"
+    }
+  },
+  "issues": []
+}
+```
+
+### GET `/workspaces/{workspace_id}/security/retention`
+
+Returns retention classes and deletion hooks for events, transcripts,
+recordings, cached TTS audio, and delegated task state. Workspace access is
+checked before returning the policy.
+
+### POST `/workspaces/{workspace_id}/security/audit`
+
+Emits a redacted `security_audit` event for a workspace-scoped sensitive action.
+
+Request:
+
+```json
+{
+  "action": "provider_config_change",
+  "actor": "flowhunt-api",
+  "voicebot_id": "voicebot-1",
+  "resource_type": "provider_config",
+  "resource_id": "voicebot-1",
+  "outcome": "saved",
+  "metadata": {
+    "api_key": "never returned raw"
+  }
+}
+```
+
+Response contains the emitted event. Sensitive metadata fields are returned as
+redacted `{ "configured": true, "redacted": true }` objects.
+
 ### GET `/providers`
 
 Returns supported provider names for STT, TTS, and agent integrations.

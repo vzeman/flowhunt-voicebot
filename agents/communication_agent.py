@@ -20,6 +20,7 @@ from local_command_agent import (
     execute_conversational_tool_calls,
     execute_tool_call,
     fast_tool_calls,
+    filter_grounded_call_control_tools,
     filter_voice_agent_tools,
     http_json,
     is_echo_answer,
@@ -103,6 +104,11 @@ def run_communication_agent(
                     delayed_ack.stop()
 
                 tool_calls = attach_task_context(tool_calls, latest)
+                tool_calls = filter_grounded_call_control_tools(
+                    tool_calls,
+                    latest,
+                    lambda task, call: validate_call_control_tool(client, providers, config, task, call),
+                )
                 if delayed_ack.delivered:
                     tool_calls = suppress_colleague_tool_progress(tool_calls)
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
@@ -220,6 +226,30 @@ def run_provider_with_retry(
             config.max_output_tokens,
             native_tools,
         )
+
+
+def validate_call_control_tool(
+    client: Any,
+    providers: AgentProviderRegistry,
+    config: CommunicationAgentConfig,
+    task: dict,
+    tool_call: dict,
+) -> bool:
+    from local_command_agent import call_control_validation_prompt, parse_call_control_validation
+
+    prompt = call_control_validation_prompt(task, tool_call)
+    try:
+        raw_answer, _tool_calls = run_provider_with_retry(client, providers, config, prompt, None)
+    except Exception as exc:
+        print(f"call-control validation failed for event {task['id']}: {exc}", flush=True)
+        return False
+    allowed = parse_call_control_validation(raw_answer)
+    if not allowed:
+        print(
+            f"dropped ungrounded call-control tool {tool_call.get('name')} for event {task['id']}",
+            flush=True,
+        )
+    return allowed
 
 
 def provider_failure_answer(exc: Exception) -> str:

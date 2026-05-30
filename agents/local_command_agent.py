@@ -177,6 +177,11 @@ Pending user messages:
 Available tools:
 {json.dumps(tools, ensure_ascii=False, indent=2)}
 
+If you say that you will check, look up, verify, ask a colleague, investigate,
+or work on something that needs external tools, you must include the matching
+tool call in the same JSON response. A progress-only spoken answer without the
+tool call is invalid because no work will be started.
+
 Return either plain text to speak, or JSON in this form:
 {json.dumps(output_format, ensure_ascii=False, indent=2)}
 """
@@ -654,6 +659,7 @@ def fast_tool_calls(task: dict) -> list[dict]:
                 "call_id": call_id,
                 "text": answer,
                 "response_to_event_id": event_id,
+                "response_kind": "colleague_result",
             },
         }]
 

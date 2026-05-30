@@ -11,6 +11,9 @@ from communication_agent import (
     CommunicationAgentConfig,
     DelayedProgressAcknowledgement,
     has_colleague_tool_call,
+    parse_colleague_tool_recovery,
+    preferred_colleague_tool_name,
+    recover_missing_colleague_tool_call,
     should_send_delayed_acknowledgement,
     suppress_colleague_tool_progress,
     has_http_failed_say,
@@ -121,6 +124,45 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
     def test_colleague_tool_call_is_detected(self) -> None:
         self.assertTrue(has_colleague_tool_call([{"name": "delegate_to_subagent", "arguments": {}}]))
         self.assertFalse(has_colleague_tool_call([{"name": "say", "arguments": {}}]))
+
+    def test_preferred_colleague_recovery_tool_uses_flow_invoke(self) -> None:
+        self.assertEqual(
+            preferred_colleague_tool_name(
+                [
+                    {"name": "create_flowhunt_project_issue"},
+                    {"name": "invoke_flowhunt_flow"},
+                ]
+            ),
+            "invoke_flowhunt_flow",
+        )
+
+    def test_colleague_tool_recovery_parser_accepts_wrapped_json(self) -> None:
+        parsed = parse_colleague_tool_recovery('Sure:\n{"delegate": true, "message": "Check status"}')
+
+        self.assertEqual(parsed["message"], "Check status")
+
+    def test_missing_colleague_tool_recovery_creates_flow_tool_call(self) -> None:
+        def provider(client, model, prompt, timeout, max_output_tokens, tools):
+            self.assertIn("When was the last incident?", prompt)
+            return '{"delegate": true, "message": "Check the LiveAgent status archive for the latest incident."}', []
+
+        registry = AgentProviderRegistry()
+        registry.register("test", provider)
+
+        calls = recover_missing_colleague_tool_call(
+            object(),
+            registry,
+            self.make_config(),
+            {"id": 42, "call_id": "call-1", "data": {"text": "When was the last incident?"}},
+            {"summary": "The caller is asking about LiveAgent status incidents.", "events": []},
+            "I'll check the latest incident status for you.",
+            [{"name": "invoke_flowhunt_flow"}],
+        )
+
+        self.assertEqual(calls[0]["name"], "invoke_flowhunt_flow")
+        self.assertEqual(calls[0]["arguments"]["call_id"], "call-1")
+        self.assertEqual(calls[0]["arguments"]["response_to_event_id"], 42)
+        self.assertIn("LiveAgent status archive", calls[0]["arguments"]["message"])
 
 
 if __name__ == "__main__":

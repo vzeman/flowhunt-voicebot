@@ -158,6 +158,12 @@ If a caller asks for historical information that was not answered by a recent
 window result, such as the last downtime after a "no incidents in 90 days"
 answer, the communication agent should re-delegate with an explicit archive or
 history request instead of treating the limited result as complete.
+The communication agent also runs a model-based recovery check when a draft
+spoken answer promises checking or colleague work but contains no tool call. If
+that check says the request still needs external work, the agent creates the
+FlowHunt/subagent tool call for the current event before marking it answered.
+This avoids language-specific keyword routing while preventing "I will check"
+responses that do not actually start delegated work.
 
 Late STT results are delivered to the communication agent as
 `reason=stale_transcript` rather than being filtered by language-specific

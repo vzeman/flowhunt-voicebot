@@ -115,15 +115,18 @@ class Settings:
     allowed_workspace_ids: tuple[str, ...] = env_csv_tuple("VOICEBOT_ALLOWED_WORKSPACE_IDS")
     pii_safe_logging_enabled: bool = env_bool("VOICEBOT_PII_SAFE_LOGGING_ENABLED", True)
     transcript_dir: str = os.getenv("VOICEBOT_TRANSCRIPT_DIR", "/data/transcripts")
+    transcript_store_provider: str = os.getenv("VOICEBOT_TRANSCRIPT_STORE_PROVIDER", "jsonl").strip().lower()
     voicebot_session_store_provider: str = os.getenv("VOICEBOT_SESSION_STORE_PROVIDER", "json").strip().lower()
     voicebot_session_store_path: str = os.getenv("VOICEBOT_SESSION_STORE_PATH", "/data/voicebot_sessions.json")
     session_lease_store_provider: str = os.getenv("VOICEBOT_SESSION_LEASE_STORE_PROVIDER", "json").strip().lower()
     session_lease_store_path: str = os.getenv("VOICEBOT_SESSION_LEASE_STORE_PATH", "/data/session_leases.json")
+    sip_trunk_store_provider: str = os.getenv("VOICEBOT_SIP_TRUNK_STORE_PROVIDER", "json").strip().lower()
     sip_trunk_registry_path: str = os.getenv("VOICEBOT_SIP_TRUNK_REGISTRY_PATH", "/data/sip_trunks.json")
     sip_trunk_pjsip_include_path: str = os.getenv(
         "VOICEBOT_SIP_TRUNK_PJSIP_INCLUDE_PATH",
         "/data/asterisk/pjsip-trunks.conf",
     )
+    audio_artifact_store_provider: str = os.getenv("VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER", "filesystem").strip().lower()
     greet_on_connect: bool = env_bool("VOICEBOT_GREET_ON_CONNECT", True)
     connect_greeting_prompt: str = os.getenv(
         "VOICEBOT_CONNECT_GREETING_PROMPT",
@@ -148,6 +151,7 @@ class Settings:
     flowhunt_issue_background_wait_seconds: float = env_float("VOICEBOT_FLOWHUNT_ISSUE_BACKGROUND_WAIT_SECONDS", 600.0)
     flowhunt_flow_wait_seconds: float = env_float("VOICEBOT_FLOWHUNT_FLOW_WAIT_SECONDS", 0.0)
     flowhunt_flow_poll_interval_seconds: float = env_float("VOICEBOT_FLOWHUNT_FLOW_POLL_INTERVAL_SECONDS", 3.0)
+    subagent_task_store_provider: str = os.getenv("VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER", "json").strip().lower()
     subagent_task_store_path: str = os.getenv("VOICEBOT_SUBAGENT_TASK_STORE_PATH", "/data/subagent_tasks.json")
     subagent_task_poll_loop_seconds: float = env_float("VOICEBOT_SUBAGENT_TASK_POLL_LOOP_SECONDS", 1.0)
     subagent_task_initial_poll_seconds: float = env_float("VOICEBOT_SUBAGENT_TASK_INITIAL_POLL_SECONDS", 3.0)

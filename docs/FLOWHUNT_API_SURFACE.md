@@ -89,6 +89,15 @@ and audit endpoints are workspace-scoped and pass through the access policy.
 Audit payloads are recursively redacted before being stored as `security_audit`
 events.
 
+## Storage APIs
+
+- `GET /storage/contracts`
+- `GET /storage/drivers`
+
+`/storage/contracts` returns the stable storage-family contract catalog.
+`/storage/drivers` returns the registered driver catalog and the selected
+driver/path for each storage family in the current runtime environment.
+
 ## Transport APIs
 
 - `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/transports`

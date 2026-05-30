@@ -17,21 +17,22 @@ from .runtime_storage import (
     build_agent_task_tracker,
     build_call_state_store,
     build_event_store,
+    build_sip_trunk_store,
     build_session_lease_store,
+    build_subagent_task_store,
+    build_transcript_store,
     build_worker_registry,
     build_voicebot_session_store,
     build_worker_queue_store,
 )
-from .sip_trunks import SipTrunkStore
-from .subagents import FlowHuntSubagentProvider, JsonSubagentTaskStore, SubagentCoordinator
-from .transcripts import TranscriptStore
+from .subagents import FlowHuntSubagentProvider, SubagentCoordinator
 from .webrtc import WebRTCSessionManager
 
 
 def main() -> None:
     settings = Settings()
     hub = WebSocketHub()
-    transcripts = TranscriptStore(settings.transcript_dir)
+    transcripts = build_transcript_store(settings)
     events = build_event_store(settings, transcripts)
     voicebot_sessions = build_voicebot_session_store(settings)
     session_leases = build_session_lease_store(settings)
@@ -39,7 +40,7 @@ def main() -> None:
     tracker = build_agent_task_tracker(settings)
     worker_registry = build_worker_registry(settings)
     worker_queue = build_worker_queue_store(settings)
-    sip_trunks = SipTrunkStore(settings.sip_trunk_registry_path, settings.sip_trunk_pjsip_include_path)
+    sip_trunks = build_sip_trunk_store(settings)
     subagents = build_subagent_coordinator(settings, events)
     asterisk = (
         AsteriskAMI(settings.ami_host, settings.ami_port, settings.ami_username, settings.ami_password)
@@ -96,7 +97,7 @@ def main() -> None:
 
 
 def build_subagent_coordinator(settings: Settings, events: EventStore) -> SubagentCoordinator:
-    store = JsonSubagentTaskStore(settings.subagent_task_store_path)
+    store = build_subagent_task_store(settings)
     coordinator = SubagentCoordinator(store=store, events=events)
     client = FlowHuntClient(
         api_key=settings.flowhunt_api_key,

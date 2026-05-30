@@ -6,67 +6,336 @@ from .call_state import CallStateStore, JsonCallStateStore
 from .events import EventStore, JsonEventStore
 from .scaling import JsonWorkerQueueStore, JsonWorkerRegistry, WorkerQueueStore, WorkerRegistry
 from .session_leases import JsonSessionLeaseStore, SessionLeaseStore
+from .sip_trunks import SipTrunkStore
+from .storage import (
+    StorageDriverDefinition,
+    StorageDriverSelection,
+    StorageRegistry,
+    attach_storage_driver,
+    normalize_driver_name,
+)
+from .subagents import JsonSubagentTaskStore, SubagentTaskStore
 from .transcripts import TranscriptStore
 from .workspace_model import JsonVoicebotSessionStore, VoicebotSessionStore
 
 
+def default_storage_registry() -> StorageRegistry:
+    return StorageRegistry(
+        [
+            _definition("events", "memory", "process", False, True, False, "in-memory append-only event list"),
+            _definition("events", "jsonl", "node", False, True, False, "append-only JSONL event log"),
+            _definition("events", "flowhunt_db", "shared", True, False, True, "workspace-scoped durable DB event rows"),
+            _definition("events", "append_only_event_log", "shared", True, False, True, "managed append-only event log"),
+            _definition("transcripts", "jsonl", "node", False, True, False, "per-call JSONL transcript files"),
+            _definition("transcripts", "flowhunt_db", "shared", True, False, True, "workspace-scoped transcript rows"),
+            _definition("voicebot_sessions", "memory", "process", False, True, False, "in-memory routed session records"),
+            _definition("voicebot_sessions", "json", "node", False, True, False, "local JSON session records"),
+            _definition("voicebot_sessions", "flowhunt_db", "shared", True, False, True, "workspace-scoped session table"),
+            _definition("session_leases", "memory", "process", False, True, False, "best-effort in-memory leases"),
+            _definition("session_leases", "json", "node", False, True, False, "local JSON leases"),
+            _definition("session_leases", "redis", "shared", True, False, True, "atomic lease-capable KV"),
+            _definition("agent_tasks", "memory", "process", False, True, False, "in-memory task claims/responded ids"),
+            _definition("agent_tasks", "json", "node", False, True, False, "local JSON task claims/responded ids"),
+            _definition("agent_tasks", "redis", "shared", True, False, True, "shared claim and responded-id state"),
+            _definition("agent_tasks", "flowhunt_db", "shared", True, False, True, "durable task response table"),
+            _definition("worker_queue", "memory", "process", False, True, False, "in-memory queue"),
+            _definition("worker_queue", "json", "node", False, True, False, "local JSON queue"),
+            _definition("worker_queue", "redis_streams", "shared", True, False, True, "Redis Streams queue"),
+            _definition("worker_queue", "nats_jetstream", "shared", True, False, True, "NATS JetStream queue"),
+            _definition("worker_queue", "rabbitmq", "shared", True, False, True, "RabbitMQ queue"),
+            _definition("worker_queue", "flowhunt_queue", "shared", True, False, True, "FlowHunt managed queue"),
+            _definition("worker_registry", "memory", "process", False, True, False, "in-memory worker heartbeats"),
+            _definition("worker_registry", "json", "node", False, True, False, "local JSON worker heartbeats"),
+            _definition("worker_registry", "redis", "shared", True, False, True, "shared heartbeat registry"),
+            _definition("worker_registry", "flowhunt_db", "shared", True, False, True, "durable worker records"),
+            _definition("call_states", "memory", "process", False, True, False, "in-memory active call snapshots"),
+            _definition("call_states", "json", "node", False, True, False, "local JSON active call snapshots"),
+            _definition("call_states", "redis", "shared", True, False, True, "shared active call snapshots"),
+            _definition("call_states", "flowhunt_db", "shared", True, False, True, "durable call state snapshots"),
+            _definition("provider_config", "memory", "process", False, True, False, "environment-backed provider config"),
+            _definition("provider_config", "flowhunt_db", "shared", True, False, True, "versioned provider config records"),
+            _definition("sip_trunks", "json", "node", False, True, False, "local trunk registry plus generated PJSIP include"),
+            _definition("sip_trunks", "flowhunt_db", "shared", True, False, True, "workspace-scoped trunk records"),
+            _definition("subagent_tasks", "memory", "process", False, True, False, "in-memory delegated task lifecycle"),
+            _definition("subagent_tasks", "json", "node", False, True, False, "local JSON delegated task lifecycle"),
+            _definition("subagent_tasks", "flowhunt_db", "shared", True, False, True, "durable delegated task records"),
+            _definition("subagent_tasks", "redis", "shared", True, False, True, "shared delegated task coordination"),
+            _definition("subagent_tasks", "flowhunt_queue", "shared", True, False, True, "FlowHunt task queue handoff"),
+            _definition("audio_artifacts", "filesystem", "node", False, True, False, "local filesystem artifacts/cache"),
+            _definition("audio_artifacts", "object_storage", "shared", True, False, True, "managed object storage"),
+        ]
+    )
+
+
+def _definition(
+    family: str,
+    driver: str,
+    scope: str,
+    managed: bool,
+    supports_local_dev: bool,
+    supports_production: bool,
+    consistency: str,
+) -> StorageDriverDefinition:
+    return StorageDriverDefinition(
+        family=family,
+        driver=driver,
+        scope=scope,
+        managed=managed,
+        supports_local_dev=supports_local_dev,
+        supports_production=supports_production,
+        consistency=consistency,
+    )
+
+
 def build_event_store(settings: Settings, transcripts: TranscriptStore) -> EventStore:
-    if settings.event_store_provider in {"json", "jsonl"}:
-        return JsonEventStore(settings.event_store_path, settings.max_context_events, transcript_store=transcripts)
-    if settings.event_store_provider in {"memory", "inmemory", "in-memory"}:
-        return EventStore(settings.max_context_events, transcript_store=transcripts)
-    raise ValueError(f"Unsupported VOICEBOT_EVENT_STORE_PROVIDER: {settings.event_store_provider}")
+    driver = normalize_driver_name(settings.event_store_provider)
+    if driver == "json":
+        driver = "jsonl"
+    selection = storage_driver_selection("events", driver, settings.event_store_provider, settings.event_store_path)
+    if driver == "jsonl":
+        return attach_storage_driver(
+            JsonEventStore(settings.event_store_path, settings.max_context_events, transcript_store=transcripts),
+            selection,
+        )
+    if driver == "memory":
+        return attach_storage_driver(EventStore(settings.max_context_events, transcript_store=transcripts), selection)
+    raise_unsupported_storage("VOICEBOT_EVENT_STORE_PROVIDER", settings.event_store_provider, selection)
 
 
 def build_voicebot_session_store(settings: Settings) -> VoicebotSessionStore:
-    if settings.voicebot_session_store_provider in {"json", "jsonl"}:
-        return JsonVoicebotSessionStore(settings.voicebot_session_store_path)
-    if settings.voicebot_session_store_provider in {"memory", "inmemory", "in-memory"}:
-        return VoicebotSessionStore()
-    raise ValueError(f"Unsupported VOICEBOT_SESSION_STORE_PROVIDER: {settings.voicebot_session_store_provider}")
+    driver = json_object_driver(settings.voicebot_session_store_provider)
+    selection = storage_driver_selection(
+        "voicebot_sessions",
+        driver,
+        settings.voicebot_session_store_provider,
+        settings.voicebot_session_store_path,
+    )
+    if driver == "json":
+        return attach_storage_driver(JsonVoicebotSessionStore(settings.voicebot_session_store_path), selection)
+    if driver == "memory":
+        return attach_storage_driver(VoicebotSessionStore(), selection)
+    raise_unsupported_storage("VOICEBOT_SESSION_STORE_PROVIDER", settings.voicebot_session_store_provider, selection)
 
 
 def build_session_lease_store(settings: Settings) -> SessionLeaseStore:
-    if settings.session_lease_store_provider in {"json", "jsonl"}:
-        return JsonSessionLeaseStore(settings.session_lease_store_path)
-    if settings.session_lease_store_provider in {"memory", "inmemory", "in-memory"}:
-        return SessionLeaseStore()
-    raise ValueError(f"Unsupported VOICEBOT_SESSION_LEASE_STORE_PROVIDER: {settings.session_lease_store_provider}")
+    driver = json_object_driver(settings.session_lease_store_provider)
+    selection = storage_driver_selection(
+        "session_leases",
+        driver,
+        settings.session_lease_store_provider,
+        settings.session_lease_store_path,
+    )
+    if driver == "json":
+        return attach_storage_driver(JsonSessionLeaseStore(settings.session_lease_store_path), selection)
+    if driver == "memory":
+        return attach_storage_driver(SessionLeaseStore(), selection)
+    raise_unsupported_storage("VOICEBOT_SESSION_LEASE_STORE_PROVIDER", settings.session_lease_store_provider, selection)
 
 
 def build_agent_task_tracker(settings: Settings) -> AgentTaskTracker:
-    if settings.agent_task_store_provider in {"json", "jsonl"}:
-        return JsonAgentTaskTracker(
-            settings.agent_task_store_path,
-            max_responded_event_ids=settings.agent_task_responded_event_retention,
+    driver = json_object_driver(settings.agent_task_store_provider)
+    selection = storage_driver_selection("agent_tasks", driver, settings.agent_task_store_provider, settings.agent_task_store_path)
+    if driver == "json":
+        return attach_storage_driver(
+            JsonAgentTaskTracker(
+                settings.agent_task_store_path,
+                max_responded_event_ids=settings.agent_task_responded_event_retention,
+            ),
+            selection,
         )
-    if settings.agent_task_store_provider in {"memory", "inmemory", "in-memory"}:
-        return AgentTaskTracker(settings.agent_task_responded_event_retention)
-    raise ValueError(f"Unsupported VOICEBOT_AGENT_TASK_STORE_PROVIDER: {settings.agent_task_store_provider}")
+    if driver == "memory":
+        return attach_storage_driver(AgentTaskTracker(settings.agent_task_responded_event_retention), selection)
+    raise_unsupported_storage("VOICEBOT_AGENT_TASK_STORE_PROVIDER", settings.agent_task_store_provider, selection)
 
 
 def build_call_state_store(settings: Settings) -> CallStateStore:
-    if settings.call_state_store_provider in {"json", "jsonl"}:
-        return JsonCallStateStore(settings.call_state_store_path)
-    if settings.call_state_store_provider in {"memory", "inmemory", "in-memory"}:
-        return CallStateStore()
-    raise ValueError(f"Unsupported VOICEBOT_CALL_STATE_STORE_PROVIDER: {settings.call_state_store_provider}")
+    driver = json_object_driver(settings.call_state_store_provider)
+    selection = storage_driver_selection("call_states", driver, settings.call_state_store_provider, settings.call_state_store_path)
+    if driver == "json":
+        return attach_storage_driver(JsonCallStateStore(settings.call_state_store_path), selection)
+    if driver == "memory":
+        return attach_storage_driver(CallStateStore(), selection)
+    raise_unsupported_storage("VOICEBOT_CALL_STATE_STORE_PROVIDER", settings.call_state_store_provider, selection)
 
 
 def build_worker_queue_store(settings: Settings) -> WorkerQueueStore:
-    if settings.worker_queue_store_provider in {"json", "jsonl"}:
-        return JsonWorkerQueueStore(settings.worker_queue_store_path)
-    if settings.worker_queue_store_provider in {"memory", "inmemory", "in-memory"}:
-        return WorkerQueueStore()
-    raise ValueError(f"Unsupported VOICEBOT_WORKER_QUEUE_STORE_PROVIDER: {settings.worker_queue_store_provider}")
+    driver = json_object_driver(settings.worker_queue_store_provider)
+    selection = storage_driver_selection("worker_queue", driver, settings.worker_queue_store_provider, settings.worker_queue_store_path)
+    if driver == "json":
+        return attach_storage_driver(JsonWorkerQueueStore(settings.worker_queue_store_path), selection)
+    if driver == "memory":
+        return attach_storage_driver(WorkerQueueStore(), selection)
+    raise_unsupported_storage("VOICEBOT_WORKER_QUEUE_STORE_PROVIDER", settings.worker_queue_store_provider, selection)
 
 
 def build_worker_registry(settings: Settings) -> WorkerRegistry:
-    if settings.worker_registry_store_provider in {"json", "jsonl"}:
-        return JsonWorkerRegistry(
-            settings.worker_registry_store_path,
-            heartbeat_ttl_seconds=settings.worker_registry_heartbeat_ttl_seconds,
+    driver = json_object_driver(settings.worker_registry_store_provider)
+    selection = storage_driver_selection(
+        "worker_registry",
+        driver,
+        settings.worker_registry_store_provider,
+        settings.worker_registry_store_path,
+    )
+    if driver == "json":
+        return attach_storage_driver(
+            JsonWorkerRegistry(
+                settings.worker_registry_store_path,
+                heartbeat_ttl_seconds=settings.worker_registry_heartbeat_ttl_seconds,
+            ),
+            selection,
         )
-    if settings.worker_registry_store_provider in {"memory", "inmemory", "in-memory"}:
-        return WorkerRegistry(heartbeat_ttl_seconds=settings.worker_registry_heartbeat_ttl_seconds)
-    raise ValueError(f"Unsupported VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER: {settings.worker_registry_store_provider}")
+    if driver == "memory":
+        return attach_storage_driver(
+            WorkerRegistry(heartbeat_ttl_seconds=settings.worker_registry_heartbeat_ttl_seconds),
+            selection,
+        )
+    raise_unsupported_storage("VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER", settings.worker_registry_store_provider, selection)
+
+
+def build_transcript_store(settings: Settings) -> TranscriptStore:
+    driver = normalize_driver_name(settings.transcript_store_provider)
+    if driver == "json":
+        driver = "jsonl"
+    selection = storage_driver_selection("transcripts", driver, settings.transcript_store_provider, settings.transcript_dir)
+    if driver == "jsonl":
+        return attach_storage_driver(TranscriptStore(settings.transcript_dir), selection)
+    raise_unsupported_storage("VOICEBOT_TRANSCRIPT_STORE_PROVIDER", settings.transcript_store_provider, selection)
+
+
+def build_sip_trunk_store(settings: Settings) -> SipTrunkStore:
+    driver = normalize_driver_name(settings.sip_trunk_store_provider)
+    selection = storage_driver_selection("sip_trunks", driver, settings.sip_trunk_store_provider, settings.sip_trunk_registry_path)
+    if driver == "json":
+        return attach_storage_driver(
+            SipTrunkStore(settings.sip_trunk_registry_path, settings.sip_trunk_pjsip_include_path),
+            selection,
+        )
+    raise_unsupported_storage("VOICEBOT_SIP_TRUNK_STORE_PROVIDER", settings.sip_trunk_store_provider, selection)
+
+
+def build_subagent_task_store(settings: Settings) -> SubagentTaskStore:
+    driver = json_object_driver(settings.subagent_task_store_provider)
+    selection = storage_driver_selection(
+        "subagent_tasks",
+        driver,
+        settings.subagent_task_store_provider,
+        settings.subagent_task_store_path,
+    )
+    if driver == "json":
+        return attach_storage_driver(JsonSubagentTaskStore(settings.subagent_task_store_path), selection)
+    if driver == "memory":
+        return attach_storage_driver(SubagentTaskStore(), selection)
+    raise_unsupported_storage("VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER", settings.subagent_task_store_provider, selection)
+
+
+def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelection]:
+    selections = {
+        "events": storage_driver_selection(
+            "events",
+            "jsonl" if normalize_driver_name(settings.event_store_provider) == "json" else normalize_driver_name(settings.event_store_provider),
+            settings.event_store_provider,
+            settings.event_store_path,
+        ),
+        "transcripts": storage_driver_selection(
+            "transcripts",
+            "jsonl" if normalize_driver_name(settings.transcript_store_provider) == "json" else normalize_driver_name(settings.transcript_store_provider),
+            settings.transcript_store_provider,
+            settings.transcript_dir,
+        ),
+        "voicebot_sessions": storage_driver_selection(
+            "voicebot_sessions",
+            json_object_driver(settings.voicebot_session_store_provider),
+            settings.voicebot_session_store_provider,
+            settings.voicebot_session_store_path,
+        ),
+        "session_leases": storage_driver_selection(
+            "session_leases",
+            json_object_driver(settings.session_lease_store_provider),
+            settings.session_lease_store_provider,
+            settings.session_lease_store_path,
+        ),
+        "agent_tasks": storage_driver_selection(
+            "agent_tasks",
+            json_object_driver(settings.agent_task_store_provider),
+            settings.agent_task_store_provider,
+            settings.agent_task_store_path,
+        ),
+        "worker_queue": storage_driver_selection(
+            "worker_queue",
+            json_object_driver(settings.worker_queue_store_provider),
+            settings.worker_queue_store_provider,
+            settings.worker_queue_store_path,
+        ),
+        "worker_registry": storage_driver_selection(
+            "worker_registry",
+            json_object_driver(settings.worker_registry_store_provider),
+            settings.worker_registry_store_provider,
+            settings.worker_registry_store_path,
+        ),
+        "call_states": storage_driver_selection(
+            "call_states",
+            json_object_driver(settings.call_state_store_provider),
+            settings.call_state_store_provider,
+            settings.call_state_store_path,
+        ),
+        "provider_config": storage_driver_selection("provider_config", "memory", "memory", None),
+        "sip_trunks": storage_driver_selection(
+            "sip_trunks",
+            normalize_driver_name(settings.sip_trunk_store_provider),
+            settings.sip_trunk_store_provider,
+            settings.sip_trunk_registry_path,
+        ),
+        "subagent_tasks": storage_driver_selection(
+            "subagent_tasks",
+            json_object_driver(settings.subagent_task_store_provider),
+            settings.subagent_task_store_provider,
+            settings.subagent_task_store_path,
+        ),
+        "audio_artifacts": storage_driver_selection(
+            "audio_artifacts",
+            normalize_driver_name(settings.audio_artifact_store_provider),
+            settings.audio_artifact_store_provider,
+            settings.tts_cache_dir,
+            {"debug_audio_dir": settings.debug_audio_dir},
+        ),
+    }
+    return selections
+
+
+def storage_driver_selection(
+    family: str,
+    driver: str,
+    configured_driver: str,
+    path: str | None = None,
+    options: dict | None = None,
+) -> StorageDriverSelection:
+    definition = default_storage_registry().resolve(family, driver)
+    return StorageDriverSelection(
+        family=family,
+        driver=driver,
+        configured_driver=configured_driver,
+        path=path,
+        definition=definition,
+        options=options or {},
+    )
+
+
+def json_object_driver(configured_provider: str) -> str:
+    driver = normalize_driver_name(configured_provider)
+    return "json" if driver == "jsonl" else driver
+
+
+def storage_drivers_payload(settings: Settings) -> dict:
+    return {
+        "registry": default_storage_registry().to_dict(),
+        "selected": {
+            family: selection.to_dict()
+            for family, selection in selected_storage_drivers(settings).items()
+        },
+    }
+
+
+def raise_unsupported_storage(env_name: str, configured: str, selection: StorageDriverSelection):
+    _ = selection
+    supported = [definition.driver for definition in default_storage_registry().definitions_for_family(selection.family)]
+    raise ValueError(f"Unsupported {env_name}: {configured}. Supported drivers for {selection.family}: {sorted(supported)}")

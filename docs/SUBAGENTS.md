@@ -68,7 +68,7 @@ Providers also expose `SubagentProviderDescriptor` metadata through
 - workspace scoping
 - async polling support
 - cancel support
-- required metadata such as `flow_id` or `project_id`
+- required metadata for providers that need request-time inputs
 - whether the provider returns clean result context or raw payloads
 
 Descriptors are validated when a provider is registered. Invalid descriptors,
@@ -76,8 +76,11 @@ such as a blank label, blank required metadata keys, or cancellation support on
 a non-polling provider, fail before the provider enters the catalog.
 
 The coordinator validates required metadata before creating or submitting a task.
-This catches malformed FlowHunt flow/project requests before a provider call is
-made and keeps failure behavior consistent across future providers.
+This catches malformed provider requests before a provider call is made and
+keeps failure behavior consistent across future providers. FlowHunt flow and
+project target IDs are integration configuration on the registered provider;
+communication agents cannot supply or override `flow_id` or `project_id` in
+tool-call metadata.
 
 ## Provider-Neutral Submission
 
@@ -93,8 +96,10 @@ not need hardcoded language heuristics or FlowHunt-only behavior:
 - `delegate_to_subagent` agent tool
 
 `POST /subagent/tasks` accepts workspace, session, request event, provider,
-input text, optional voicebot id, dedupe key, and provider metadata. When
-`schedule=true`, the task lifecycle runner assigns the first poll/deadline.
+input text, optional voicebot id, dedupe key, and provider metadata. FlowHunt
+providers ignore request metadata for target selection and use the configured
+integration flow/project ID. When `schedule=true`, the task lifecycle runner
+assigns the first poll/deadline.
 
 Speculative delegation is available for partial-STT or intent-detector paths
 that recognize stable external-work intent before final endpointing. A
@@ -137,7 +142,7 @@ For FlowHunt flow execution, the adapter uses the invoke task protocol:
 
 1. submit with flow invoke
 2. store the returned task id
-3. poll the task by `flow_id + task_id`
+3. poll the task by configured `flow_id + task_id`
 4. complete only when the provider task returns a final result/status
 
 ## Runtime Integration

@@ -241,6 +241,23 @@ class SubagentTests(unittest.TestCase):
         self.assertEqual(completed.status, "completed")
         self.assertEqual(completed.result.summary, "The answer is 42.")
 
+    def test_flowhunt_provider_ignores_request_metadata_target_override(self) -> None:
+        client = FakeFlowHuntClient()
+        provider = FlowHuntSubagentProvider("flowhunt_flow", client, "configured-flow")
+        request = SubagentTaskRequest(
+            workspace_id="workspace-1",
+            session_id="call-1",
+            request_event_id=10,
+            provider="flowhunt_flow",
+            input_text="Count pages",
+            metadata={"flow_id": "agent-supplied-flow"},
+        )
+
+        submitted = provider.submit(request)
+
+        self.assertEqual(client.invoked, [("configured-flow", "Count pages", 0, 3)])
+        self.assertEqual(submitted.provider_references["target_id"], "configured-flow")
+
     def test_coordinator_exposes_registered_subagent_provider_catalog(self) -> None:
         coordinator = SubagentCoordinator()
         coordinator.register(FakeProvider())

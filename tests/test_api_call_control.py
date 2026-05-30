@@ -423,6 +423,35 @@ class ApiCallControlTests(unittest.TestCase):
             "flowhunt_issue_completed",
         ])
 
+    def test_flowhunt_project_issue_tool_uses_configured_project_id_over_model_argument(self) -> None:
+        FakeFlowHuntClient.calls = []
+        settings = Settings(
+            flowhunt_api_key="key",
+            flowhunt_workspace_id="workspace-1",
+            flowhunt_project_id="configured-project-id",
+            flowhunt_complex_backend="project",
+        )
+        client, events, _tracker = self.build_client(settings=settings)
+
+        with patch("voicebot.api.FlowHuntClient", FakeFlowHuntClient):
+            response = client.post(
+                "/agent/tools/create_flowhunt_project_issue",
+                json={
+                    "arguments": {
+                        "call_id": "call-1",
+                        "title": "Check website",
+                        "description": "Review the caller website.",
+                        "project_id": "agent-supplied-project",
+                        "response_to_event_id": 52,
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(FakeFlowHuntClient.calls[0][1][0], "configured-project-id")
+        created = [event for event in events.list_events(call_id="call-1") if event.type == "flowhunt_issue_created"]
+        self.assertEqual(created[-1].data["project_id"], "configured-project-id")
+
     def test_flowhunt_flow_tool_records_result(self) -> None:
         FakeFlowHuntClient.calls = []
         settings = Settings(
@@ -551,7 +580,7 @@ class ApiCallControlTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["task"]["status"], "running")
-        self.assertEqual(provider.requests[0].metadata["flow_id"], "flow-1")
+        self.assertNotIn("flow_id", provider.requests[0].metadata)
         self.assertEqual(
             [event.type for event in events.list_events(call_id="call-1")],
             ["flowhunt_flow_invoked", "subagent_task_requested", "subagent_task_updated"],
@@ -585,7 +614,7 @@ class ApiCallControlTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(provider.requests[0].metadata["flow_id"], "configured-flow-id")
+        self.assertNotIn("flow_id", provider.requests[0].metadata)
         invoked = [event for event in events.list_events(call_id="call-1") if event.type == "flowhunt_flow_invoked"]
         self.assertEqual(invoked[-1].data["flow_id"], "configured-flow-id")
 

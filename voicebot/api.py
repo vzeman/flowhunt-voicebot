@@ -2393,7 +2393,7 @@ def create_app(
 
     async def tool_create_flowhunt_project_issue(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
-        project_id = str(args.get("project_id") or runtime_settings.flowhunt_project_id)
+        project_id = str(runtime_settings.flowhunt_project_id or args.get("project_id") or "")
         title = str(require_arg(args, "title"))
         description = str(require_arg(args, "description"))
         response_to_event_id = args.get("response_to_event_id")
@@ -2588,7 +2588,6 @@ def create_app(
                     input_text=message,
                     dedupe_key=str(response_to_event_id or invoked.id),
                     metadata={
-                        "flow_id": flow_id,
                         "response_to_event_id": response_to_event_id,
                     },
                 )

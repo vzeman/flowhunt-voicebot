@@ -508,12 +508,14 @@ Request:
   "provider": "flowhunt_flow",
   "input_text": "Count the pages in this sitemap.",
   "dedupe_key": "session-1:turn-123",
-  "metadata": {
-    "flow_id": "flow-1"
-  },
+  "metadata": {},
   "schedule": true
 }
 ```
+
+For FlowHunt providers, flow/project target IDs are taken from the registered
+integration configuration. They are not accepted from communication agent tool
+calls and are ignored as task metadata for target selection.
 
 ### POST `/subagent/tasks/speculative`
 
@@ -530,9 +532,7 @@ until confirmed.
   "provider": "flowhunt_flow",
   "input_text": "Count pages in the sitemap",
   "speculative_key": "session-1:turn-7",
-  "metadata": {
-    "flow_id": "flow-1"
-  }
+  "metadata": {}
 }
 ```
 
@@ -1515,9 +1515,9 @@ Supported tool names:
 | `transfer_call` | Transfer an active call to another extension or SIP target. |
 | `send_dtmf` | Send one DTMF digit into an active call. |
 | `stop_playback` | Stop queued or active bot playback. |
-| `delegate_to_subagent` | Delegate complex work to a registered colleague/subagent provider. |
+| `delegate_to_subagent` | Delegate complex work to a registered colleague/subagent provider. FlowHunt target IDs are integration configuration and cannot be supplied by the communication agent. |
 | `invoke_flowhunt_flow` | Invoke the configured FlowHunt flow for complex work. The voice-agent tool schema accepts `call_id`, `message`, `response_to_event_id`, and `suppress_progress`; the runtime uses `VOICEBOT_FLOWHUNT_FLOW_ID` so the agent cannot invent a flow ID during a call. |
-| `create_flowhunt_project_issue` | Create a FlowHunt AI Project issue for complex work. |
+| `create_flowhunt_project_issue` | Create a FlowHunt AI Project issue for complex work. The project ID is integration configuration and cannot be supplied by the communication agent. |
 | `list_transcripts` | List call IDs with persisted transcripts. |
 | `list_transcript_summaries` | List transcript metadata. |
 | `get_transcript_stats` | Read aggregate transcript counts and corruption counters. |

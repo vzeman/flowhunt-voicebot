@@ -76,12 +76,10 @@ DEFAULT_SUBAGENT_PROVIDER_DESCRIPTORS: dict[SubagentProviderKind, SubagentProvid
     "flowhunt_flow": SubagentProviderDescriptor(
         kind="flowhunt_flow",
         label="FlowHunt flow invoke",
-        required_metadata=("flow_id",),
     ),
     "flowhunt_project": SubagentProviderDescriptor(
         kind="flowhunt_project",
         label="FlowHunt project issue",
-        required_metadata=("project_id",),
     ),
     "internal_worker": SubagentProviderDescriptor(kind="internal_worker", label="Internal worker agent"),
     "http_service": SubagentProviderDescriptor(kind="http_service", label="HTTP/service task provider"),
@@ -575,7 +573,7 @@ class FlowHuntSubagentProvider:
         self.target_id = target_id
 
     def submit(self, request: SubagentTaskRequest) -> SubagentTask:
-        target_id = str(request.metadata.get("flow_id") or request.metadata.get("project_id") or self.target_id)
+        target_id = self.target_id
         if self.kind == "flowhunt_flow":
             result = self.client.invoke_flow_and_wait(target_id, request.input_text, 0, 3)
         else:

@@ -160,7 +160,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             ToolArgument("provider", "Registered provider kind, for example flowhunt_flow or flowhunt_project."),
             ToolArgument(
                 "metadata",
-                "Provider-specific metadata such as flow_id, project_id, skill, or target identifiers.",
+                "Optional provider-specific metadata for non-FlowHunt providers, such as skill or routing hints. FlowHunt target IDs come from integration configuration, not agent input.",
                 required=False,
                 schema={"type": ["object", "null"]},
             ),
@@ -211,12 +211,6 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             ToolArgument("call_id", "Active call ID."),
             ToolArgument("title", "Short issue title."),
             ToolArgument("description", "Caller request and relevant context for the FlowHunt AI Project."),
-            ToolArgument(
-                "project_id",
-                "Optional FlowHunt AI Project ID. Defaults to VOICEBOT_FLOWHUNT_PROJECT_ID.",
-                required=False,
-                schema={"type": ["string", "null"]},
-            ),
             ToolArgument(
                 "response_to_event_id",
                 "Optional event ID this answers.",

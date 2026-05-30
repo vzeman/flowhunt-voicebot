@@ -1397,6 +1397,12 @@ Request:
 
 ## Scaling
 
+### GET `/sip/media-plane`
+
+Returns the SIP/Asterisk media-plane HA contract: local Docker behavior,
+Kubernetes target architecture, readiness dimensions, trunk routing scope,
+draining model, call-control routing, and the active-call failover boundary.
+
 ### GET `/scaling/topology`
 
 Returns worker roles, queue names, concurrency, shared state, and event bus

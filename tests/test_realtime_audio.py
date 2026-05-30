@@ -15,6 +15,7 @@ from voicebot.realtime_audio import (
     TurnDetectionConfig,
     TurnDetector,
     VoiceActivity,
+    trim_trailing_silence,
     turn_detection_config_from_settings,
 )
 
@@ -175,6 +176,26 @@ class RealtimeAudioTests(unittest.TestCase):
 
         self.assertEqual(len(audio), 160)
         self.assertAlmostEqual(float(audio.mean()), 0.25, delta=0.02)
+
+    def test_trim_trailing_silence_keeps_short_tail_for_stt_context(self) -> None:
+        audio = np.concatenate(
+            [
+                np.ones(200, dtype=np.float32) * 0.2,
+                np.zeros(500, dtype=np.float32),
+            ]
+        )
+
+        trimmed = trim_trailing_silence(audio, sample_rate=1000, threshold=0.05, frame_ms=20, keep_ms=120)
+
+        self.assertEqual(len(trimmed), 320)
+        self.assertTrue(np.all(trimmed[:200] > 0))
+
+    def test_trim_trailing_silence_keeps_all_silence_when_no_activity_found(self) -> None:
+        audio = np.zeros(200, dtype=np.float32)
+
+        trimmed = trim_trailing_silence(audio, sample_rate=1000, threshold=0.05)
+
+        np.testing.assert_array_equal(trimmed, audio)
 
     def test_audio_chunk_normalizer_scales_float_audio_outside_unit_range(self) -> None:
         samples = np.ones(80, dtype=np.float32) * 8192.0

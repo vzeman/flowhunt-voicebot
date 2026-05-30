@@ -672,9 +672,6 @@ def fast_tool_calls(task: dict) -> list[dict]:
         }]
 
     if is_colleague_update_task(task):
-        session_language = data.get("session_language") if isinstance(data.get("session_language"), dict) else {}
-        if str(session_language.get("language") or "").lower() not in {"", "en"}:
-            return []
         if data.get("consume_prompt"):
             return []
         answer = colleague_update_answer(task)
@@ -753,6 +750,8 @@ def strip_internal_colleague_text(text: str) -> str:
         if not line:
             continue
         lowered = line.lower()
+        if "tool-call budget" in lowered:
+            continue
         if "you can share with your colleague" in lowered:
             line = re.sub(r"\byou can share with your colleague\b", "", line, flags=re.IGNORECASE).strip(" -:;,.")
             lowered = line.lower()

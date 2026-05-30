@@ -14,13 +14,16 @@ from local_command_agent import (
     attach_response_event_id,
     attach_task_context,
     build_prompt,
+    call_control_validation_prompt,
     colleague_update_answer,
     customer_facing_colleague_text,
     ensure_action_acknowledgements,
     execute_conversational_tool_calls,
     fast_tool_call,
     fast_tool_calls,
+    filter_grounded_call_control_tools,
     needs_spoken_followup,
+    parse_call_control_validation,
     remove_colleague_reentrant_tool_calls,
 )
 
@@ -46,6 +49,39 @@ class AgentCoordinationTests(unittest.TestCase):
 
         self.assertEqual(sanitized[0]["arguments"]["call_id"], "webrtc-current")
         self.assertEqual(sanitized[0]["arguments"]["response_to_event_id"], 3073)
+
+    def test_call_control_validation_parser_accepts_json_true_only(self) -> None:
+        self.assertTrue(parse_call_control_validation('{"allowed": true, "reason": "explicit"}'))
+        self.assertFalse(parse_call_control_validation('{"allowed": false, "reason": "noise"}'))
+        self.assertFalse(parse_call_control_validation("not json"))
+
+    def test_call_control_validation_prompt_uses_current_message(self) -> None:
+        prompt = call_control_validation_prompt(
+            {"id": 3165, "call_id": "call-1", "data": {"text": "The dog"}},
+            {"name": "hangup_call", "arguments": {"call_id": "call-1"}},
+        )
+
+        self.assertIn("The dog", prompt)
+        self.assertIn("Reject if the message is noise", prompt)
+
+    def test_ungrounded_call_control_tool_is_dropped(self) -> None:
+        task = {"id": 3165, "call_id": "call-1", "data": {"text": "The dog"}}
+        tool_calls = [
+            {"name": "hangup_call", "arguments": {"call_id": "call-1", "response_to_event_id": 3165}},
+            {"name": "say", "arguments": {"call_id": "call-1", "text": "I am still here."}},
+        ]
+
+        filtered = filter_grounded_call_control_tools(tool_calls, task, lambda _task, _call: False)
+
+        self.assertEqual([call["name"] for call in filtered], ["say"])
+
+    def test_explicit_call_control_tool_is_kept_after_validation(self) -> None:
+        task = {"id": 3165, "call_id": "call-1", "data": {"text": "Please hang up now."}}
+        tool_calls = [{"name": "hangup_call", "arguments": {"call_id": "call-1", "response_to_event_id": 3165}}]
+
+        filtered = filter_grounded_call_control_tools(tool_calls, task, lambda _task, _call: True)
+
+        self.assertEqual(filtered, tool_calls)
 
     def test_colleague_result_cannot_invoke_another_colleague_task(self) -> None:
         tasks = [

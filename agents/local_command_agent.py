@@ -497,6 +497,53 @@ def remove_colleague_reentrant_tool_calls(tasks: list[dict], tool_calls: list[di
     return [call for call in tool_calls if call.get("name") not in COLLEAGUE_TOOL_NAMES]
 
 
+def call_control_validation_prompt(task: dict, tool_call: dict) -> str:
+    data = task.get("data", {})
+    return f"""Decide whether a phone call-control tool is explicitly requested by the caller's current message.
+
+Current caller message:
+{data.get("text") or ""}
+
+Requested tool call:
+{json.dumps(tool_call, ensure_ascii=False, indent=2)}
+
+Return only JSON:
+{{"allowed": true or false, "reason": "short reason"}}
+
+Allow the tool only when the current caller message clearly asks for that exact phone action.
+Reject if the message is noise, ambiguous, unrelated, a partial fragment, or only old conversation context.
+"""
+
+
+def parse_call_control_validation(raw: str) -> bool:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+        if not match:
+            return False
+        try:
+            data = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return False
+    return bool(data.get("allowed") is True)
+
+
+def filter_grounded_call_control_tools(
+    tool_calls: list[dict],
+    task: dict,
+    validator,
+) -> list[dict]:
+    filtered: list[dict] = []
+    for call in tool_calls:
+        if call.get("name") not in CALL_CONTROL_TOOL_NAMES:
+            filtered.append(call)
+            continue
+        if validator(task, call):
+            filtered.append(call)
+    return filtered
+
+
 def filter_voice_agent_tools(tools: list[dict]) -> list[dict]:
     return [tool for tool in tools if tool.get("name") in VOICE_AGENT_TOOL_NAMES]
 
@@ -955,6 +1002,13 @@ def main() -> None:
                     if answer and is_echo_answer(answer, pending):
                         raise RuntimeError(f"agent returned echo response twice: {answer}")
                 tool_calls = attach_task_context(tool_calls, latest)
+                tool_calls = filter_grounded_call_control_tools(
+                    tool_calls,
+                    latest,
+                    lambda task, call: parse_call_control_validation(
+                        run_agent_command(args.command, call_control_validation_prompt(task, call), args.command_timeout)
+                    ),
+                )
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
                 calls_to_execute = []
                 say_call = answer_as_say_call(answer, latest)

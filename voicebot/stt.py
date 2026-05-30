@@ -19,6 +19,7 @@ except ModuleNotFoundError:
 
 from .audio import CALL_SAMPLE_RATE, STT_SAMPLE_RATE, resample_audio
 from .config import Settings
+from .language import normalize_language_hint
 from .providers import normalize_provider, provider_api_key, provider_base_url
 
 try:
@@ -210,12 +211,7 @@ def _average(values: list[float]) -> float | None:
 
 
 def _stt_language_hint(language: str | None) -> str | None:
-    if language is None:
-        return None
-    normalized = language.strip().lower()
-    if normalized in {"", "auto", "detect", "detected", "multilingual", "any"}:
-        return None
-    return normalized
+    return normalize_language_hint(language)
 
 
 def _normalize_for_similarity(text: str) -> str:

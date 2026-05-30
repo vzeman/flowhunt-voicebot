@@ -435,6 +435,13 @@ instructed to answer in the caller's detected language. Use a concrete language
 code such as `sk` or `en` when the voicebot should prefer that language for
 greeting and responses.
 
+When the runtime detects a language from accepted caller transcripts, it keeps
+that language in session context and includes it in `/agent/tasks` as
+`session_language`, `session_languages_by_call_id`, and, for `auto` prompt
+configs, an effective prompt language with `language_source:
+"session_detected"`. Dropped or stale STT results do not update the session
+language.
+
 Prompt changes emit `voicebot_prompts_updated` and a `security_audit` event.
 
 ### PUT `/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers`

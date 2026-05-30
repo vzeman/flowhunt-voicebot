@@ -15,6 +15,7 @@ from .providers import (
     unsupported_provider_message,
 )
 from .transports import CallRoute
+from .language import normalize_language_hint
 
 if TYPE_CHECKING:
     from .config import Settings
@@ -164,7 +165,7 @@ def _build_openai_stt(settings: Settings):
 def _build_supertonic_tts(settings: Settings):
     from .tts import CachedTTSProvider, SupertonicTTSProvider, TTSCacheConfig
 
-    provider = SupertonicTTSProvider(settings.tts_voice, settings.language)
+    provider = SupertonicTTSProvider(settings.tts_voice, normalize_language_hint(settings.language))
     if not settings.tts_cache_enabled:
         return provider
     return CachedTTSProvider(

@@ -29,6 +29,7 @@ except ModuleNotFoundError:
 
 from .audio import CALL_SAMPLE_RATE, resample_audio
 from .config import Settings
+from .language import detect_text_language, is_auto_language
 from .providers import normalize_provider, provider_api_key, provider_base_url
 from .storage import ArtifactStoreProtocol, FilesystemArtifactStore
 
@@ -77,24 +78,25 @@ class CachedTTSProvider(TTSProvider):
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
     def synthesize(self, text: str) -> tuple[np.ndarray, float]:
-        key = self._cache_key(text)
+        language = self._effective_language(text)
+        key = self._cache_key(text, language)
         artifact_id = f"{key}.npz"
         cached = self._read(artifact_id)
         if cached is not None:
             return cached
 
         audio, duration = self._inner.synthesize(text)
-        self._write(artifact_id, audio, duration)
+        self._write(artifact_id, audio, duration, language)
         return audio, duration
 
-    def _cache_key(self, text: str) -> str:
+    def _cache_key(self, text: str, language: str | None) -> str:
         payload = {
             "version": 1,
             "config": {
                 "provider": self._config.provider,
                 "model": self._config.model,
                 "voice": self._config.voice,
-                "language": self._config.language,
+                "language": language,
                 "sample_rate": self._config.sample_rate,
             },
             "text": text,
@@ -115,7 +117,7 @@ class CachedTTSProvider(TTSProvider):
             return None
         return audio, duration
 
-    def _write(self, artifact_id: str, audio: np.ndarray, duration: float) -> None:
+    def _write(self, artifact_id: str, audio: np.ndarray, duration: float, language: str | None) -> None:
         with self._lock:
             buffer = BytesIO()
             np.savez_compressed(buffer, audio=audio.astype(np.float32, copy=False), duration=np.asarray([duration]))
@@ -127,10 +129,18 @@ class CachedTTSProvider(TTSProvider):
                     "provider": self._config.provider,
                     "model": self._config.model,
                     "voice": self._config.voice,
-                    "language": self._config.language,
+                    "language": language,
                     "sample_rate": self._config.sample_rate,
                 },
             )
+
+    def _effective_language(self, text: str) -> str | None:
+        if not is_auto_language(self._config.language):
+            return self._config.language
+        detected = detect_text_language(text)
+        if detected is not None and detected.confidence >= 0.75:
+            return detected.language
+        return "auto"
 
 
 class SupertonicTTSProvider(TTSProvider):

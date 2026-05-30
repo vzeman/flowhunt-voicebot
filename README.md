@@ -450,6 +450,9 @@ be pinned. `VOICEBOT_STT_PROMPT` can give the transcription model domain
 vocabulary that is commonly heard on calls. Keep it empty unless you have a
 measured need; prompts can leak into transcriptions when the input audio is
 unclear.
+With `auto`, accepted caller transcripts update session language context. Later
+agent turns keep using that language, and TTS cache keys include the effective
+detected language so cached phrases are separated per language.
 `VOICEBOT_STT_TIMEOUT_SECONDS` bounds each provider transcription request; a
 timeout is recorded as `stt_failed` so stalled STT calls are visible in the
 event timeline instead of leaving the call silent.

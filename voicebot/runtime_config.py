@@ -83,7 +83,14 @@ class VoicebotRealtimeConfig:
 class VoicebotQuotaConfig:
     max_concurrent_sessions: int = 1
     max_provider_inflight: int = 10
-    enabled_actions: tuple[str, ...] = ("say", "hangup_call", "transfer_call", "send_dtmf", "invoke_flowhunt_flow")
+    enabled_actions: tuple[str, ...] = (
+        "say",
+        "hangup_call",
+        "transfer_call",
+        "send_dtmf",
+        "delegate_to_subagent",
+        "invoke_flowhunt_flow",
+    )
 
     def __post_init__(self) -> None:
         if self.max_concurrent_sessions < 1:

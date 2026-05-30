@@ -112,9 +112,15 @@ fetch external URLs.
 ## Task APIs
 
 - `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/tasks`
+- `GET /subagent/providers`
+- `POST /subagent/tasks`
+- `POST /subagent/tasks/{task_id}/cancel`
 
 This returns delegated subagent/external task status scoped to the workspace and
-voicebot.
+voicebot. The `/subagent/...` endpoints are internal runtime/worker APIs for
+provider-neutral colleague task submission, provider discovery, and
+cancellation. They remain workspace-scoped through payload fields when they
+read or mutate task state.
 
 ## Internal And Prototype APIs
 

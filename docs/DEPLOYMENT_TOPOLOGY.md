@@ -49,6 +49,14 @@ Current roles:
 | `subagent_task_poller` | `voicebot lifespan task poller` | `voicebot-subagent-poller` | `voicebot.external_tasks` |
 | `post_call_worker` | `voicebot` | `voicebot-post-call-worker` | `voicebot.post_call` |
 
+Queue workers must honor the runtime priority contract. High-priority work
+includes barge-in, stop playback, hangup, transfer, and DTMF. Normal work covers
+ordinary STT, agent, and TTS turns. Background work covers subagent polling,
+summaries, post-call jobs, analytics, compaction, and slow retries. Kubernetes
+can implement this with one queue carrying a priority field or with separate
+high/normal/background streams, but high-priority work must overtake background
+work before a worker claim is granted.
+
 ## Role Readiness
 
 `GET /health/readiness/roles` derives role-specific readiness from the existing

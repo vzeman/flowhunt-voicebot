@@ -23,11 +23,19 @@ WorkItemKind = Literal[
     "stt_turn",
     "agent_turn",
     "tts_request",
+    "call_control",
+    "playback_control",
+    "barge_in",
     "external_task_poll",
     "session_event",
     "summary",
     "post_call",
+    "analytics",
 ]
+
+WorkPriority = Literal["high", "normal", "background"]
+
+WORK_PRIORITY_RANK: dict[WorkPriority, int] = {"high": 0, "normal": 1, "background": 2}
 
 
 @dataclass(frozen=True)
@@ -339,6 +347,7 @@ class WorkerQueueEnvelope:
     max_attempts: int = 3
     last_error: str | None = None
     failed_at: str | None = None
+    priority: WorkPriority | None = None
 
     def __post_init__(self) -> None:
         if not self.item_id.strip():
@@ -349,6 +358,10 @@ class WorkerQueueEnvelope:
             raise ValueError("idempotency_key is required")
         if self.kind not in get_args(WorkItemKind):
             raise ValueError(f"unsupported work item kind: {self.kind}")
+        priority = self.priority or default_work_priority(self.kind, self.payload)
+        if priority not in get_args(WorkPriority):
+            raise ValueError(f"unsupported work priority: {priority}")
+        object.__setattr__(self, "priority", priority)
         if not self.queue.strip():
             raise ValueError("queue is required")
         if self.attempt < 0:
@@ -383,6 +396,7 @@ class WorkerQueueEnvelope:
             "max_attempts": self.max_attempts,
             "last_error": self.last_error,
             "failed_at": self.failed_at,
+            "priority": self.priority,
         }
 
 
@@ -429,7 +443,7 @@ class WorkerQueueStore:
         pending = self._pending.setdefault(queue, deque())
         claimed: list[WorkerQueueEnvelope] = []
         while pending and len(claimed) < limit:
-            envelope = pending.popleft()
+            envelope = _pop_next_by_priority(pending)
             updated = replace(envelope, attempt=envelope.attempt + 1)
             self._claimed[updated.item_id] = (updated, owner, current + timedelta(seconds=ttl_seconds))
             claimed.append(updated)
@@ -720,7 +734,66 @@ def worker_queue_envelope_from_dict(data: dict[str, Any]) -> WorkerQueueEnvelope
         max_attempts=int(data.get("max_attempts") or 3),
         last_error=_optional_str(data.get("last_error")),
         failed_at=_optional_str(data.get("failed_at")),
+        priority=_optional_priority(data.get("priority")),
     )
+
+
+def default_work_priority(kind: str, payload: dict[str, Any] | None = None) -> WorkPriority:
+    payload = payload or {}
+    action = str(payload.get("action") or payload.get("reason") or "").strip().lower()
+    if kind in {"barge_in", "call_control", "playback_control"}:
+        return "high"
+    if kind == "session_event" and action in {"hangup", "transfer", "send_dtmf", "stop_playback", "barge_in"}:
+        return "high"
+    if kind in {"external_task_poll", "summary", "post_call", "analytics"}:
+        return "background"
+    return "normal"
+
+
+def priority_routing_rules() -> dict[str, Any]:
+    return {
+        "classes": {
+            "high": {
+                "rank": WORK_PRIORITY_RANK["high"],
+                "examples": ["barge_in", "playback_control", "call_control", "hangup", "transfer", "send_dtmf"],
+            },
+            "normal": {
+                "rank": WORK_PRIORITY_RANK["normal"],
+                "examples": ["stt_turn", "agent_turn", "tts_request", "ordinary session_event"],
+            },
+            "background": {
+                "rank": WORK_PRIORITY_RANK["background"],
+                "examples": ["external_task_poll", "summary", "post_call", "analytics"],
+            },
+        },
+        "claim_order": ["high", "normal", "background"],
+        "fifo_within_priority": True,
+    }
+
+
+def _pop_next_by_priority(pending: deque[WorkerQueueEnvelope]) -> WorkerQueueEnvelope:
+    best_index = 0
+    best_rank = WORK_PRIORITY_RANK[pending[0].priority or "normal"]
+    for index, envelope in enumerate(pending):
+        rank = WORK_PRIORITY_RANK[envelope.priority or "normal"]
+        if rank < best_rank:
+            best_index = index
+            best_rank = rank
+            if rank == WORK_PRIORITY_RANK["high"]:
+                break
+    pending.rotate(-best_index)
+    envelope = pending.popleft()
+    pending.rotate(best_index)
+    return envelope
+
+
+def _optional_priority(value: Any) -> WorkPriority | None:
+    if value is None:
+        return None
+    priority = str(value).strip().lower()
+    if priority not in get_args(WorkPriority):
+        raise ValueError(f"unsupported work priority: {priority}")
+    return priority  # type: ignore[return-value]
 
 
 def worker_instance_from_dict(data: dict[str, Any]) -> WorkerInstance:

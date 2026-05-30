@@ -26,7 +26,9 @@ from voicebot.scaling import (
     autoscaling_signals,
     autoscaling_signals_prometheus,
     build_workload_plan,
+    default_work_priority,
     default_deployment_topology,
+    priority_routing_rules,
 )
 from voicebot.config import Settings
 from voicebot.runtime_storage import build_worker_registry
@@ -106,6 +108,14 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(data["attempt"], 1)
         self.assertEqual(data["idempotency_key"], "session-1:turn-1:stt")
         self.assertEqual(data["max_attempts"], 5)
+        self.assertEqual(data["priority"], "normal")
+
+    def test_default_priority_rules_classify_realtime_and_background_work(self) -> None:
+        self.assertEqual(default_work_priority("call_control", {"action": "transfer"}), "high")
+        self.assertEqual(default_work_priority("playback_control", {"reason": "barge_in"}), "high")
+        self.assertEqual(default_work_priority("external_task_poll", {}), "background")
+        self.assertEqual(default_work_priority("agent_turn", {}), "normal")
+        self.assertEqual(priority_routing_rules()["claim_order"], ["high", "normal", "background"])
 
     def test_worker_queue_envelope_rejects_invalid_records(self) -> None:
         valid = {
@@ -161,6 +171,39 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(reclaimed[0].attempt, 2)
         self.assertEqual(acked.item_id if acked else None, "item-1")
         self.assertEqual([claim["item"]["item_id"] for claim in store.claimed()], ["item-2"])
+
+    def test_worker_queue_claims_high_priority_before_older_background_work(self) -> None:
+        store = WorkerQueueStore()
+        store.enqueue(
+            WorkerQueueEnvelope(
+                item_id="background-1",
+                kind="external_task_poll",
+                routing=RoutingKey("workspace-1", "voicebot-1"),
+                queue="voicebot.control",
+            )
+        )
+        store.enqueue(
+            WorkerQueueEnvelope(
+                item_id="normal-1",
+                kind="agent_turn",
+                routing=RoutingKey("workspace-1", "voicebot-1"),
+                queue="voicebot.control",
+            )
+        )
+        store.enqueue(
+            WorkerQueueEnvelope(
+                item_id="high-1",
+                kind="call_control",
+                routing=RoutingKey("workspace-1", "voicebot-1"),
+                queue="voicebot.control",
+                payload={"action": "hangup"},
+            )
+        )
+
+        claimed = store.claim("voicebot.control", "worker-1", limit=3)
+
+        self.assertEqual([item.item_id for item in claimed], ["high-1", "normal-1", "background-1"])
+        self.assertEqual([item.priority for item in claimed], ["high", "normal", "background"])
 
     def test_worker_queue_store_deduplicates_by_idempotency_key_and_renews_claims(self) -> None:
         store = WorkerQueueStore()
@@ -776,6 +819,7 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(enqueue.status_code, 200)
         self.assertEqual(enqueue.json()["item"]["routing"]["partition_key"], "workspace-1:voicebot-1:session-1")
         self.assertEqual(enqueue.json()["item"]["idempotency_key"], "session-1:event-42")
+        self.assertEqual(enqueue.json()["item"]["priority"], "normal")
         self.assertEqual(duplicate.json()["item"]["item_id"], "item-1")
         self.assertEqual(snapshot.json()["pending"]["voicebot.agent"][0]["item_id"], "item-1")
         self.assertEqual([item["item_id"] for item in claim.json()["items"]], ["item-1"])
@@ -785,6 +829,32 @@ class ScalingTests(unittest.TestCase):
         self.assertTrue(release.json()["released"])
         self.assertEqual(reclaim.json()["items"][0]["attempt"], 2)
         self.assertTrue(ack.json()["acked"])
+
+    def test_scaling_queue_api_exposes_priority_rules_and_claims_by_priority(self) -> None:
+        client = self.build_client()
+        for item_id, kind in (("background-1", "external_task_poll"), ("high-1", "call_control")):
+            response = client.post(
+                "/scaling/queue/enqueue",
+                json={
+                    "item_id": item_id,
+                    "kind": kind,
+                    "routing": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "session_id": "session-1"},
+                    "queue": "voicebot.control",
+                    "payload": {"action": "hangup"},
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+
+        priorities = client.get("/scaling/queue/priorities")
+        claim = client.post(
+            "/scaling/queue/claim",
+            json={"queue": "voicebot.control", "owner": "worker-1", "limit": 2, "ttl_seconds": 30},
+        )
+
+        self.assertEqual(priorities.status_code, 200)
+        self.assertEqual(priorities.json()["claim_order"], ["high", "normal", "background"])
+        self.assertEqual([item["item_id"] for item in claim.json()["items"]], ["high-1", "background-1"])
+        self.assertEqual([item["priority"] for item in claim.json()["items"]], ["high", "background"])
 
     def test_scaling_queue_api_exposes_dead_lettered_work(self) -> None:
         client = self.build_client()

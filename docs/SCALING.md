@@ -93,20 +93,36 @@ this routed admission API or passes routed metadata through a transport path.
 `WorkerQueueEnvelope` defines the payload shape for future queue/stream
 handoff. Every queued item carries an item id, idempotency key, work kind,
 queue name, routing key with workspace/voicebot/session/provider fields,
-payload, trace id, creation timestamp, retry attempt, and maximum attempts. The
-routing partition key keeps all work for a session addressable after worker
-restart, while the provider key supports provider-specific rate limits.
+payload, trace id, creation timestamp, retry attempt, maximum attempts, and
+priority. The routing partition key keeps all work for a session addressable
+after worker restart, while the provider key supports provider-specific rate
+limits.
 
 `WorkerQueueStore` is the local lifecycle contract for these envelopes. It can
 enqueue pending items, deduplicate active submissions by idempotency key, claim
 them by queue with an owner and TTL, renew claims, acknowledge completed work,
 release failed work back to pending, expire abandoned claims, dead-letter work
 after retry exhaustion, and produce grouped pending/claimed/dead-letter
-snapshots. It is intentionally in-memory; the same lifecycle should move to
-Redis streams, a database queue, or FlowHunt shared infrastructure for
-production.
+snapshots. Claims always prefer `high`, then `normal`, then `background`, while
+keeping FIFO order inside each priority. It is intentionally in-memory; the
+same lifecycle should move to Redis streams, a database queue, or FlowHunt
+shared infrastructure for production.
 `JsonWorkerQueueStore` persists this local lifecycle for restart recovery during
 development and single-node deployments.
+
+Priority classes:
+
+- `high`: barge-in, stop playback, hangup, transfer, DTMF, and other
+  transport-owned call-control work.
+- `normal`: STT turns, agent turns, TTS requests, and ordinary session events.
+- `background`: external task polling, summaries, post-call jobs, analytics,
+  compaction, and slow provider retries.
+
+Production queue mapping can use one physical stream with a priority field or
+separate streams such as `voicebot.high`, `voicebot.normal`, and
+`voicebot.background`. Workers must claim high-priority work first and should
+reserve enough media/control capacity so urgent call actions do not wait behind
+background task polling or long summaries.
 
 `GET /scaling/backpressure`, `POST /scaling/backpressure/acquire`, and
 `POST /scaling/backpressure/release` expose the local backpressure contract for
@@ -119,6 +135,7 @@ is configured with `VOICEBOT_SCALING_BACKPRESSURE_MAX_INFLIGHT`.
 Internal queue endpoints expose this lifecycle for early worker separation:
 
 - `GET /scaling/queue`
+- `GET /scaling/queue/priorities`
 - `POST /scaling/queue/enqueue`
 - `POST /scaling/queue/claim`
 - `POST /scaling/queue/renew`

@@ -11,7 +11,7 @@ from voicebot.api import WebSocketHub, create_app
 from voicebot.asterisk_control import AsteriskAMI
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
-from voicebot.health import ami_configuration_check, durable_storage_check, pipeline_contract_check, readiness_report, storage_contract_check
+from voicebot.health import ami_configuration_check, durable_storage_check, pipeline_contract_check, readiness_report, sip_media_plane_check, storage_contract_check
 from voicebot.pipeline_contract import pipeline_contract_payload
 from voicebot.storage_contracts import storage_contracts_payload
 from voicebot.transcripts import TranscriptStore
@@ -34,6 +34,7 @@ class HealthTests(unittest.TestCase):
         self.assertTrue(report["checks"]["providers"]["ok"])
         self.assertTrue(report["checks"]["event_catalog"]["ok"])
         self.assertTrue(report["checks"]["pipeline_contract"]["ok"])
+        self.assertTrue(report["checks"]["sip_media_plane"]["ok"])
         self.assertTrue(report["checks"]["storage_contracts"]["ok"])
         self.assertTrue(report["checks"]["durable_storage"]["ok"])
 
@@ -112,7 +113,16 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(payload["active_calls"], [])
         self.assertEqual(
             set(payload["checks"]),
-            {"transcripts", "ami", "providers", "event_catalog", "pipeline_contract", "storage_contracts", "durable_storage"},
+            {
+                "transcripts",
+                "ami",
+                "providers",
+                "event_catalog",
+                "pipeline_contract",
+                "sip_media_plane",
+                "storage_contracts",
+                "durable_storage",
+            },
         )
 
     def test_pipeline_contract_check_exposes_valid_pipeline_catalog(self) -> None:
@@ -123,6 +133,14 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(check["version"], pipeline_contract_payload()["version"])
         self.assertIn("asterisk_audiosocket", check["transports"])
         self.assertIn("webrtc", check["transports"])
+
+    def test_sip_media_plane_check_exposes_readiness_contract(self) -> None:
+        check = sip_media_plane_check().to_dict()
+
+        self.assertTrue(check["ok"])
+        self.assertEqual(check["issue_count"], 0)
+        self.assertEqual(check["architecture"]["active_call_failover"], "interrupted_not_migrated")
+        self.assertIn("sip_registered", check["readiness_dimensions"])
 
     def test_storage_contracts_are_exposed_and_valid(self) -> None:
         check = storage_contract_check().to_dict()

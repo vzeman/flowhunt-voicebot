@@ -9,6 +9,7 @@ from .asterisk_control import AsteriskAMI
 from .event_catalog import event_catalog_integrity_issues, missing_catalog_event_types
 from .pipeline_contract import pipeline_contract_issues, pipeline_contract_payload
 from .provider_catalog import provider_catalog
+from .sip_media_plane import sip_media_plane_issues, sip_media_plane_payload
 from .storage_contracts import storage_contract_issues, storage_contracts_payload
 from .transcripts import TranscriptStore
 
@@ -40,6 +41,7 @@ def readiness_report(
         "providers": provider_catalog_check().to_dict(),
         "event_catalog": event_catalog_check().to_dict(),
         "pipeline_contract": pipeline_contract_check().to_dict(),
+        "sip_media_plane": sip_media_plane_check().to_dict(),
         "storage_contracts": storage_contract_check().to_dict(),
     }
     if storage_components is not None:
@@ -122,6 +124,16 @@ def pipeline_contract_check() -> HealthCheck:
     return HealthCheck(
         not issues,
         "pipeline contract is valid" if not issues else "pipeline contract has integrity issues",
+        {"issue_count": len(issues), "issues": issues, **payload},
+    )
+
+
+def sip_media_plane_check() -> HealthCheck:
+    issues = sip_media_plane_issues()
+    payload = sip_media_plane_payload()
+    return HealthCheck(
+        not issues,
+        "SIP media plane contract is valid" if not issues else "SIP media plane contract has integrity issues",
         {"issue_count": len(issues), "issues": issues, **payload},
     )
 

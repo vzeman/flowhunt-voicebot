@@ -102,6 +102,7 @@ from .scaling import (
     default_deployment_topology,
 )
 from .session_leases import SessionLeaseStore
+from .sip_media_plane import sip_media_plane_payload
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .storage_contracts import storage_contracts_payload
 from .runtime_config import (
@@ -1129,6 +1130,10 @@ def create_app(
             "trunks": [trunk.redacted_dict() for trunk in sip_trunks.list()],
             "registrations": control_result_dict(safe_asterisk_action(lambda: asterisk.show_registrations())),
         }
+
+    @app.get("/sip/media-plane")
+    def get_sip_media_plane() -> dict[str, Any]:
+        return sip_media_plane_payload()
 
     @app.post("/sip-trunks")
     def upsert_sip_trunk(request: SipTrunkRequest) -> dict[str, Any]:

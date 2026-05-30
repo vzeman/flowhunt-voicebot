@@ -277,6 +277,30 @@ class AgentCoordinationTests(unittest.TestCase):
             "Agent panel slowness, resolved in 56 minutes.",
         )
 
+    def test_colleague_result_does_not_turn_normal_status_page_into_incident(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {
+                "reason": "colleague_result",
+                "data": {
+                    "summary": (
+                        "Based on the current status page, there have been no incidents in the last 90 days. "
+                        "All LiveAgent services are operating normally. The status page shows no downtime "
+                        "recorded from May 18 through May 30, 2026."
+                    )
+                },
+            },
+        }
+
+        answer = colleague_update_answer(task)
+
+        self.assertEqual(
+            answer,
+            "I checked with a colleague. The LiveAgent status page currently shows normal operation, "
+            "with no active downtime or visible incidents.",
+        )
+
     def test_colleague_progress_uses_canned_customer_update(self) -> None:
         task = {
             "id": 10,

@@ -280,6 +280,52 @@ class PlaybackControlTests(unittest.TestCase):
         finally:
             session.stop()
 
+    def test_colleague_result_is_not_lost_after_newer_transcript(self) -> None:
+        events = EventStore(max_context_events=30)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(deferred_response_wait_seconds=1.0),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"reason": "colleague_result"})
+            session._remember_response_generation(request.id)
+            events.append("call-1", "user_transcript", {"text": "newer caller turn"})
+
+            session.submit_agent_response(
+                AgentResponse("call-1", "I checked with a colleague. Here is the result.", response_to_event_id=request.id)
+            )
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertNotIn("agent_response_dropped", event_types)
+            self.assertIn("agent_response_queued", event_types)
+            self.assertTrue(session.playback.is_active())
+        finally:
+            session.stop()
+
+    def test_call_session_colleague_result_is_not_lost_after_newer_transcript(self) -> None:
+        events = EventStore(max_context_events=30)
+        session, left, right = self.make_session("call-1", events)
+        try:
+            request = events.append("call-1", "agent_response_requested", {"reason": "colleague_result"})
+            session._remember_response_generation(request.id)
+            events.append("call-1", "user_transcript", {"text": "newer caller turn"})
+
+            session.submit_agent_response(
+                AgentResponse("call-1", "I checked with a colleague. Here is the result.", response_to_event_id=request.id)
+            )
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertNotIn("agent_response_dropped", event_types)
+            self.assertIn("agent_response_queued", event_types)
+            self.assertTrue(session.playback.is_active())
+        finally:
+            left.close()
+            right.close()
+
     def test_response_is_dropped_after_newer_user_speech_even_without_transcript(self) -> None:
         events = EventStore(max_context_events=30)
         session = WebRTCCallSession(

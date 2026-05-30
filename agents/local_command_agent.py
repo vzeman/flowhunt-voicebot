@@ -655,12 +655,12 @@ def conversationalize_colleague_text(text: str) -> str:
     pricing_summary = extract_plan_pricing_summary(text)
     if pricing_summary:
         return pricing_summary
-    incident_summary = extract_incident_summary(text)
-    if incident_summary:
-        return incident_summary
     status_summary = extract_status_page_summary(text)
     if status_summary:
         return status_summary
+    incident_summary = extract_incident_summary(text)
+    if incident_summary:
+        return incident_summary
     cleaned = re.sub(r"https?://\S+", "", text)
     cleaned = re.sub(r"[*_`#]", "", cleaned)
     cleaned = cleaned.replace("\u2705", "included").replace("\u274c", "not included")
@@ -698,7 +698,7 @@ def extract_status_page_summary(text: str) -> str:
     normal = any(
         phrase in lowered
         for phrase in ("normal status", "operational", "no active downtime", "no ongoing incident")
-    )
+    ) or re.search(r"\bno\s+(?:active\s+|visible\s+|ongoing\s+)?incidents?\b", lowered) is not None
     if not normal:
         return ""
     subject = "The status page"

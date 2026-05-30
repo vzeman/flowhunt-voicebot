@@ -68,6 +68,16 @@ Channel types include SIP trunk bindings and WebRTC widget/token bindings.
 
 Provider config uses secret references and must validate before channel enable.
 
+## Prompt APIs
+
+- `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts`
+- `PUT /workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts`
+- `PATCH /workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts`
+
+Prompt config covers greeting prompt, communication-agent system prompt, STT
+prompt, and default language. It is cached by workspace and voicebot so live
+agent turns receive prompts in their task context.
+
 ## Security APIs
 
 - `GET /security/contract`

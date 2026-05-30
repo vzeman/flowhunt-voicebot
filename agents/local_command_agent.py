@@ -69,6 +69,10 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
             f"- event_id={task['id']} call_id={task['call_id']} "
             f"reason={reason} {label}: {data.get('text', '')}"
         )
+    prompt_config = prompt_config_for_tasks(tasks, context)
+    language = str(prompt_config.get("language") or "en")
+    custom_system_prompt = str(prompt_config.get("system_prompt") or "").strip()
+    greeting_prompt = str(prompt_config.get("greeting") or "").strip()
     output_format = {
         "say": "text to speak, if any",
         "tool_calls": [
@@ -95,9 +99,19 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
         ],
     }
 
+    custom_instructions = f"""
+Configured voicebot prompts:
+- Default response language: {language}
+- Greeting prompt: {greeting_prompt or "(default)"}
+- Additional system instructions: {custom_system_prompt or "(none)"}
+""" if prompt_config else ""
+
     return f"""You are an AI voicebot speaking with a customer on a phone call.
 Your job is to help the caller, answer their questions, solve practical
 problems, and use tools when a phone action is needed.
+Respond in the configured default language unless the caller clearly uses
+another language or asks for a different language.
+{custom_instructions}
 
 Do not repeat the caller's words back as the whole answer. Treat transcripts as
 requests, not dictation. For normal questions, answer in one brief spoken
@@ -166,6 +180,17 @@ Available tools:
 Return either plain text to speak, or JSON in this form:
 {json.dumps(output_format, ensure_ascii=False, indent=2)}
 """
+
+
+def prompt_config_for_tasks(tasks: list[dict], context: dict) -> dict:
+    if isinstance(context.get("voicebot_prompts"), dict):
+        return context["voicebot_prompts"]
+    by_call_id = context.get("prompt_configs_by_call_id")
+    if not isinstance(by_call_id, dict) or not tasks:
+        return {}
+    call_id = tasks[-1].get("call_id")
+    prompt_config = by_call_id.get(call_id)
+    return prompt_config if isinstance(prompt_config, dict) else {}
 
 
 def build_retry_prompt(original_prompt: str, bad_answer: str) -> str:
@@ -550,6 +575,8 @@ def fast_tool_calls(task: dict) -> list[dict]:
     call_id = task["call_id"]
 
     if data.get("reason") == "call_connected":
+        if data.get("use_agent_prompt"):
+            return []
         return [{
             "name": "say",
             "arguments": {

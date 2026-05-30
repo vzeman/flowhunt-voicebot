@@ -45,6 +45,8 @@ from .api_models import (
     VoicebotAdminRequest,
     VoicebotChannelPatchRequest,
     VoicebotChannelRequest,
+    VoicebotPromptConfigPatchRequest,
+    VoicebotPromptConfigRequest,
     VoicebotProviderConfigRequest,
     VoicebotRuntimeConfigRequest,
     WorkerQueueClaimRequest,
@@ -124,6 +126,7 @@ from .runtime_config import (
     VoicebotQuotaConfig,
     VoicebotRealtimeConfig,
     VoicebotRuntimeConfig,
+    VoicebotPromptConfigStore,
     VoicebotRuntimeConfigStore,
     VoicebotSubagentConfig,
     runtime_config_to_dict,
@@ -204,6 +207,7 @@ def create_app(
     session_leases: SessionLeaseStore | None = None,
     workspace_policy: WorkspaceAccessPolicy | None = None,
     runtime_configs: VoicebotRuntimeConfigStore | None = None,
+    prompt_configs: VoicebotPromptConfigStore | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -239,6 +243,7 @@ def create_app(
     voicebot_session_store = voicebot_sessions or VoicebotSessionStore()
     session_lease_store = session_leases or SessionLeaseStore()
     runtime_config_store = runtime_configs or VoicebotRuntimeConfigStore()
+    prompt_config_store = prompt_configs or VoicebotPromptConfigStore()
     workspace_access_policy = workspace_policy or workspace_access_policy_from_settings(runtime_settings)
     subagent_terminal_events: list[VoicebotEvent] = []
 
@@ -249,6 +254,49 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from None
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from None
+
+    def effective_prompt_config(workspace_id: str | None, voicebot_id: str | None) -> VoicebotPromptConfig:
+        if workspace_id and voicebot_id:
+            override = prompt_config_store.get(workspace_id, voicebot_id)
+            if override is not None:
+                return override
+            runtime_config = runtime_config_store.get(workspace_id, voicebot_id)
+            if runtime_config is not None:
+                return runtime_config.prompts
+        return VoicebotPromptConfig(
+            greeting=runtime_settings.connect_greeting_prompt,
+            system_prompt="",
+            stt_prompt=runtime_settings.stt_prompt,
+            language=runtime_settings.language or "en",
+        )
+
+    def prompts_payload(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        prompts = effective_prompt_config(workspace_id, voicebot_id)
+        source = "default"
+        if prompt_config_store.get(workspace_id, voicebot_id) is not None:
+            source = "prompt_override"
+        elif runtime_config_store.get(workspace_id, voicebot_id) is not None:
+            source = "runtime_config"
+        return {
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "source": source,
+            "prompts": prompts.as_dict(),
+        }
+
+    def prompt_config_for_call(call_id: str) -> VoicebotPromptConfig:
+        snapshot = registry.snapshot(call_id)
+        route = snapshot.get("route") if isinstance(snapshot, dict) else {}
+        if not isinstance(route, dict):
+            route = {}
+        return effective_prompt_config(non_empty_str(route.get("workspace_id")), non_empty_str(route.get("voicebot_id")))
+
+    def prompt_context_for_pending(pending: list[VoicebotEvent]) -> dict[str, Any]:
+        by_call_id = {event.call_id: prompt_config_for_call(event.call_id).as_dict() for event in pending}
+        context: dict[str, Any] = {"prompt_configs_by_call_id": by_call_id}
+        if len(by_call_id) == 1:
+            context["voicebot_prompts"] = next(iter(by_call_id.values()))
+        return context
 
     def append_security_audit(
         *,
@@ -942,6 +990,110 @@ def create_app(
             "validation": [],
         }
 
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts")
+    def get_voicebot_prompts(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        if voicebot_store.get(workspace_id, voicebot_id) is None:
+            raise HTTPException(status_code=404, detail="Voicebot not found")
+        return prompts_payload(workspace_id, voicebot_id)
+
+    @app.put("/workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts")
+    async def put_voicebot_prompts(
+        workspace_id: str,
+        voicebot_id: str,
+        request: VoicebotPromptConfigRequest,
+    ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        if voicebot_store.get(workspace_id, voicebot_id) is None:
+            raise HTTPException(status_code=404, detail="Voicebot not found")
+        try:
+            prompts = prompt_config_store.save(
+                workspace_id,
+                voicebot_id,
+                VoicebotPromptConfig(
+                    greeting=request.greeting,
+                    system_prompt=request.system_prompt,
+                    stt_prompt=request.stt_prompt,
+                    language=request.language,
+                ),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        event = events.append(
+            "system",
+            "voicebot_prompts_updated",
+            {
+                "workspace_id": workspace_id,
+                "voicebot_id": voicebot_id,
+                "fields": sorted(prompts.as_dict()),
+            },
+        )
+        audit_event = append_security_audit(
+            workspace_id=workspace_id,
+            voicebot_id=voicebot_id,
+            action="prompt_config_change",
+            actor="api",
+            resource_type="voicebot_prompts",
+            resource_id=voicebot_id,
+            outcome="saved",
+            metadata=prompts.as_dict(),
+        )
+        await hub.broadcast(event)
+        await hub.broadcast(audit_event)
+        return {
+            "ok": True,
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "prompts": prompts.as_dict(),
+            "event": event_to_dict(event),
+        }
+
+    @app.patch("/workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts")
+    async def patch_voicebot_prompts(
+        workspace_id: str,
+        voicebot_id: str,
+        request: VoicebotPromptConfigPatchRequest,
+    ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        if voicebot_store.get(workspace_id, voicebot_id) is None:
+            raise HTTPException(status_code=404, detail="Voicebot not found")
+        current = effective_prompt_config(workspace_id, voicebot_id)
+        payload = current.as_dict()
+        updates = request.model_dump(exclude_none=True)
+        payload.update(updates)
+        try:
+            prompts = prompt_config_store.save(workspace_id, voicebot_id, VoicebotPromptConfig(**payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        event = events.append(
+            "system",
+            "voicebot_prompts_updated",
+            {
+                "workspace_id": workspace_id,
+                "voicebot_id": voicebot_id,
+                "fields": sorted(updates),
+            },
+        )
+        audit_event = append_security_audit(
+            workspace_id=workspace_id,
+            voicebot_id=voicebot_id,
+            action="prompt_config_change",
+            actor="api",
+            resource_type="voicebot_prompts",
+            resource_id=voicebot_id,
+            outcome="saved",
+            metadata=prompts.as_dict(),
+        )
+        await hub.broadcast(event)
+        await hub.broadcast(audit_event)
+        return {
+            "ok": True,
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "prompts": prompts.as_dict(),
+            "event": event_to_dict(event),
+        }
+
     @app.get("/scaling/topology")
     def scaling_topology() -> dict[str, Any]:
         return default_deployment_topology().as_dict()
@@ -1385,7 +1537,14 @@ def create_app(
         if request.type != "offer":
             raise HTTPException(status_code=400, detail="WebRTC session type must be offer")
         try:
-            return await webrtc.create_session(request.sdp, request.type, request.metadata)
+            metadata = dict(request.metadata or {})
+            workspace_id = non_empty_str(metadata.get("workspace_id"))
+            voicebot_id = non_empty_str(metadata.get("voicebot_id"))
+            if workspace_id:
+                require_workspace_access(workspace_id)
+            if workspace_id and voicebot_id:
+                metadata.setdefault("prompt_config", effective_prompt_config(workspace_id, voicebot_id).as_dict())
+            return await webrtc.create_session(request.sdp, request.type, metadata)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
 
@@ -1652,9 +1811,11 @@ def create_app(
             and event.call_id in active_call_ids
             and (call_id is None or event.call_id == call_id)
         ]
+        task_context = events.context(call_id=call_id)
+        task_context.update(prompt_context_for_pending(pending[:limit]))
         return {
             "pending": [event_to_dict(event) for event in pending[:limit]],
-            "context": events.context(call_id=call_id),
+            "context": task_context,
         }
 
     @app.post("/agent/tasks/claim")

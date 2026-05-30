@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agents"))
 
 from local_command_agent import (
     action_acknowledgement,
+    build_prompt,
     colleague_update_answer,
     customer_facing_colleague_text,
     ensure_action_acknowledgements,
@@ -42,6 +43,32 @@ class AgentCoordinationTests(unittest.TestCase):
         filtered = remove_colleague_reentrant_tool_calls(tasks, tool_calls)
 
         self.assertEqual([call["name"] for call in filtered], ["say"])
+
+    def test_build_prompt_includes_voicebot_prompt_config(self) -> None:
+        prompt = build_prompt(
+            [{"id": 10, "call_id": "call-1", "data": {"text": "Ahoj"}}],
+            {
+                "voicebot_prompts": {
+                    "greeting": "Pozdrav volajuceho po slovensky.",
+                    "system_prompt": "Use concise Slovak.",
+                    "stt_prompt": "LiveAgent",
+                    "language": "sk",
+                }
+            },
+            [],
+        )
+
+        self.assertIn("Default response language: sk", prompt)
+        self.assertIn("Use concise Slovak.", prompt)
+
+    def test_call_connected_with_custom_prompt_uses_model_turn(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {"reason": "call_connected", "text": "Pozdrav volajuceho po slovensky.", "use_agent_prompt": True},
+        }
+
+        self.assertEqual(fast_tool_calls(task), [])
 
     def test_flowhunt_invocation_does_not_need_immediate_followup(self) -> None:
         self.assertFalse(needs_spoken_followup([{"name": "invoke_flowhunt_flow", "arguments": {}}]))

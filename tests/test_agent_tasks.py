@@ -8,6 +8,7 @@ from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
+from voicebot.runtime_config import VoicebotPromptConfig, VoicebotPromptConfigStore
 from voicebot.transcripts import TranscriptStore
 
 
@@ -15,9 +16,19 @@ class FakeCallRegistry(CallRegistry):
     def __init__(self, active_call_ids: list[str]) -> None:
         super().__init__()
         self._active_call_ids = active_call_ids
+        self._snapshots = {
+            call_id: {
+                "call_id": call_id,
+                "route": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"},
+            }
+            for call_id in active_call_ids
+        }
 
     def active_call_ids(self) -> list[str]:
         return self._active_call_ids
+
+    def snapshot(self, call_id: str) -> dict | None:
+        return self._snapshots.get(call_id)
 
 
 class AgentTasksTests(unittest.TestCase):
@@ -47,6 +58,40 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual([event["id"] for event in payload["pending"]], [first.id])
         self.assertEqual([event["call_id"] for event in payload["context"]["events"]], ["call-1"])
         self.assertEqual(tracker.responded_event_ids, set())
+
+    def test_agent_tasks_include_cached_prompt_config_for_call_route(self) -> None:
+        events = EventStore(max_context_events=20)
+        prompts = VoicebotPromptConfigStore()
+        prompts.save(
+            "workspace-1",
+            "voicebot-1",
+            VoicebotPromptConfig(
+                greeting="Pozdrav volajuceho.",
+                system_prompt="Use Slovak.",
+                stt_prompt="LiveAgent",
+                language="sk",
+            ),
+        )
+        app = create_app(
+            events,
+            FakeCallRegistry(["call-1"]),
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+            prompt_configs=prompts,
+        )
+        client = TestClient(app)
+        events.append("call-1", "agent_response_requested", {"text": "hello"})
+
+        response = client.get("/agent/tasks?call_id=call-1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["context"]["voicebot_prompts"]["language"], "sk")
+        self.assertEqual(
+            response.json()["context"]["prompt_configs_by_call_id"]["call-1"]["system_prompt"],
+            "Use Slovak.",
+        )
 
     def test_agent_tasks_applies_limit(self) -> None:
         client, events, _tracker = self.build_client()

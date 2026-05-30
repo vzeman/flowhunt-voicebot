@@ -99,3 +99,16 @@ deployment.
 
 Runtime config responses redact by design: API keys are never part of this
 payload. Providers reference secrets by `{name, workspace_id}` only.
+
+Prompt config can also be managed independently from provider config:
+
+- `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts`
+- `PUT /workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts`
+- `PATCH /workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts`
+
+The effective prompt config is cached in the runtime and included in
+`/agent/tasks` context as `voicebot_prompts` and
+`prompt_configs_by_call_id`. Communication-agent workers therefore do not need
+to fetch prompt config on every turn. Prompt overrides take precedence over
+prompts stored inside versioned runtime config; if neither exists, local `.env`
+defaults are used.

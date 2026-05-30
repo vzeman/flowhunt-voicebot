@@ -163,13 +163,16 @@ class WebRTCCallSession:
             lifecycle_data,
         )
         if self.settings.greet_on_connect:
+            prompt_config = self.metadata.get("prompt_config") if isinstance(self.metadata.get("prompt_config"), dict) else {}
+            greeting_prompt = str(prompt_config.get("greeting") or self.settings.connect_greeting_prompt)
             request = self.events.append(
                 self.call_id,
                 "agent_response_requested",
                 {
                     "reason": "call_connected",
                     "trigger_event_id": connected.id,
-                    "text": self.settings.connect_greeting_prompt,
+                    "text": greeting_prompt,
+                    **({"use_agent_prompt": True} if prompt_config else {}),
                 },
             )
             self._remember_response_generation(request.id)

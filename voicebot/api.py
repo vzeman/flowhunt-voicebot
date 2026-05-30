@@ -79,7 +79,7 @@ from .multimodal import (
     MultimodalContextStore,
     validate_multimodal_content,
 )
-from .observability import ConversationExpectation, build_timeline, evaluate_conversation
+from .observability import ConversationExpectation, build_timeline, diagnostics_summary, evaluate_conversation, evaluate_slos
 from .pipeline_contract import pipeline_contract_payload
 from .provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities, provider_catalog
 from .provider_config import (
@@ -1433,6 +1433,42 @@ def create_app(
                 max_duplicate_agent_responses=request.max_duplicate_agent_responses,
                 require_final_agent_response=request.require_final_agent_response,
             ),
+        )
+
+    @app.get("/observability/slo")
+    def observability_slo(
+        call_id: str | None = None,
+        workspace_id: str | None = None,
+        voicebot_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 1000,
+    ) -> dict[str, Any]:
+        return evaluate_slos(
+            events.list_events(
+                call_id=call_id,
+                workspace_id=workspace_id,
+                voicebot_id=voicebot_id,
+                session_id=session_id,
+                limit=validated_limit(limit),
+            )
+        )
+
+    @app.get("/observability/diagnostics")
+    def observability_diagnostics(
+        call_id: str | None = None,
+        workspace_id: str | None = None,
+        voicebot_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 1000,
+    ) -> dict[str, Any]:
+        return diagnostics_summary(
+            events.list_events(
+                call_id=call_id,
+                workspace_id=workspace_id,
+                voicebot_id=voicebot_id,
+                session_id=session_id,
+                limit=validated_limit(limit),
+            )
         )
 
     @app.get("/context")

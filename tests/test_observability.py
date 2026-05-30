@@ -13,7 +13,9 @@ from voicebot.observability import (
     TraceContext,
     audio_observability_summary,
     build_timeline,
+    diagnostics_summary,
     evaluate_conversation,
+    evaluate_slos,
     latency_observability_summary,
     provider_observability_summary,
     structured_log_record,
@@ -157,6 +159,38 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(summary["slowest_turn"]["turn_id"], 1)
         self.assertEqual(summary["metrics"]["tts_synthesis_latency_seconds"]["latest"]["event_id"], metric.id)
 
+    def test_slo_evaluation_reports_breaches_and_targets(self) -> None:
+        events = EventStore(max_context_events=30)
+        connected = events.append("call-1", "call_connected", {})
+        playback = events.append("call-1", "bot_playback_started", {})
+        failed = events.append("call-1", "provider_call_failed", {"provider": "openai"})
+        fixed = [
+            type(connected)(connected.id, connected.call_id, connected.type, "2026-05-28T00:00:00+00:00", connected.data),
+            type(playback)(playback.id, playback.call_id, playback.type, "2026-05-28T00:00:03+00:00", playback.data),
+            failed,
+        ]
+
+        result = evaluate_slos(fixed)
+
+        checks = {check["name"]: check for check in result["checks"]}
+        self.assertFalse(checks["call_to_greeting_audio_seconds"]["ok"])
+        self.assertEqual(checks["call_to_greeting_audio_seconds"]["observed"], 3.0)
+        self.assertFalse(checks["provider_error_rate"]["ok"])
+        self.assertIn("seconds", result["targets"])
+
+    def test_diagnostics_summary_is_support_safe_and_includes_hints(self) -> None:
+        events = EventStore(max_context_events=20)
+        events.append("call-1", "stt_no_text", {"text": "sensitive text"})
+        events.append("call-1", "bot_playback_interrupted", {"reason": "user_speech_started"})
+        events.append("call-1", "provider_call_failed", {"provider": "openai", "api_key": "secret"})
+
+        diagnostics = diagnostics_summary(events.list_events(call_id="call-1"))
+
+        self.assertTrue(diagnostics["secret_safe"])
+        self.assertFalse(diagnostics["transcript_text_included"])
+        self.assertEqual(diagnostics["provider_failures"], {"openai": 1})
+        self.assertTrue(any("STT returned no text" in hint for hint in diagnostics["support_hints"]))
+
     def test_provider_summary_reports_latency_and_failures(self) -> None:
         events = EventStore(max_context_events=20)
         events.append("call-1", "metrics", {"name": "stt_duration_seconds", "value": 0.2, "provider": "openai"})
@@ -233,6 +267,7 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["counts"], {"call": 1})
         self.assertEqual(response.json()["events"][0]["call_id"], "call-1")
+        self.assertIn("slos", response.json())
 
     def test_evaluate_endpoint_runs_conversation_checks(self) -> None:
         events = EventStore(max_context_events=20)
@@ -253,6 +288,21 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ok"])
         self.assertEqual(response.json()["failures"], [])
+
+    def test_slo_and_diagnostics_endpoints_return_operational_views(self) -> None:
+        events = EventStore(max_context_events=20)
+        events.append("call-1", "call_connected", {"workspace_id": "workspace-1"})
+        events.append("call-1", "bot_playback_started", {"workspace_id": "workspace-1"})
+        events.append("call-1", "provider_call_failed", {"workspace_id": "workspace-1", "provider": "openai"})
+        client = self.build_client(events)
+
+        slo = client.get("/observability/slo?workspace_id=workspace-1")
+        diagnostics = client.get("/observability/diagnostics?workspace_id=workspace-1")
+
+        self.assertEqual(slo.status_code, 200)
+        self.assertIn("checks", slo.json())
+        self.assertEqual(diagnostics.status_code, 200)
+        self.assertIn("support_hints", diagnostics.json())
 
     def build_client(self, events: EventStore) -> TestClient:
         app = create_app(

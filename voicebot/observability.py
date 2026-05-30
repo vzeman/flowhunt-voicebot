@@ -73,9 +73,31 @@ EVENT_CATEGORIES: dict[str, TimelineCategory] = {
     "metrics": "telemetry",
     "context_compacted": "system",
     "system": "system",
+    "runtime_draining_started": "system",
+    "runtime_draining_stopped": "system",
+    "session_lease_acquired": "system",
+    "session_lease_renewed": "system",
+    "session_lease_released": "system",
+    "session_lease_expired": "system",
+    "session_lease_lost": "system",
+    "session_recovered": "system",
+    "session_interrupted": "system",
+    "session_admission_decided": "system",
 }
 
 SLOW_TURN_WARNING_SECONDS = 5.0
+
+SLO_TARGETS_SECONDS: dict[str, float] = {
+    "call_to_greeting_audio_seconds": 2.0,
+    "speech_to_transcript_seconds": 1.5,
+    "end_of_speech_to_playback_started_seconds": 2.5,
+    "subagent_result_handoff_seconds": 5.0,
+}
+
+SLO_TARGET_RATES: dict[str, float] = {
+    "successful_call_setup_rate": 0.98,
+    "provider_error_rate": 0.02,
+}
 
 
 @dataclass(frozen=True)
@@ -154,11 +176,119 @@ def build_timeline(events: list[VoicebotEvent]) -> dict[str, Any]:
         "audio": audio,
         "providers": providers,
         "latency": latency,
+        "slos": evaluate_slos(events),
         "health": timeline_health_summary(audio, providers, latency),
         "first_event_id": entries[0]["id"] if entries else None,
         "last_event_id": entries[-1]["id"] if entries else None,
         "duration_seconds": timeline_duration_seconds(events),
     }
+
+
+def evaluate_slos(events: list[VoicebotEvent]) -> dict[str, Any]:
+    latency = latency_observability_summary(events)
+    call_setup = call_setup_summary(events)
+    provider_summary = provider_observability_summary(events)["providers"]
+    checks = []
+
+    call_to_greeting = call_to_greeting_audio_seconds(events)
+    checks.append(_slo_check("call_to_greeting_audio_seconds", call_to_greeting, SLO_TARGETS_SECONDS["call_to_greeting_audio_seconds"], "seconds_below_or_equal"))
+
+    transcript_latencies = [
+        turn["speech_to_transcript_seconds"]
+        for turn in latency["turns"]
+        if turn.get("speech_to_transcript_seconds") is not None
+    ]
+    checks.append(_slo_check("speech_to_transcript_seconds", _max_or_none(transcript_latencies), SLO_TARGETS_SECONDS["speech_to_transcript_seconds"], "seconds_below_or_equal"))
+
+    first_audio_latencies = [
+        turn["end_of_speech_to_playback_started_seconds"]
+        for turn in latency["turns"]
+        if turn.get("end_of_speech_to_playback_started_seconds") is not None
+    ]
+    checks.append(_slo_check("end_of_speech_to_playback_started_seconds", _max_or_none(first_audio_latencies), SLO_TARGETS_SECONDS["end_of_speech_to_playback_started_seconds"], "seconds_below_or_equal"))
+
+    checks.append(_slo_check("successful_call_setup_rate", call_setup["success_rate"], SLO_TARGET_RATES["successful_call_setup_rate"], "rate_above_or_equal"))
+    checks.append(_slo_check("provider_error_rate", provider_error_rate(provider_summary), SLO_TARGET_RATES["provider_error_rate"], "rate_below_or_equal"))
+    return {
+        "ok": all(check["ok"] for check in checks if check["observed"] is not None),
+        "checks": checks,
+        "targets": {"seconds": SLO_TARGETS_SECONDS, "rates": SLO_TARGET_RATES},
+    }
+
+
+def diagnostics_summary(events: list[VoicebotEvent]) -> dict[str, Any]:
+    timeline = build_timeline(events)
+    return {
+        "trace_fields": ["trace_id", "workspace_id", "voicebot_id", "session_id", "call_id", "turn_id", "event_id"],
+        "secret_safe": True,
+        "transcript_text_included": False,
+        "timeline_health": timeline["health"],
+        "slo": timeline["slos"],
+        "categories": timeline["counts"],
+        "provider_failures": {
+            provider: summary["failure_count"]
+            for provider, summary in timeline["providers"].items()
+            if summary["failure_count"]
+        },
+        "slowest_turn": timeline["latency"]["slowest_turn"],
+        "support_hints": support_hints(timeline),
+    }
+
+
+def support_hints(timeline: dict[str, Any]) -> list[str]:
+    hints: list[str] = []
+    if timeline["audio"].get("stt_no_text"):
+        hints.append("STT returned no text; inspect audio level, language, prompt, and VAD endpointing.")
+    if timeline["audio"].get("playback_interrupted"):
+        hints.append("Playback was interrupted; inspect barge-in threshold and echo/noise controls.")
+    if timeline["providers"]:
+        failed = [name for name, summary in timeline["providers"].items() if summary["failure_count"]]
+        if failed:
+            hints.append(f"Provider failures detected: {', '.join(sorted(failed))}.")
+    slowest = timeline["latency"].get("slowest_turn")
+    if slowest:
+        hints.append("Slow turn detected; inspect speech-to-transcript, agent, TTS, and playback timestamps for the turn.")
+    return hints
+
+
+def call_setup_summary(events: list[VoicebotEvent]) -> dict[str, Any]:
+    started = _count_events(events, "call_started")
+    connected = _count_events(events, "call_connected")
+    failed = _count_events(events, "transport_error") + _count_events(events, "session_interrupted")
+    attempts = max(started, connected + failed)
+    success_rate = (connected / attempts) if attempts else None
+    return {"started": started, "connected": connected, "failed": failed, "success_rate": success_rate}
+
+
+def call_to_greeting_audio_seconds(events: list[VoicebotEvent]) -> float | None:
+    ordered = sorted(events, key=lambda item: item.id)
+    connected = next((event for event in ordered if event.type == "call_connected"), None)
+    playback = next((event for event in ordered if event.type == "bot_playback_started"), None)
+    if connected is None or playback is None:
+        return None
+    return _seconds_between_events(connected, playback)
+
+
+def provider_error_rate(provider_summary: dict[str, dict[str, Any]]) -> float | None:
+    total_failures = sum(int(summary.get("failure_count") or 0) for summary in provider_summary.values())
+    total_observed = sum(int(summary.get("latency_count") or 0) + int(summary.get("failure_count") or 0) for summary in provider_summary.values())
+    if total_observed == 0:
+        return None
+    return total_failures / total_observed
+
+
+def _slo_check(name: str, observed: float | None, target: float, comparator: str) -> dict[str, Any]:
+    ok = None
+    if observed is not None:
+        if comparator in {"seconds_below_or_equal", "rate_below_or_equal"}:
+            ok = observed <= target
+        elif comparator == "rate_above_or_equal":
+            ok = observed >= target
+    return {"name": name, "ok": ok, "observed": observed, "target": target, "comparator": comparator}
+
+
+def _max_or_none(values: list[float]) -> float | None:
+    return max(values) if values else None
 
 
 def audio_observability_summary(events: list[VoicebotEvent]) -> dict[str, Any]:

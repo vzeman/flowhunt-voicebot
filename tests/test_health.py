@@ -13,6 +13,7 @@ from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.health import (
     ami_configuration_check,
+    drain_check,
     durable_storage_check,
     pipeline_contract_check,
     readiness_report,
@@ -45,6 +46,7 @@ class HealthTests(unittest.TestCase):
         self.assertTrue(report["checks"]["sip_media_plane"]["ok"])
         self.assertTrue(report["checks"]["webrtc_media_plane"]["ok"])
         self.assertTrue(report["checks"]["storage_contracts"]["ok"])
+        self.assertTrue(report["checks"]["drain"]["ok"])
         self.assertTrue(report["checks"]["durable_storage"]["ok"])
 
     def test_readiness_reports_transcript_corruption_stats(self) -> None:
@@ -131,9 +133,28 @@ class HealthTests(unittest.TestCase):
                 "sip_media_plane",
                 "webrtc_media_plane",
                 "storage_contracts",
+                "drain",
                 "durable_storage",
             },
         )
+
+    def test_readiness_fails_when_runtime_is_draining(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = readiness_report(
+                transcripts=TranscriptStore(directory),
+                asterisk=None,
+                active_call_ids=[],
+                drain_state={"draining": True, "reason": "rollout", "readiness_accepts_new_sessions": False},
+            )
+
+        self.assertFalse(report["ok"])
+        self.assertFalse(report["checks"]["drain"]["ok"])
+        self.assertEqual(report["checks"]["drain"]["drain"]["reason"], "rollout")
+
+    def test_drain_check_reports_ready_when_not_draining(self) -> None:
+        check = drain_check({"draining": False, "readiness_accepts_new_sessions": True}).to_dict()
+
+        self.assertTrue(check["ok"])
 
     def test_pipeline_contract_check_exposes_valid_pipeline_catalog(self) -> None:
         check = pipeline_contract_check().to_dict()

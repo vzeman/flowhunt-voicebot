@@ -67,6 +67,41 @@ The runtime pipeline should process typed frames/events in these categories:
 | `metrics` | `metrics` |
 | `system` | `system`, `error` |
 
+## Pipeline Contract
+
+The canonical stage contract is exposed by `voicebot.pipeline_contract` and the
+HTTP endpoint:
+
+`GET /pipeline/contract`
+
+The contract is versioned with `pipeline_version`, and every live SIP/WebRTC
+session snapshot plus lifecycle event includes that version. This makes session
+logs auditable after pipeline changes and gives future queue workers a stable
+compatibility boundary.
+
+The current stage sequence is:
+
+| Stage | Purpose | Queue boundary |
+| --- | --- | --- |
+| `transport_input` | Normalize SIP/Asterisk AudioSocket and WebRTC lifecycle/media input | `transport_owned` |
+| `audio_normalization` | Resample, jitter-buffer, and echo-gate inbound audio | `in_process` |
+| `turn_detection` | Detect caller turns and interrupt playback on barge-in | `in_process` |
+| `stt` | Convert caller speech to transcript frames through replaceable STT providers | `queue_ready` |
+| `communication_agent` | Produce customer-facing responses and request tools/subagents | `queue_ready` |
+| `subagent_delegation` | Track provider-neutral colleague task lifecycle such as FlowHunt work | `durable_queue_required` |
+| `tts` | Convert agent response chunks to audio through replaceable TTS providers | `queue_ready` |
+| `playback_output` | Send interruptible audio to the active transport | `transport_owned` |
+| `post_output_audit` | Persist transcripts, metrics, timelines, and retention artifacts | `queue_ready` |
+
+`queue_ready` means the local Docker runtime still executes the stage in the
+process, but the frame contract is explicit enough to move that work to a
+durable queue later. `durable_queue_required` marks work that must be backed by
+leases/retries before production Kubernetes failover.
+
+Both `asterisk_audiosocket` and `webrtc` map to this same conceptual pipeline.
+Transport-specific behavior belongs in adapters at the input/output edges, not
+inside STT, agent, subagent, or TTS orchestration.
+
 ## Ordering Rules
 
 Frames in these categories are session ordered:

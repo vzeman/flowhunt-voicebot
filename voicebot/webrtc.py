@@ -18,6 +18,7 @@ from .config import Settings
 from .events import EventStore, VoicebotEvent
 from .frames import AudioInputFrame, TextFrame, TranscriptionFrame
 from .pipeline import PipelineRunner
+from .pipeline_contract import PIPELINE_CONTRACT_VERSION
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
 from .realtime_audio import AudioJitterBuffer, JitterBufferConfig, TurnDetector, trim_trailing_silence, turn_detection_config_from_settings
 from .spoken_text import limit_spoken_response_text, split_spoken_response_text
@@ -146,7 +147,11 @@ class WebRTCCallSession:
         self._speech_worker.start()
 
     def start(self) -> None:
-        lifecycle_data = {"session_id": self.session_id, **self.descriptor.lifecycle_event_data()}
+        lifecycle_data = {
+            "session_id": self.session_id,
+            **self.descriptor.lifecycle_event_data(),
+            "pipeline_version": PIPELINE_CONTRACT_VERSION,
+        }
         self.events.append(
             self.call_id,
             "call_started",
@@ -417,6 +422,7 @@ class WebRTCCallSession:
             "call_id": self.call_id,
             "session_id": self.session_id,
             "transport": "webrtc",
+            "pipeline_version": PIPELINE_CONTRACT_VERSION,
             "connection_state": self.connection_state,
             "recording": self.recording_event.is_set(),
             "playback_active": self.playback.is_active(),
@@ -438,7 +444,15 @@ class WebRTCCallSession:
         if self._jitter_buffer is not None:
             self._jitter_buffer.clear()
         self.connection_state = "closed"
-        self.events.append(self.call_id, "call_ended", {"session_id": self.session_id, **self.descriptor.lifecycle_event_data()})
+        self.events.append(
+            self.call_id,
+            "call_ended",
+            {
+                "session_id": self.session_id,
+                **self.descriptor.lifecycle_event_data(),
+                "pipeline_version": PIPELINE_CONTRACT_VERSION,
+            },
+        )
 
     def _jitter_buffer_snapshot(self) -> dict[str, Any]:
         if self._jitter_buffer is None:

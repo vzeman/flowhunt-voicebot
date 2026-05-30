@@ -20,6 +20,11 @@ The descriptor has `lifecycle_event_data()` so `call_started` and
 `call_connected` events can carry the same route and transport fields for every
 transport.
 
+Runtime sessions add `pipeline_version` from the canonical pipeline contract to
+their lifecycle events and snapshots. SIP and WebRTC both map to the same stage
+sequence exposed at `GET /pipeline/contract`; transport-specific behavior stays
+behind the media adapters at the first and last pipeline stages.
+
 Descriptors require a non-empty `call_id`, supported transport kind, and
 positive `sample_rate`. Transport factories should fail fast on invalid media
 rates or unsupported transport kinds before creating runtime sessions or

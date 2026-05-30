@@ -58,6 +58,7 @@ EVENT_CATEGORIES: dict[str, TimelineCategory] = {
     "flowhunt_flow_updated": "task",
     "flowhunt_flow_completed": "task",
     "provider_call_failed": "telemetry",
+    "latency_budget_exceeded": "telemetry",
     "subagent_task_requested": "task",
     "subagent_task_deduplicated": "task",
     "subagent_task_updated": "task",
@@ -91,7 +92,10 @@ SLOW_TURN_WARNING_SECONDS = 5.0
 SLO_TARGETS_SECONDS: dict[str, float] = {
     "call_to_greeting_audio_seconds": 2.0,
     "speech_to_transcript_seconds": 1.5,
+    "agent_response_latency_seconds": 1.2,
+    "tts_first_audio_latency_seconds": 0.8,
     "end_of_speech_to_playback_started_seconds": 2.5,
+    "colleague_result_to_agent_request_seconds": 12.0,
     "subagent_result_handoff_seconds": 5.0,
 }
 
@@ -207,6 +211,15 @@ def evaluate_slos(events: list[VoicebotEvent]) -> dict[str, Any]:
         if turn.get("end_of_speech_to_playback_started_seconds") is not None
     ]
     checks.append(_slo_check("end_of_speech_to_playback_started_seconds", _max_or_none(first_audio_latencies), SLO_TARGETS_SECONDS["end_of_speech_to_playback_started_seconds"], "seconds_below_or_equal"))
+
+    metrics = latency["metrics"]
+    for metric_name in (
+        "agent_response_latency_seconds",
+        "tts_first_audio_latency_seconds",
+        "colleague_result_to_agent_request_seconds",
+    ):
+        latest = metrics.get(metric_name, {}).get("max")
+        checks.append(_slo_check(metric_name, _optional_float(latest), SLO_TARGETS_SECONDS[metric_name], "seconds_below_or_equal"))
 
     checks.append(_slo_check("successful_call_setup_rate", call_setup["success_rate"], SLO_TARGET_RATES["successful_call_setup_rate"], "rate_above_or_equal"))
     checks.append(_slo_check("provider_error_rate", provider_error_rate(provider_summary), SLO_TARGET_RATES["provider_error_rate"], "rate_below_or_equal"))

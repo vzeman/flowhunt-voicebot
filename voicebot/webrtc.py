@@ -21,6 +21,7 @@ from .pipeline import PipelineRunner
 from .pipeline_contract import PIPELINE_CONTRACT_VERSION
 from .processor_registry import ProcessorDependencies, ProcessorRegistry, ProcessorSpec, default_processor_registry
 from .realtime_audio import AudioJitterBuffer, JitterBufferConfig, TurnDetector, trim_trailing_silence, turn_detection_config_from_settings
+from .realtime_quality import metric_latency_budget_seconds
 from .spoken_text import limit_spoken_response_text, split_spoken_response_text
 from .turn_coalescing import TurnCoalescer
 from .transports import WEBRTC_CAPABILITIES, StaticMediaTransport
@@ -696,7 +697,23 @@ class WebRTCCallSession:
             self._record_metric("agent_response_latency_seconds", time.monotonic() - started, {"event_id": event_id})
 
     def _record_metric(self, name: str, value: float, data: dict | None = None) -> None:
-        self.events.append(self.call_id, "metrics", {"name": name, "value": value, **(data or {})})
+        payload = {"name": name, "value": value, **(data or {})}
+        budget = metric_latency_budget_seconds(self.settings, name)
+        if budget is not None:
+            payload["budget_seconds"] = budget
+        metric = self.events.append(self.call_id, "metrics", payload)
+        if budget is not None and value > budget:
+            self.events.append(
+                self.call_id,
+                "latency_budget_exceeded",
+                {
+                    "metric_event_id": metric.id,
+                    "name": name,
+                    "value": value,
+                    "budget_seconds": budget,
+                    **(data or {}),
+                },
+            )
 
     def _emit_agent_request(self, data: dict) -> VoicebotEvent:
         request = self.events.append(self.call_id, "agent_response_requested", data)

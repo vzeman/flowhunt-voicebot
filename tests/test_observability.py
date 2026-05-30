@@ -164,9 +164,11 @@ class ObservabilityTests(unittest.TestCase):
         connected = events.append("call-1", "call_connected", {})
         playback = events.append("call-1", "bot_playback_started", {})
         failed = events.append("call-1", "provider_call_failed", {"provider": "openai"})
+        agent_metric = events.append("call-1", "metrics", {"name": "agent_response_latency_seconds", "value": 2.0})
         fixed = [
             type(connected)(connected.id, connected.call_id, connected.type, "2026-05-28T00:00:00+00:00", connected.data),
             type(playback)(playback.id, playback.call_id, playback.type, "2026-05-28T00:00:03+00:00", playback.data),
+            agent_metric,
             failed,
         ]
 
@@ -175,6 +177,8 @@ class ObservabilityTests(unittest.TestCase):
         checks = {check["name"]: check for check in result["checks"]}
         self.assertFalse(checks["call_to_greeting_audio_seconds"]["ok"])
         self.assertEqual(checks["call_to_greeting_audio_seconds"]["observed"], 3.0)
+        self.assertFalse(checks["agent_response_latency_seconds"]["ok"])
+        self.assertEqual(checks["agent_response_latency_seconds"]["observed"], 2.0)
         self.assertFalse(checks["provider_error_rate"]["ok"])
         self.assertIn("seconds", result["targets"])
 

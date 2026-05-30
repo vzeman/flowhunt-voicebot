@@ -232,7 +232,7 @@ def has_http_failed_say(results: list[dict]) -> bool:
 
 
 class DelayedProgressAcknowledgement:
-    def __init__(self, base_url: str, task: dict, delay_seconds: float = 0.9) -> None:
+    def __init__(self, base_url: str, task: dict, delay_seconds: float = 1.8) -> None:
         self.base_url = base_url
         self.task = task
         self.delay_seconds = delay_seconds
@@ -258,8 +258,9 @@ class DelayedProgressAcknowledgement:
                 "POST",
                 f"{self.base_url}/calls/{self.task['call_id']}/responses",
                 {
-                    "text": "One moment, I am checking that.",
+                    "text": "Give me a moment.",
                     "response_to_event_id": None,
+                    "response_kind": "progress_ack",
                 },
             )
             self.delivered = True

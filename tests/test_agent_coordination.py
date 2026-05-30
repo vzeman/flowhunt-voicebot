@@ -66,8 +66,21 @@ class AgentCoordinationTests(unittest.TestCase):
         calls = ensure_action_acknowledgements([action])
 
         self.assertEqual([call["name"] for call in calls], ["say", "transfer_call"])
-        self.assertIn("transfer you to 123", calls[0]["arguments"]["text"])
+        self.assertEqual(calls[0]["arguments"]["text"], "Transferring to 123 now.")
         self.assertEqual(calls[0]["arguments"]["response_kind"], "call_control_ack")
+        self.assertEqual(calls[0]["arguments"]["call_control_ack_wait_seconds"], 0.0)
+
+    def test_action_acknowledgement_is_short_for_hangup(self) -> None:
+        action = {
+            "name": "hangup_call",
+            "arguments": {"call_id": "call-1", "response_to_event_id": 10},
+        }
+
+        calls = ensure_action_acknowledgements([action])
+
+        self.assertEqual(calls[0]["arguments"]["text"], "Goodbye.")
+        self.assertEqual(calls[0]["arguments"]["response_kind"], "call_control_ack")
+        self.assertEqual(calls[0]["arguments"]["call_control_ack_wait_seconds"], 1.2)
 
     def test_action_acknowledgement_uses_existing_say(self) -> None:
         calls = ensure_action_acknowledgements(
@@ -78,10 +91,20 @@ class AgentCoordinationTests(unittest.TestCase):
         )
 
         self.assertEqual([call["name"] for call in calls], ["say", "hangup_call"])
+        self.assertEqual(calls[0]["arguments"]["response_kind"], "call_control_ack")
+        self.assertEqual(calls[0]["arguments"]["call_control_ack_wait_seconds"], 1.2)
 
     def test_execute_conversational_tool_calls_waits_after_say_before_control(self) -> None:
         calls = [
-            {"name": "say", "arguments": {"call_id": "call-1", "text": "Goodbye."}},
+            {
+                "name": "say",
+                "arguments": {
+                    "call_id": "call-1",
+                    "text": "Goodbye.",
+                    "response_kind": "call_control_ack",
+                    "call_control_ack_wait_seconds": 1.2,
+                },
+            },
             {"name": "hangup_call", "arguments": {"call_id": "call-1"}},
         ]
 
@@ -104,6 +127,34 @@ class AgentCoordinationTests(unittest.TestCase):
                 call("POST", "http://voicebot/agent/tools/hangup_call", {"arguments": calls[1]["arguments"]}),
             ]
         )
+
+    def test_execute_conversational_tool_calls_can_run_control_while_speech_is_playing(self) -> None:
+        calls = [
+            {
+                "name": "say",
+                "arguments": {
+                    "call_id": "call-1",
+                    "text": "Transferring now.",
+                    "response_kind": "call_control_ack",
+                    "call_control_ack_wait_seconds": 0.0,
+                },
+            },
+            {"name": "transfer_call", "arguments": {"call_id": "call-1", "target": "123"}},
+        ]
+
+        with patch("local_command_agent.http_json") as http_json:
+            http_json.return_value = {"ok": True}
+
+            results = execute_conversational_tool_calls("http://voicebot", calls)
+
+        self.assertEqual([result["name"] for result in results], ["say", "transfer_call"])
+        http_json.assert_has_calls(
+            [
+                call("POST", "http://voicebot/agent/tools/say", {"arguments": calls[0]["arguments"]}),
+                call("POST", "http://voicebot/agent/tools/transfer_call", {"arguments": calls[1]["arguments"]}),
+            ]
+        )
+        self.assertEqual(http_json.call_count, 2)
 
     def test_execute_conversational_tool_calls_runs_background_work_during_speech(self) -> None:
         calls = [

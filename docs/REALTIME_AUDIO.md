@@ -116,18 +116,21 @@ releases the claimed task instead of renewing it indefinitely.
 
 For ordinary caller requests, the communication agent also starts a delayed
 progress acknowledgement timer while the model is deciding what to do. If no
-answer or tool call is ready within roughly one second, the bot says a short
-"I am checking that" message without marking the caller task as answered. When
-the model later invokes a colleague/subagent tool, the wrapper suppresses the
-tool's default progress phrase so the caller does not hear duplicate waiting
-messages.
+answer or tool call is ready within roughly two seconds, the bot says a short
+"Give me a moment" message without marking the caller task as answered. This
+speech is tagged as `response_kind=progress_ack`, so a later high-priority
+call-control acknowledgement can interrupt it instead of waiting behind filler
+audio. When the model later invokes a colleague/subagent tool, the wrapper
+suppresses the tool's default progress phrase so the caller does not hear
+duplicate waiting messages.
 
 Colleague/subagent progress speech is intentionally scheduled in parallel with
 the background work. The tool handler queues the spoken progress update as a
 fire-and-forget call response and immediately continues to create or schedule
-the FlowHunt/subagent task. Only call-control actions that depend on sequencing,
-such as saying goodbye before hangup, wait for speech playback before executing
-the control action.
+the FlowHunt/subagent task. Call-control sequencing is explicit per action:
+hangup waits only for a short goodbye acknowledgement, while transfer and DTMF
+can run once their acknowledgement has been queued so work can continue while
+audio is playing.
 
 The communication-agent tool executor separates speech intent from background
 work intent when both are returned in the same model turn. `say` calls and
@@ -159,6 +162,11 @@ The SIP and WebRTC runtimes record that kind on `agent_response_received`,
 being dropped as an ordinary stale answer after later caller noise. The decision
 to control the call still comes from the agent's tool call, not from matching
 caller text against language-specific keywords.
+
+Generated call-control acknowledgements are intentionally brief: hangup says
+"Goodbye", transfer says "Transferring now", and DTMF says "Sending that now".
+Keeping these phrases short reduces the time between the model's tool decision
+and the actual call-control action.
 
 Short conversational answers are synthesized as one TTS request even when they
 are slightly longer than the streaming chunk target. This avoids splitting a

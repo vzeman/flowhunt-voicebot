@@ -305,7 +305,7 @@ def execute_conversational_tool_calls(base_url: str, calls: list[dict]) -> list[
     results = execute_speech_and_background_calls(base_url, say_calls, background_calls)
     results.extend(execute_tool_calls(base_url, other_calls))
     if say_calls and control_calls:
-        wait_for_spoken_acknowledgement(base_url, say_calls[-1])
+        wait_for_spoken_acknowledgement(base_url, say_calls[-1], control_ack_wait_seconds(say_calls[-1]))
     results.extend(execute_tool_calls(base_url, control_calls))
     return results
 
@@ -323,7 +323,9 @@ def execute_speech_and_background_calls(base_url: str, say_calls: list[dict], ba
     return [*speech_results, *background_results]
 
 
-def wait_for_spoken_acknowledgement(base_url: str, say_call: dict, timeout_seconds: float = 4.0) -> None:
+def wait_for_spoken_acknowledgement(base_url: str, say_call: dict, timeout_seconds: float = 1.2) -> None:
+    if timeout_seconds <= 0:
+        return
     call_id = (say_call.get("arguments") or {}).get("call_id")
     if not call_id:
         return
@@ -339,6 +341,15 @@ def wait_for_spoken_acknowledgement(base_url: str, say_call: dict, timeout_secon
         if saw_playback and not playback_active:
             return
         time.sleep(0.05)
+
+
+def control_ack_wait_seconds(say_call: dict) -> float:
+    args = say_call.get("arguments") if isinstance(say_call.get("arguments"), dict) else {}
+    value = args.get("call_control_ack_wait_seconds", 1.2)
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return 1.2
 
 
 READ_ONLY_TOOL_NAMES = {
@@ -385,13 +396,16 @@ def action_acknowledgement(call: dict) -> dict | None:
         return None
     response_to_event_id = args.get("response_to_event_id")
     if name == "hangup_call":
-        text = "Sure, I will hang up the call now. Goodbye."
+        text = "Goodbye."
+        wait_seconds = 1.2
     elif name == "transfer_call":
         target = str(args.get("target") or "").strip()
-        text = f"Sure, I will transfer you to {target} now." if target else "Sure, I will transfer the call now."
+        text = f"Transferring to {target} now." if target else "Transferring now."
+        wait_seconds = 0.0
     elif name == "send_dtmf":
         digit = str(args.get("digit") or "").strip()
-        text = f"Sure, I will send digit {digit} now." if digit else "Sure, I will send that keypad digit now."
+        text = f"Sending {digit} now." if digit else "Sending that now."
+        wait_seconds = 0.0
     else:
         return None
     return {
@@ -401,6 +415,7 @@ def action_acknowledgement(call: dict) -> dict | None:
             "text": text,
             "response_to_event_id": response_to_event_id,
             "response_kind": "call_control_ack",
+            "call_control_ack_wait_seconds": wait_seconds,
         },
     }
 
@@ -410,7 +425,9 @@ def ensure_action_acknowledgements(tool_calls: list[dict]) -> list[dict]:
     for call in tool_calls:
         if call.get("name") in CALL_CONTROL_TOOL_NAMES:
             acknowledgement = action_acknowledgement(call)
-            if acknowledgement and not _has_prior_say(result):
+            if acknowledgement and _has_prior_say(result):
+                mark_prior_say_as_action_ack(result, acknowledgement)
+            elif acknowledgement:
                 result.append(acknowledgement)
         result.append(call)
     return result
@@ -418,6 +435,18 @@ def ensure_action_acknowledgements(tool_calls: list[dict]) -> list[dict]:
 
 def _has_prior_say(calls: list[dict]) -> bool:
     return any(call.get("name") == "say" for call in calls)
+
+
+def mark_prior_say_as_action_ack(calls: list[dict], acknowledgement: dict) -> None:
+    acknowledgement_args = acknowledgement.get("arguments") if isinstance(acknowledgement.get("arguments"), dict) else {}
+    for call in reversed(calls):
+        if call.get("name") != "say":
+            continue
+        args = call.setdefault("arguments", {})
+        if isinstance(args, dict):
+            args.setdefault("response_kind", "call_control_ack")
+            args.setdefault("call_control_ack_wait_seconds", acknowledgement_args.get("call_control_ack_wait_seconds", 1.2))
+        return
 
 
 def answer_as_say_call(answer: str, latest: dict) -> dict | None:

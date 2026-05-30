@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agents"))
 from agent_provider_registry import AgentProviderRegistry
 from communication_agent import (
     CommunicationAgentConfig,
+    DelayedProgressAcknowledgement,
     has_colleague_tool_call,
     should_send_delayed_acknowledgement,
     suppress_colleague_tool_progress,
@@ -85,6 +86,22 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
         )
         self.assertFalse(
             should_send_delayed_acknowledgement({"data": {"reason": "colleague_result", "text": "done"}})
+        )
+
+    def test_delayed_ack_is_later_and_tagged_as_progress(self) -> None:
+        ack = DelayedProgressAcknowledgement("http://voicebot", {"call_id": "call-1"}, delay_seconds=0.0)
+
+        with unittest.mock.patch("communication_agent.http_json") as http_json:
+            ack._run()
+
+        http_json.assert_called_once_with(
+            "POST",
+            "http://voicebot/calls/call-1/responses",
+            {
+                "text": "Give me a moment.",
+                "response_to_event_id": None,
+                "response_kind": "progress_ack",
+            },
         )
 
     def test_colleague_tool_progress_can_be_suppressed_after_delayed_ack(self) -> None:

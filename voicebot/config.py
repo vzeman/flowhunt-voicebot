@@ -57,7 +57,7 @@ class Settings:
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_base_url: str = os.getenv("VOICEBOT_OPENAI_BASE_URL", os.getenv("OPENAI_BASE_URL", ""))
     openai_stt_model: str = os.getenv("VOICEBOT_OPENAI_STT_MODEL", "whisper-1")
-    language: str | None = os.getenv("VOICEBOT_LANGUAGE", "en") or None
+    language: str | None = os.getenv("VOICEBOT_LANGUAGE", "auto") or None
     stt_prompt: str = os.getenv("VOICEBOT_STT_PROMPT", "")
     stt_no_speech_threshold: float = env_float("VOICEBOT_STT_NO_SPEECH_THRESHOLD", 0.60)
     stt_logprob_threshold: float = env_float("VOICEBOT_STT_LOGPROB_THRESHOLD", -1.0)

@@ -71,6 +71,7 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
         )
     prompt_config = prompt_config_for_tasks(tasks, context)
     language = str(prompt_config.get("language") or "en")
+    language_instruction = response_language_instruction(language)
     custom_system_prompt = str(prompt_config.get("system_prompt") or "").strip()
     greeting_prompt = str(prompt_config.get("greeting") or "").strip()
     output_format = {
@@ -109,8 +110,7 @@ Configured voicebot prompts:
     return f"""You are an AI voicebot speaking with a customer on a phone call.
 Your job is to help the caller, answer their questions, solve practical
 problems, and use tools when a phone action is needed.
-Respond in the configured default language unless the caller clearly uses
-another language or asks for a different language.
+{language_instruction}
 {custom_instructions}
 
 Do not repeat the caller's words back as the whole answer. Treat transcripts as
@@ -187,6 +187,19 @@ tool call is invalid because no work will be started.
 Return either plain text to speak, or JSON in this form:
 {json.dumps(output_format, ensure_ascii=False, indent=2)}
 """
+
+
+def response_language_instruction(language: str) -> str:
+    normalized = language.strip().lower()
+    if normalized in {"", "auto", "detect", "detected", "multilingual", "any"}:
+        return (
+            "Detect the caller's language from the latest caller message and respond in that language. "
+            "If the caller changes language, switch with them. If no caller language is known yet, use English."
+        )
+    return (
+        "Respond in the configured default language unless the caller clearly uses "
+        "another language or asks for a different language."
+    )
 
 
 def prompt_config_for_tasks(tasks: list[dict], context: dict) -> dict:

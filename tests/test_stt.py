@@ -6,10 +6,15 @@ from unittest.mock import patch
 
 import numpy as np
 
-from voicebot.stt import OpenAISTTProvider
+from voicebot.stt import OpenAISTTProvider, _stt_language_hint
 
 
 class OpenAISTTProviderTests(unittest.TestCase):
+    def test_auto_language_does_not_force_stt_language_hint(self) -> None:
+        self.assertIsNone(_stt_language_hint("auto"))
+        self.assertIsNone(_stt_language_hint("multilingual"))
+        self.assertEqual(_stt_language_hint("sk"), "sk")
+
     def test_new_openai_transcribe_models_use_json_response_format(self) -> None:
         provider = OpenAISTTProvider.__new__(OpenAISTTProvider)
 

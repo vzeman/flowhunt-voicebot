@@ -429,6 +429,12 @@ send every field when replacing the config.
 Updates only the supplied prompt fields. Supported fields are `greeting`,
 `system_prompt`, `stt_prompt`, and `language`.
 
+Use `language: "auto"` for multilingual voicebots. In that mode the default STT
+adapter does not force a language hint, and the communication agent is
+instructed to answer in the caller's detected language. Use a concrete language
+code such as `sk` or `en` when the voicebot should prefer that language for
+greeting and responses.
+
 Prompt changes emit `voicebot_prompts_updated` and a `security_audit` event.
 
 ### PUT `/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers`

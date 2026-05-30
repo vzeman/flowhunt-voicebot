@@ -113,6 +113,12 @@ to fetch prompt config on every turn. Prompt overrides take precedence over
 prompts stored inside versioned runtime config; if neither exists, local `.env`
 defaults are used.
 
+For multilingual voicebots, configure prompt `language` as `auto`. The STT
+runtime treats `auto`, `detect`, `multilingual`, and `any` as no fixed language
+hint, while the communication agent mirrors the latest caller language. Use a
+fixed language code only when the voicebot should intentionally prefer one
+language.
+
 Subagent prompt hooks are part of the versioned runtime config, not the
 standalone communication prompt override. They are configured per provider kind
 under `subagents.prompts`:

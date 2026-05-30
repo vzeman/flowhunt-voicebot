@@ -109,15 +109,35 @@ class VoicebotQuotaConfig:
 
 
 @dataclass(frozen=True)
+class SubagentPromptConfig:
+    before_call_prompt: str = "I will ask a colleague to check that and come back with the result."
+    after_call_prompt: str = "A colleague is working on the request."
+    result_prompt: str = "A colleague finished checking the caller request. Result: {result}"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "before_call_prompt": self.before_call_prompt,
+            "after_call_prompt": self.after_call_prompt,
+            "result_prompt": self.result_prompt,
+        }
+
+
+@dataclass(frozen=True)
 class VoicebotSubagentConfig:
     flowhunt_workspace_id: str = ""
     flowhunt_flow_id: str = ""
     flowhunt_project_id: str = ""
     complex_backend: str = "flow"
+    prompts: dict[str, SubagentPromptConfig] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.complex_backend not in {"flow", "project", "disabled"}:
             raise ValueError("complex_backend must be flow, project, or disabled")
+        for provider, prompts in self.prompts.items():
+            if not provider.strip():
+                raise ValueError("subagent prompt provider must not be blank")
+            if not isinstance(prompts, SubagentPromptConfig):
+                raise ValueError("subagent prompts must be SubagentPromptConfig values")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -125,7 +145,11 @@ class VoicebotSubagentConfig:
             "flowhunt_flow_id": self.flowhunt_flow_id,
             "flowhunt_project_id": self.flowhunt_project_id,
             "complex_backend": self.complex_backend,
+            "prompts": {provider: prompts.as_dict() for provider, prompts in sorted(self.prompts.items())},
         }
+
+    def prompt_for(self, provider: str) -> SubagentPromptConfig:
+        return self.prompts.get(provider) or SubagentPromptConfig()
 
 
 @dataclass(frozen=True)

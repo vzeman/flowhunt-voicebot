@@ -128,6 +128,22 @@ parallel with task creation. The caller can hear that work is starting while the
 subagent task is already being submitted or polled; the task lifecycle is not
 blocked by TTS generation or playback.
 
+Each subagent provider can have editable prompt hooks in the voicebot runtime
+config:
+
+- `before_call_prompt`: spoken immediately before the provider is called
+- `after_call_prompt`: stored with the task and used as provider progress after
+  submission
+- `result_prompt`: rendered when the provider completes and passed to the
+  communication agent as `consume_prompt` when explicitly configured
+
+Prompt hooks are keyed by provider kind, for example `flowhunt_flow` or
+`internal_worker`. Result prompts support placeholders for `{result}`,
+`{provider}`, `{status}`, `{error}`, `{call_id}`, `{task_id}`,
+`{external_task_id}`, and `{input_text}`. This keeps FlowHunt-specific wording,
+language, and result-consumption style configurable per voicebot instead of
+hardcoded in the communication agent.
+
 When an agent model returns both a `say` call and a colleague/subagent work call
 in the same turn, the tool executor treats them as separate intents and
 dispatches them concurrently. This keeps customer-facing speech responsive

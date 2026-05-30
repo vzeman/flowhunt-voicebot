@@ -258,6 +258,23 @@ class SubagentTests(unittest.TestCase):
         self.assertEqual(client.invoked, [("configured-flow", "Count pages", 0, 3)])
         self.assertEqual(submitted.provider_references["target_id"], "configured-flow")
 
+    def test_flowhunt_provider_uses_prompt_hook_progress_from_metadata(self) -> None:
+        client = FakeFlowHuntClient()
+        provider = FlowHuntSubagentProvider("flowhunt_flow", client, "flow-1")
+        request = SubagentTaskRequest(
+            workspace_id="workspace-1",
+            session_id="call-1",
+            request_event_id=10,
+            provider="flowhunt_flow",
+            input_text="Count pages",
+            metadata={"after_call_text": "The specialist is checking it now."},
+        )
+
+        submitted = provider.submit(request)
+
+        self.assertEqual(submitted.status, "running")
+        self.assertEqual(submitted.progress_messages[-1], "The specialist is checking it now.")
+
     def test_coordinator_exposes_registered_subagent_provider_catalog(self) -> None:
         coordinator = SubagentCoordinator()
         coordinator.register(FakeProvider())

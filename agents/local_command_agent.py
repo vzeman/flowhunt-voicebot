@@ -129,6 +129,8 @@ running, give a short natural progress update only when it adds value; do not
 repeat the same waiting message. Never call invoke_flowhunt_flow or
 create_flowhunt_project_issue while handling a colleague update; use the
 colleague update as the result or status of the already-running work.
+If a colleague update includes consume_prompt, follow that prompt when turning
+the colleague result into a spoken answer.
 If the caller asks to end the call, call the hangup_call tool. If the caller
 asks to transfer the call, call transfer_call with the requested extension or
 target. If the caller asks you to press or send a keypad digit, call send_dtmf
@@ -650,6 +652,8 @@ def fast_tool_calls(task: dict) -> list[dict]:
         }]
 
     if is_colleague_update_task(task):
+        if data.get("consume_prompt"):
+            return []
         answer = colleague_update_answer(task)
         if not answer:
             return []

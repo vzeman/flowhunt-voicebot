@@ -136,6 +136,7 @@ from .runtime_config import (
     VoicebotPromptConfigStore,
     VoicebotRuntimeConfigStore,
     VoicebotSubagentConfig,
+    SubagentPromptConfig,
     runtime_config_to_dict,
 )
 from .realtime_quality import metric_latency_budget_seconds, realtime_audio_profile, realtime_audio_profile_issues
@@ -157,6 +158,11 @@ _API_MULTIMODAL_CAPABILITIES = ModalityCapabilities(
     input=frozenset(_MODALITIES),
     output=frozenset(_MODALITIES),
 )
+
+
+class _SafeFormatDict(dict[str, Any]):
+    def __missing__(self, key: str) -> str:
+        return ""
 
 
 class WebSocketHub:
@@ -277,6 +283,42 @@ def create_app(
             stt_prompt=runtime_settings.stt_prompt,
             language=runtime_settings.language or "en",
         )
+
+    def default_subagent_config() -> VoicebotSubagentConfig:
+        return VoicebotSubagentConfig(
+            flowhunt_workspace_id=runtime_settings.flowhunt_workspace_id,
+            flowhunt_flow_id=runtime_settings.flowhunt_flow_id,
+            flowhunt_project_id=runtime_settings.flowhunt_project_id,
+            complex_backend=runtime_settings.flowhunt_complex_backend,
+        )
+
+    def effective_subagent_config(workspace_id: str | None, voicebot_id: str | None) -> VoicebotSubagentConfig:
+        if workspace_id and voicebot_id:
+            runtime_config = runtime_config_store.get(workspace_id, voicebot_id)
+            if runtime_config is not None:
+                return runtime_config.subagents
+        return default_subagent_config()
+
+    def subagent_config_for_call(call_id: str) -> VoicebotSubagentConfig:
+        snapshot = registry.snapshot(call_id)
+        route = snapshot.get("route") if isinstance(snapshot, dict) else {}
+        if not isinstance(route, dict):
+            route = {}
+        return effective_subagent_config(non_empty_str(route.get("workspace_id")), non_empty_str(route.get("voicebot_id")))
+
+    def subagent_config_from_request(data: Any) -> VoicebotSubagentConfig:
+        payload = data.model_dump()
+        prompt_payload = payload.pop("prompts", {}) or {}
+        prompts = {
+            provider: SubagentPromptConfig(**prompt)
+            for provider, prompt in prompt_payload.items()
+            if isinstance(prompt, dict)
+        }
+        return VoicebotSubagentConfig(**payload, prompts=prompts)
+
+    def explicit_subagent_prompt_for_call(call_id: str, provider: str) -> tuple[SubagentPromptConfig, bool]:
+        config = subagent_config_for_call(call_id)
+        return config.prompt_for(provider), provider in config.prompts
 
     def prompts_payload(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
         prompts = effective_prompt_config(workspace_id, voicebot_id)
@@ -955,7 +997,7 @@ def create_app(
                     max_provider_inflight=request.quotas.max_provider_inflight,
                     enabled_actions=tuple(request.quotas.enabled_actions),
                 ),
-                subagents=VoicebotSubagentConfig(**request.subagents.model_dump()),
+                subagents=subagent_config_from_request(request.subagents),
                 enabled=request.enabled,
             )
         except ValueError as exc:
@@ -2393,7 +2435,8 @@ def create_app(
 
     async def tool_create_flowhunt_project_issue(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
-        project_id = str(runtime_settings.flowhunt_project_id or args.get("project_id") or "")
+        subagent_config = subagent_config_for_call(call_id)
+        project_id = str(subagent_config.flowhunt_project_id or runtime_settings.flowhunt_project_id or "")
         title = str(require_arg(args, "title"))
         description = str(require_arg(args, "description"))
         response_to_event_id = args.get("response_to_event_id")
@@ -2406,12 +2449,13 @@ def create_app(
                 "message": "A FlowHunt colleague is already checking this request.",
                 "duplicate": True,
             }
-        if runtime_settings.flowhunt_complex_backend == "flow":
+        if subagent_config.complex_backend == "flow":
             return await tool_invoke_flowhunt_flow({**args, "message": description})
+        prompt_meta = subagent_prompt_metadata(call_id, "flowhunt_project", input_text=description)
         if not args.get("suppress_progress"):
             schedule_tool_progress(
                 call_id,
-                "I will ask a colleague to check that and come back with the result.",
+                prompt_meta["before_call_text"],
                 progress_key=f"{call_id}:{response_to_event_id or project_id}:initial",
                 min_interval_seconds=1.0,
             )
@@ -2428,7 +2472,7 @@ def create_app(
         await hub.broadcast(requested)
         client = FlowHuntClient(
             api_key=runtime_settings.flowhunt_api_key,
-            workspace_id=runtime_settings.flowhunt_workspace_id,
+            workspace_id=subagent_config.flowhunt_workspace_id or runtime_settings.flowhunt_workspace_id,
             base_url=runtime_settings.flowhunt_base_url,
             timeout=runtime_settings.flowhunt_timeout,
         )
@@ -2437,7 +2481,7 @@ def create_app(
             project_id,
             title,
             description,
-            {"call_id": call_id, "response_to_event_id": response_to_event_id},
+            {"call_id": call_id, "response_to_event_id": response_to_event_id, **prompt_meta},
             runtime_settings.flowhunt_issue_wait_seconds,
             runtime_settings.flowhunt_issue_poll_interval_seconds,
             runtime_settings.flowhunt_progress_update_seconds,
@@ -2469,6 +2513,7 @@ def create_app(
                     runtime_settings.flowhunt_issue_background_wait_seconds,
                     runtime_settings.flowhunt_issue_poll_interval_seconds,
                     runtime_settings.flowhunt_progress_update_seconds,
+                    prompt_meta,
                 )
             )
         return {"event": event_to_dict(completed), "ok": result.ok, "message": result.message}
@@ -2497,10 +2542,11 @@ def create_app(
                 "duplicate": True,
             }
         scope = subagent_scope_from_call(call_id)
+        prompt_meta = subagent_prompt_metadata(call_id, provider, input_text=message)
         if not args.get("suppress_progress"):
             schedule_tool_progress(
                 call_id,
-                "I will ask a colleague to check that and come back with the result.",
+                prompt_meta["before_call_text"],
                 progress_key=f"{call_id}:{response_to_event_id or provider}:initial",
                 min_interval_seconds=1.0,
             )
@@ -2527,7 +2573,7 @@ def create_app(
                     provider=provider,  # type: ignore[arg-type]
                     input_text=message,
                     dedupe_key=str(args.get("dedupe_key") or response_to_event_id or requested.id),
-                    metadata=metadata,
+                    metadata={**metadata, **prompt_meta},
                 )
             )
             scheduled = subagent_lifecycle.schedule(task)
@@ -2539,12 +2585,13 @@ def create_app(
             "event": event_to_dict(requested),
             "task": subagent_task_to_dict(scheduled),
             "ok": scheduled.status != "failed",
-            "message": "A colleague is working on the request.",
+            "message": prompt_meta["after_call_text"],
         }
 
     async def tool_invoke_flowhunt_flow(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
-        flow_id = str(runtime_settings.flowhunt_flow_id or args.get("flow_id") or "")
+        subagent_config = subagent_config_for_call(call_id)
+        flow_id = str(subagent_config.flowhunt_flow_id or runtime_settings.flowhunt_flow_id or "")
         message = str(require_arg(args, "message"))
         response_to_event_id = args.get("response_to_event_id")
         duplicate = existing_flowhunt_request(call_id, response_to_event_id)
@@ -2556,10 +2603,11 @@ def create_app(
                 "message": "A FlowHunt colleague is already checking this request.",
                 "duplicate": True,
             }
+        prompt_meta = subagent_prompt_metadata(call_id, "flowhunt_flow", input_text=message)
         if not args.get("suppress_progress"):
             schedule_tool_progress(
                 call_id,
-                "I will ask a FlowHunt colleague to check that and come back with the result.",
+                prompt_meta["before_call_text"],
                 progress_key=f"{call_id}:{response_to_event_id or flow_id}:initial",
                 min_interval_seconds=1.0,
             )
@@ -2576,12 +2624,12 @@ def create_app(
         if (
             subagent_coordinator is not None
             and subagent_lifecycle is not None
-            and runtime_settings.flowhunt_workspace_id
+            and (subagent_config.flowhunt_workspace_id or runtime_settings.flowhunt_workspace_id)
             and "flowhunt_flow" in subagent_coordinator.providers
         ):
             task = subagent_coordinator.request(
                 SubagentTaskRequest(
-                    workspace_id=runtime_settings.flowhunt_workspace_id,
+                    workspace_id=subagent_config.flowhunt_workspace_id or runtime_settings.flowhunt_workspace_id,
                     session_id=call_id,
                     request_event_id=invoked.id,
                     provider="flowhunt_flow",
@@ -2589,6 +2637,7 @@ def create_app(
                     dedupe_key=str(response_to_event_id or invoked.id),
                     metadata={
                         "response_to_event_id": response_to_event_id,
+                        **prompt_meta,
                     },
                 )
             )
@@ -2599,11 +2648,11 @@ def create_app(
                 "event": event_to_dict(invoked),
                 "task": subagent_task_to_dict(scheduled),
                 "ok": scheduled.status != "failed",
-                "message": "A FlowHunt colleague is working on the request.",
+                "message": prompt_meta["after_call_text"],
             }
         client = FlowHuntClient(
             api_key=runtime_settings.flowhunt_api_key,
-            workspace_id=runtime_settings.flowhunt_workspace_id,
+            workspace_id=subagent_config.flowhunt_workspace_id or runtime_settings.flowhunt_workspace_id,
             base_url=runtime_settings.flowhunt_base_url,
             timeout=runtime_settings.flowhunt_timeout,
         )
@@ -2639,6 +2688,7 @@ def create_app(
                     response_to_event_id,
                     runtime_settings.flowhunt_issue_background_wait_seconds,
                     runtime_settings.flowhunt_flow_poll_interval_seconds,
+                    prompt_meta,
                 )
             )
         elif result.data.get("pending") and extract_session_id(result.data):
@@ -2651,18 +2701,21 @@ def create_app(
                     flow_id,
                     runtime_settings.flowhunt_issue_background_wait_seconds,
                     runtime_settings.flowhunt_flow_poll_interval_seconds,
+                    prompt_meta,
                 )
             )
         else:
+            text = render_subagent_prompt(prompt_meta["subagent_prompts"]["result_prompt"], result=result.message, provider="flowhunt_flow", call_id=call_id, input_text=message, status="completed")
             await request_communication_agent(
                 call_id,
                 "colleague_result",
-                f"A FlowHunt colleague finished checking the caller request. Result: {result.message}",
+                text,
                 response_to_event_id,
                 flow_id=flow_id,
                 session_id=extract_session_id(result.data),
                 ok=result.ok,
                 source_event_id=completed.id,
+                consume_prompt=prompt_meta["subagent_prompts"]["result_prompt"] if prompt_meta["subagent_prompts_explicit"] else None,
                 data=result.data,
             )
         return {"event": event_to_dict(completed), "ok": result.ok, "message": result.message}
@@ -2745,6 +2798,78 @@ def create_app(
             return
         threading.Thread(target=speak_tool_progress_sync, args=(call_id, normalized), daemon=True).start()
 
+    def render_subagent_prompt(template: str, **values: Any) -> str:
+        if not template:
+            return ""
+        try:
+            return template.format_map(_SafeFormatDict({key: "" if value is None else value for key, value in values.items()}))
+        except (KeyError, ValueError):
+            return template
+
+    def subagent_prompt_metadata(
+        call_id: str,
+        provider: str,
+        *,
+        input_text: str = "",
+        result: str = "",
+        status: str = "",
+        error: str = "",
+        task_id: str = "",
+        external_task_id: str = "",
+    ) -> dict[str, Any]:
+        prompts, explicit = explicit_subagent_prompt_for_call(call_id, provider)
+        values = {
+            "provider": provider,
+            "call_id": call_id,
+            "input_text": input_text,
+            "result": result,
+            "status": status,
+            "error": error,
+            "task_id": task_id,
+            "external_task_id": external_task_id,
+        }
+        rendered = {
+            "before_call_text": render_subagent_prompt(prompts.before_call_prompt, **values),
+            "after_call_text": render_subagent_prompt(prompts.after_call_prompt, **values),
+            "result_text": render_subagent_prompt(prompts.result_prompt, **values),
+        }
+        return {
+            "subagent_prompts": prompts.as_dict(),
+            "subagent_prompts_explicit": explicit,
+            **rendered,
+        }
+
+    def subagent_result_text(task: SubagentTask, message: str, *, ok: bool) -> tuple[str, dict[str, Any]]:
+        metadata_prompts = task.metadata.get("subagent_prompts")
+        explicit = bool(task.metadata.get("subagent_prompts_explicit"))
+        if isinstance(metadata_prompts, dict):
+            prompts = SubagentPromptConfig(
+                before_call_prompt=str(metadata_prompts.get("before_call_prompt") or SubagentPromptConfig().before_call_prompt),
+                after_call_prompt=str(metadata_prompts.get("after_call_prompt") or SubagentPromptConfig().after_call_prompt),
+                result_prompt=str(metadata_prompts.get("result_prompt") or SubagentPromptConfig().result_prompt),
+            )
+        else:
+            prompts, explicit = explicit_subagent_prompt_for_call(task.session_id, task.provider)
+        result_value = message if ok else f"The task could not finish: {message}"
+        text = render_subagent_prompt(
+            prompts.result_prompt,
+            result=result_value,
+            provider=task.provider,
+            call_id=task.session_id,
+            input_text=task.input_text,
+            status=task.status,
+            error=task.error or "",
+            task_id=task.task_id,
+            external_task_id=task.external_task_id or "",
+        )
+        data = {
+            "subagent_prompts_explicit": explicit,
+            "result_prompt": prompts.result_prompt,
+        }
+        if explicit:
+            data["consume_prompt"] = prompts.result_prompt
+        return text, data
+
     async def request_communication_agent(
         call_id: str,
         reason: str,
@@ -2817,30 +2942,35 @@ def create_app(
         if task.status == "completed":
             result = task.result
             message = result.content if result and result.content else result.summary if result else "The delegated task completed."
+            text, prompt_data = subagent_result_text(task, message, ok=True)
             await request_communication_agent(
                 task.session_id,
                 "colleague_result",
-                f"A colleague finished checking the caller request. Result: {message}",
+                text,
                 task.request_event_id,
                 subagent_task_id=task.task_id,
                 provider=task.provider,
                 external_task_id=task.external_task_id,
                 ok=True,
                 source_event_id=terminal_event.id if terminal_event else None,
+                **prompt_data,
                 data=task.clean_result_context(),
             )
             return
         if task.status in {"failed", "timed_out"}:
+            message = task.error or task.status
+            text, prompt_data = subagent_result_text(task, message, ok=False)
             await request_communication_agent(
                 task.session_id,
                 "colleague_result",
-                f"A delegated colleague task could not finish: {task.error or task.status}.",
+                text,
                 task.request_event_id,
                 subagent_task_id=task.task_id,
                 provider=task.provider,
                 external_task_id=task.external_task_id,
                 ok=False,
                 source_event_id=terminal_event.id if terminal_event else None,
+                **prompt_data,
                 data=task.clean_result_context(),
             )
 
@@ -2957,7 +3087,9 @@ def create_app(
         wait_seconds: float,
         poll_interval_seconds: float,
         progress_update_seconds: float,
+        prompt_meta: dict[str, Any] | None = None,
     ) -> None:
+        prompt_meta = prompt_meta or subagent_prompt_metadata(call_id, "flowhunt_project")
         deadline = asyncio.get_running_loop().time() + max(0.0, wait_seconds)
         next_progress = asyncio.get_running_loop().time() + max(1.0, progress_update_seconds)
         last_progress_message = ""
@@ -2983,12 +3115,19 @@ def create_app(
                 await request_communication_agent(
                     call_id,
                     "colleague_result",
-                    f"A colleague task failed while checking the caller request: {latest.message}",
+                    render_subagent_prompt(
+                        str(prompt_meta["subagent_prompts"]["result_prompt"]),
+                        result=f"The task could not finish: {latest.message}",
+                        provider="flowhunt_project",
+                        call_id=call_id,
+                        status="failed",
+                    ),
                     response_to_event_id,
                     project_id=project_id,
                     issue_id=issue_id,
                     ok=False,
                     source_event_id=completed.id,
+                    consume_prompt=prompt_meta["subagent_prompts"]["result_prompt"] if prompt_meta.get("subagent_prompts_explicit") else None,
                     data=latest.data,
                 )
                 return
@@ -3015,12 +3154,19 @@ def create_app(
                 await request_communication_agent(
                     call_id,
                     "colleague_result",
-                    f"A colleague finished checking the caller request. Result: {message}",
+                    render_subagent_prompt(
+                        str(prompt_meta["subagent_prompts"]["result_prompt"]),
+                        result=message,
+                        provider="flowhunt_project",
+                        call_id=call_id,
+                        status=state or "completed",
+                    ),
                     response_to_event_id,
                     project_id=project_id,
                     issue_id=issue_id,
                     ok=state not in {"failed", "error", "cancelled", "canceled", "human_input_needed"},
                     source_event_id=completed.id,
+                    consume_prompt=prompt_meta["subagent_prompts"]["result_prompt"] if prompt_meta.get("subagent_prompts_explicit") else None,
                     data=latest.data,
                 )
                 return
@@ -3052,7 +3198,13 @@ def create_app(
                 await request_communication_agent(
                     call_id,
                     "colleague_progress",
-                    f"A colleague is still checking the caller request. Current update: {message}",
+                    render_subagent_prompt(
+                        str(prompt_meta.get("after_call_text") or prompt_meta["subagent_prompts"]["after_call_prompt"]),
+                        result=message,
+                        provider="flowhunt_project",
+                        call_id=call_id,
+                        status="running",
+                    ),
                     response_to_event_id,
                     project_id=project_id,
                     issue_id=issue_id,
@@ -3069,7 +3221,9 @@ def create_app(
         flow_id: str,
         wait_seconds: float,
         poll_interval_seconds: float,
+        prompt_meta: dict[str, Any] | None = None,
     ) -> None:
+        prompt_meta = prompt_meta or subagent_prompt_metadata(call_id, "flowhunt_flow")
         deadline = asyncio.get_running_loop().time() + max(0.0, wait_seconds)
         from_timestamp = "0"
         seen_event_ids: set[str] = set()
@@ -3112,12 +3266,19 @@ def create_app(
                 await request_communication_agent(
                     call_id,
                     "colleague_result",
-                    f"A FlowHunt colleague finished checking the caller request. Result: {latest.message}",
+                    render_subagent_prompt(
+                        str(prompt_meta["subagent_prompts"]["result_prompt"]),
+                        result=latest.message,
+                        provider="flowhunt_flow",
+                        call_id=call_id,
+                        status="completed",
+                    ),
                     response_to_event_id,
                     flow_id=flow_id,
                     session_id=session_id,
                     ok=True,
                     source_event_id=completed.id,
+                    consume_prompt=prompt_meta["subagent_prompts"]["result_prompt"] if prompt_meta.get("subagent_prompts_explicit") else None,
                     data=latest.data,
                 )
                 return
@@ -3130,7 +3291,9 @@ def create_app(
         response_to_event_id: int | None,
         wait_seconds: float,
         poll_interval_seconds: float,
+        prompt_meta: dict[str, Any] | None = None,
     ) -> None:
+        prompt_meta = prompt_meta or subagent_prompt_metadata(call_id, "flowhunt_flow")
         deadline = asyncio.get_running_loop().time() + max(0.0, wait_seconds)
         while asyncio.get_running_loop().time() < deadline:
             if registry.get(call_id) is None:
@@ -3154,12 +3317,19 @@ def create_app(
                 await request_communication_agent(
                     call_id,
                     "colleague_result",
-                    f"A FlowHunt colleague task failed while checking the caller request: {latest.message}",
+                    render_subagent_prompt(
+                        str(prompt_meta["subagent_prompts"]["result_prompt"]),
+                        result=f"The task could not finish: {latest.message}",
+                        provider="flowhunt_flow",
+                        call_id=call_id,
+                        status="failed",
+                    ),
                     response_to_event_id,
                     flow_id=flow_id,
                     task_id=task_id,
                     ok=False,
                     source_event_id=completed.id,
+                    consume_prompt=prompt_meta["subagent_prompts"]["result_prompt"] if prompt_meta.get("subagent_prompts_explicit") else None,
                     data=latest.data,
                 )
                 return
@@ -3184,12 +3354,19 @@ def create_app(
                 await request_communication_agent(
                     call_id,
                     "colleague_result",
-                    f"A FlowHunt colleague finished checking the caller request. Result: {message}",
+                    render_subagent_prompt(
+                        str(prompt_meta["subagent_prompts"]["result_prompt"]),
+                        result=message,
+                        provider="flowhunt_flow",
+                        call_id=call_id,
+                        status="completed" if ok else "failed",
+                    ),
                     response_to_event_id,
                     flow_id=flow_id,
                     task_id=task_id,
                     ok=ok,
                     source_event_id=completed.id,
+                    consume_prompt=prompt_meta["subagent_prompts"]["result_prompt"] if prompt_meta.get("subagent_prompts_explicit") else None,
                     data=latest.data,
                 )
                 return

@@ -242,11 +242,18 @@ class VoicebotQuotaConfigRequest(BaseModel):
     )
 
 
+class SubagentPromptConfigRequest(BaseModel):
+    before_call_prompt: str = "I will ask a colleague to check that and come back with the result."
+    after_call_prompt: str = "A colleague is working on the request."
+    result_prompt: str = "A colleague finished checking the caller request. Result: {result}"
+
+
 class VoicebotSubagentConfigRequest(BaseModel):
     flowhunt_workspace_id: str = ""
     flowhunt_flow_id: str = ""
     flowhunt_project_id: str = ""
     complex_backend: str = "flow"
+    prompts: dict[str, SubagentPromptConfigRequest] = Field(default_factory=dict)
 
 
 class VoicebotRuntimeConfigRequest(BaseModel):

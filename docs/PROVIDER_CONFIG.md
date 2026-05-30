@@ -112,3 +112,29 @@ The effective prompt config is cached in the runtime and included in
 to fetch prompt config on every turn. Prompt overrides take precedence over
 prompts stored inside versioned runtime config; if neither exists, local `.env`
 defaults are used.
+
+Subagent prompt hooks are part of the versioned runtime config, not the
+standalone communication prompt override. They are configured per provider kind
+under `subagents.prompts`:
+
+```json
+{
+  "subagents": {
+    "flowhunt_workspace_id": "workspace-1",
+    "flowhunt_flow_id": "flow-1",
+    "prompts": {
+      "flowhunt_flow": {
+        "before_call_prompt": "I will ask the specialist now.",
+        "after_call_prompt": "The specialist is checking it now.",
+        "result_prompt": "Use this colleague result for the caller: {result}"
+      }
+    }
+  }
+}
+```
+
+These hooks let each voicebot/provider pair customize what is said before the
+subagent call, what progress text is attached after the call is submitted, and
+how the subagent answer is consumed by the communication agent. The result
+prompt can reference `{result}`, `{provider}`, `{status}`, `{error}`,
+`{call_id}`, `{task_id}`, `{external_task_id}`, and `{input_text}`.

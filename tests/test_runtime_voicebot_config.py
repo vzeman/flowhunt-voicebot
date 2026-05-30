@@ -113,7 +113,18 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
                 },
                 "realtime": {"silence_ms": 420, "tts_chunk_chars": 75},
                 "quotas": {"max_concurrent_sessions": 3, "enabled_actions": ["say", "hangup_call"]},
-                "subagents": {"complex_backend": "flow", "flowhunt_workspace_id": "workspace-1", "flowhunt_flow_id": "flow-1"},
+                "subagents": {
+                    "complex_backend": "flow",
+                    "flowhunt_workspace_id": "workspace-1",
+                    "flowhunt_flow_id": "flow-1",
+                    "prompts": {
+                        "flowhunt_flow": {
+                            "before_call_prompt": "I will ask the specialist now.",
+                            "after_call_prompt": "The specialist is working on it.",
+                            "result_prompt": "Summarize this colleague result: {result}",
+                        }
+                    },
+                },
             },
         )
 
@@ -122,6 +133,10 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["config"]["config_version"], 1)
         self.assertEqual(payload["config"]["prompts"]["greeting"], "Say hello.")
+        self.assertEqual(
+            payload["config"]["subagents"]["prompts"]["flowhunt_flow"]["result_prompt"],
+            "Summarize this colleague result: {result}",
+        )
         self.assertEqual(payload["config"]["realtime"]["tts_chunk_chars"], 75)
         self.assertEqual(payload["config"]["quotas"]["max_concurrent_sessions"], 3)
         self.assertEqual(payload["config"]["providers"]["stt"]["secret_ref"], {"name": "openai-main", "workspace_id": "workspace-1"})

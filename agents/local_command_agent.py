@@ -665,6 +665,9 @@ def fast_tool_calls(task: dict) -> list[dict]:
         }]
 
     if is_colleague_update_task(task):
+        session_language = data.get("session_language") if isinstance(data.get("session_language"), dict) else {}
+        if str(session_language.get("language") or "").lower() not in {"", "en"}:
+            return []
         if data.get("consume_prompt"):
             return []
         answer = colleague_update_answer(task)

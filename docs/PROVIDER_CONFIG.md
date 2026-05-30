@@ -119,6 +119,13 @@ hint, while the communication agent mirrors the latest caller language. Use a
 fixed language code only when the voicebot should intentionally prefer one
 language.
 
+The runtime keeps detected language as call/session context after accepted
+caller transcripts. For `auto` prompt configs, `/agent/tasks` exposes the
+detected language as the effective prompt language and marks
+`language_source=session_detected`. TTS cache keys also include the effective
+language, so reused phrases are partitioned by language instead of sharing a
+single `auto` bucket.
+
 Subagent prompt hooks are part of the versioned runtime config, not the
 standalone communication prompt override. They are configured per provider kind
 under `subagents.prompts`:

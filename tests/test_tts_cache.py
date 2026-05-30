@@ -90,6 +90,21 @@ class TTSCacheTests(unittest.TestCase):
         self.assertEqual(first_inner.calls, 1)
         self.assertEqual(second_inner.calls, 1)
 
+    def test_cached_tts_auto_language_partitions_cache_by_detected_language(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            inner = CountingTTS()
+            provider = CachedTTSProvider(
+                inner,
+                directory,
+                TTSCacheConfig(provider="openai", model="tts-model", voice="alloy", language="auto"),
+            )
+
+            provider.synthesize("Dobrý deň, rozprávate po slovensky?")
+            provider.synthesize("Hello, please check the status.")
+            provider.synthesize("Dobrý deň, rozprávate po slovensky?")
+
+        self.assertEqual(inner.calls, 2)
+
     def test_cached_tts_writes_artifact_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             inner = CountingTTS()

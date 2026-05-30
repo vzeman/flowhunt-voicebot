@@ -485,6 +485,19 @@ class AgentCoordinationTests(unittest.TestCase):
 
         self.assertEqual(fast_tool_calls(task), [])
 
+    def test_colleague_update_with_non_english_session_language_uses_model_path(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {
+                "reason": "colleague_result",
+                "session_language": {"language": "sk", "confidence": 0.95},
+                "data": {"summary": "Všetky služby fungujú normálne."},
+            },
+        }
+
+        self.assertEqual(fast_tool_calls(task), [])
+
 
 if __name__ == "__main__":
     unittest.main()

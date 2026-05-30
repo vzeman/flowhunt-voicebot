@@ -93,6 +93,31 @@ class AgentTasksTests(unittest.TestCase):
             "Use Slovak.",
         )
 
+    def test_agent_tasks_remember_detected_session_language_for_auto_prompt(self) -> None:
+        client, events, _tracker = self.build_client()
+        events.append("call-1", "user_transcript", {"turn_id": 1, "text": "Dobrý deň, rozprávate po slovensky?"})
+        request = events.append("call-1", "agent_response_requested", {"text": "Dobrý deň, rozprávate po slovensky?"})
+
+        response = client.get("/agent/tasks?call_id=call-1")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["pending"][0]["id"], request.id)
+        self.assertEqual(payload["pending"][0]["data"]["session_language"]["language"], "sk")
+        self.assertEqual(payload["context"]["voicebot_prompts"]["language"], "sk")
+        self.assertEqual(payload["context"]["voicebot_prompts"]["language_source"], "session_detected")
+
+    def test_agent_tasks_ignore_dropped_transcript_for_session_language(self) -> None:
+        client, events, _tracker = self.build_client()
+        transcript = events.append("call-1", "user_transcript", {"turn_id": 1, "text": "Dobrý deň, rozprávate po slovensky?"})
+        events.append("call-1", "stt_result_dropped", {"transcript_event_id": transcript.id, "reason": "low_signal_transcript"})
+        events.append("call-1", "agent_response_requested", {"text": "hello"})
+
+        response = client.get("/agent/tasks?call_id=call-1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("session_language", response.json()["pending"][0]["data"])
+
     def test_agent_tasks_applies_limit(self) -> None:
         client, events, _tracker = self.build_client()
         first = events.append("call-1", "agent_response_requested", {"text": "first"})

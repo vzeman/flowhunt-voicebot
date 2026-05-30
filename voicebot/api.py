@@ -80,6 +80,7 @@ from .flowhunt import (
     is_terminal_issue_state,
 )
 from .health import readiness_report
+from .language import detected_session_language, is_auto_language
 from .metrics import summarize_metrics
 from .multimodal import (
     ContentDirection,
@@ -281,7 +282,7 @@ def create_app(
             greeting=runtime_settings.connect_greeting_prompt,
             system_prompt="",
             stt_prompt=runtime_settings.stt_prompt,
-            language=runtime_settings.language or "en",
+            language=runtime_settings.language or "auto",
         )
 
     def default_subagent_config() -> VoicebotSubagentConfig:
@@ -342,11 +343,40 @@ def create_app(
         return effective_prompt_config(non_empty_str(route.get("workspace_id")), non_empty_str(route.get("voicebot_id")))
 
     def prompt_context_for_pending(pending: list[VoicebotEvent]) -> dict[str, Any]:
-        by_call_id = {event.call_id: prompt_config_for_call(event.call_id).as_dict() for event in pending}
-        context: dict[str, Any] = {"prompt_configs_by_call_id": by_call_id}
+        by_call_id = {}
+        session_languages = {}
+        for event in pending:
+            prompt_config = prompt_config_for_call(event.call_id).as_dict()
+            detected_language = detected_session_language(events.list_events(call_id=event.call_id, limit=1000))
+            if detected_language:
+                session_languages[event.call_id] = detected_language
+                if is_auto_language(str(prompt_config.get("language") or "")):
+                    prompt_config = {
+                        **prompt_config,
+                        "language": detected_language["language"],
+                        "language_source": "session_detected",
+                        "detected_language": detected_language,
+                    }
+            by_call_id[event.call_id] = prompt_config
+        context: dict[str, Any] = {
+            "prompt_configs_by_call_id": by_call_id,
+            "session_languages_by_call_id": session_languages,
+        }
         if len(by_call_id) == 1:
             context["voicebot_prompts"] = next(iter(by_call_id.values()))
+            if session_languages:
+                context["session_language"] = next(iter(session_languages.values()))
         return context
+
+    def agent_task_event_to_dict(event: VoicebotEvent, context: dict[str, Any]) -> dict[str, Any]:
+        payload = event_to_dict(event)
+        session_language = (context.get("session_languages_by_call_id") or {}).get(event.call_id)
+        if isinstance(session_language, dict):
+            payload["data"] = {
+                **payload.get("data", {}),
+                "session_language": session_language,
+            }
+        return payload
 
     def append_security_audit(
         *,
@@ -1873,8 +1903,11 @@ def create_app(
         ]
         task_context = events.context(call_id=call_id)
         task_context.update(prompt_context_for_pending(pending[:limit]))
+        context_slice = pending[:limit]
+        task_context = events.context(call_id=call_id)
+        task_context.update(prompt_context_for_pending(context_slice))
         return {
-            "pending": [event_to_dict(event) for event in pending[:limit]],
+            "pending": [agent_task_event_to_dict(event, task_context) for event in context_slice],
             "context": task_context,
         }
 

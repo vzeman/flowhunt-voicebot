@@ -38,6 +38,7 @@ from .api_models import (
     VoicebotChannelPatchRequest,
     VoicebotChannelRequest,
     VoicebotProviderConfigRequest,
+    VoicebotRuntimeConfigRequest,
     WorkerQueueClaimRequest,
     WorkerQueueEnqueueRequest,
     WorkerHeartbeatRequest,
@@ -101,6 +102,15 @@ from .scaling import (
 from .session_leases import SessionLeaseStore
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .storage_contracts import storage_contracts_payload
+from .runtime_config import (
+    VoicebotPromptConfig,
+    VoicebotQuotaConfig,
+    VoicebotRealtimeConfig,
+    VoicebotRuntimeConfig,
+    VoicebotRuntimeConfigStore,
+    VoicebotSubagentConfig,
+    runtime_config_to_dict,
+)
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
 from .tool_executor import AgentToolExecutor
@@ -173,6 +183,7 @@ def create_app(
     voicebot_sessions: VoicebotSessionStore | None = None,
     session_leases: SessionLeaseStore | None = None,
     workspace_policy: WorkspaceAccessPolicy | None = None,
+    runtime_configs: VoicebotRuntimeConfigStore | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -206,6 +217,7 @@ def create_app(
     channel_resolver = channels or ChannelResolver()
     voicebot_session_store = voicebot_sessions or VoicebotSessionStore()
     session_lease_store = session_leases or SessionLeaseStore()
+    runtime_config_store = runtime_configs or VoicebotRuntimeConfigStore()
     workspace_access_policy = workspace_policy or workspace_access_policy_from_settings(runtime_settings)
     subagent_terminal_events: list[VoicebotEvent] = []
 
@@ -674,6 +686,83 @@ def create_app(
             "ok": True,
             "config": provider_config_to_dict(saved),
             "selection_plan": selection_plan_to_dict(provider_selection_plan(saved)),
+            "validation": [],
+        }
+
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/runtime-config")
+    def get_voicebot_runtime_config(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        config = runtime_config_store.get(workspace_id, voicebot_id)
+        if config is None:
+            raise HTTPException(status_code=404, detail="Runtime config not found")
+        return {"config": runtime_config_to_dict(config)}
+
+    @app.put("/workspaces/{workspace_id}/voicebots/{voicebot_id}/runtime-config")
+    async def put_voicebot_runtime_config(
+        workspace_id: str,
+        voicebot_id: str,
+        request: VoicebotRuntimeConfigRequest,
+    ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        try:
+            providers = VoicebotProviderConfig(
+                workspace_id=workspace_id,
+                voicebot_id=voicebot_id,
+                stt=provider_choice_from_request("stt", request.providers.stt, workspace_id),
+                tts=provider_choice_from_request("tts", request.providers.tts, workspace_id),
+                agent=provider_choice_from_request("agent", request.providers.agent, workspace_id),
+            )
+            config = VoicebotRuntimeConfig(
+                workspace_id=workspace_id,
+                voicebot_id=voicebot_id,
+                config_version=1,
+                providers=providers,
+                prompts=VoicebotPromptConfig(
+                    greeting=request.prompts.greeting,
+                    system_prompt=request.prompts.system_prompt,
+                    stt_prompt=request.prompts.stt_prompt,
+                    language=request.prompts.language,
+                ),
+                realtime=VoicebotRealtimeConfig(**request.realtime.model_dump()),
+                quotas=VoicebotQuotaConfig(
+                    max_concurrent_sessions=request.quotas.max_concurrent_sessions,
+                    max_provider_inflight=request.quotas.max_provider_inflight,
+                    enabled_actions=tuple(request.quotas.enabled_actions),
+                ),
+                subagents=VoicebotSubagentConfig(**request.subagents.model_dump()),
+                enabled=request.enabled,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        descriptors = {
+            "stt": provider_catalog_descriptors("stt"),
+            "tts": provider_catalog_descriptors("tts"),
+            "agent": provider_catalog_descriptors("agent"),
+        }
+        issues = validate_provider_config(config.providers, descriptors)
+        if issues:
+            return {
+                "ok": False,
+                "config": runtime_config_to_dict(config),
+                "validation": [validation_issue_to_dict(issue) for issue in issues],
+            }
+        saved = runtime_config_store.save(config)
+        provider_config_store.save(saved.providers)
+        event = events.append(
+            "system",
+            "runtime_config_updated",
+            {
+                "workspace_id": workspace_id,
+                "voicebot_id": voicebot_id,
+                "config_version": saved.config_version,
+                "enabled": saved.enabled,
+            },
+        )
+        await hub.broadcast(event)
+        return {
+            "ok": True,
+            "config": runtime_config_to_dict(saved),
+            "event": event_to_dict(event),
             "validation": [],
         }
 

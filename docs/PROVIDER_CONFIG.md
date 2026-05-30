@@ -67,3 +67,35 @@ workspace-specific model names.
 Each family can define a fallback provider. The first implementation only models
 fallback selection; runtime retry and failover behavior should be added at the
 provider call boundary with metrics and typed provider-error events.
+
+## Versioned Runtime Config
+
+Provider config is now also part of the broader workspace/voicebot runtime
+configuration:
+
+- `PUT /workspaces/{workspace_id}/voicebots/{voicebot_id}/runtime-config`
+- `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/runtime-config`
+
+The runtime config is versioned with `config_version`. Every successful save
+activates a new version and emits `runtime_config_updated` with
+`workspace_id`, `voicebot_id`, `config_version`, and enabled state. Future
+session-routing work should stamp this `config_version` on accepted sessions so
+active calls keep the config version they started with while new calls use the
+latest enabled version.
+
+The schema includes:
+
+- provider selections and secret references for STT, TTS, and communication agent
+- greeting, system prompt, STT prompt, and language
+- realtime audio thresholds, endpointing, reply limits, and TTS chunk size
+- concurrency/provider quotas and enabled actions
+- FlowHunt subagent binding fields
+- enabled state
+
+Local `.env` settings remain the development fallback for the current Docker
+runtime. The versioned runtime config is the product/control-plane contract that
+should move to FlowHunt DB plus FlowHunt secret storage before Kubernetes
+deployment.
+
+Runtime config responses redact by design: API keys are never part of this
+payload. Providers reference secrets by `{name, workspace_id}` only.

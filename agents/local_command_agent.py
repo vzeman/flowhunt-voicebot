@@ -272,6 +272,41 @@ def execute_tool_calls(base_url: str, calls: list[dict]) -> list[dict]:
     return results
 
 
+CALL_CONTROL_TOOL_NAMES = {"hangup_call", "transfer_call", "send_dtmf"}
+
+
+def execute_conversational_tool_calls(base_url: str, calls: list[dict]) -> list[dict]:
+    if not calls:
+        return []
+    say_calls = [call for call in calls if call.get("name") == "say"]
+    control_calls = [call for call in calls if call.get("name") in CALL_CONTROL_TOOL_NAMES]
+    other_calls = [call for call in calls if call.get("name") not in {"say", *CALL_CONTROL_TOOL_NAMES}]
+    ordered = [*say_calls, *other_calls]
+    results = execute_tool_calls(base_url, ordered)
+    if say_calls and control_calls:
+        wait_for_spoken_acknowledgement(base_url, say_calls[-1])
+    results.extend(execute_tool_calls(base_url, control_calls))
+    return results
+
+
+def wait_for_spoken_acknowledgement(base_url: str, say_call: dict, timeout_seconds: float = 4.0) -> None:
+    call_id = (say_call.get("arguments") or {}).get("call_id")
+    if not call_id:
+        return
+    deadline = time.monotonic() + timeout_seconds
+    saw_playback = False
+    while time.monotonic() < deadline:
+        try:
+            state = http_json("GET", f"{base_url}/calls/{call_id}")
+        except Exception:
+            return
+        playback_active = bool(state.get("playback_active"))
+        saw_playback = saw_playback or playback_active
+        if saw_playback and not playback_active:
+            return
+        time.sleep(0.05)
+
+
 READ_ONLY_TOOL_NAMES = {
     "list_transcripts",
     "list_transcript_summaries",
@@ -306,6 +341,61 @@ VOICE_AGENT_TOOL_NAMES = {
 
 def needs_spoken_followup(tool_calls: list[dict]) -> bool:
     return any(call.get("name") in READ_ONLY_TOOL_NAMES for call in tool_calls)
+
+
+def action_acknowledgement(call: dict) -> dict | None:
+    name = call.get("name")
+    args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+    call_id = args.get("call_id")
+    if not call_id:
+        return None
+    response_to_event_id = args.get("response_to_event_id")
+    if name == "hangup_call":
+        text = "Sure, I will hang up the call now. Goodbye."
+    elif name == "transfer_call":
+        target = str(args.get("target") or "").strip()
+        text = f"Sure, I will transfer you to {target} now." if target else "Sure, I will transfer the call now."
+    elif name == "send_dtmf":
+        digit = str(args.get("digit") or "").strip()
+        text = f"Sure, I will send digit {digit} now." if digit else "Sure, I will send that keypad digit now."
+    else:
+        return None
+    return {
+        "name": "say",
+        "arguments": {
+            "call_id": call_id,
+            "text": text,
+            "response_to_event_id": response_to_event_id,
+        },
+    }
+
+
+def ensure_action_acknowledgements(tool_calls: list[dict]) -> list[dict]:
+    result: list[dict] = []
+    for call in tool_calls:
+        if call.get("name") in CALL_CONTROL_TOOL_NAMES:
+            acknowledgement = action_acknowledgement(call)
+            if acknowledgement and not _has_prior_say(result):
+                result.append(acknowledgement)
+        result.append(call)
+    return result
+
+
+def _has_prior_say(calls: list[dict]) -> bool:
+    return any(call.get("name") == "say" for call in calls)
+
+
+def answer_as_say_call(answer: str, latest: dict) -> dict | None:
+    if not answer:
+        return None
+    return {
+        "name": "say",
+        "arguments": {
+            "call_id": latest["call_id"],
+            "text": answer,
+            "response_to_event_id": latest["id"],
+        },
+    }
 
 
 def is_colleague_update_task(task: dict) -> bool:
@@ -421,21 +511,23 @@ def fast_tool_calls(task: dict) -> list[dict]:
         }]
 
     if wants_hangup(normalized):
-        return [{
+        action = {
             "name": "hangup_call",
             "arguments": {"call_id": call_id, "response_to_event_id": event_id},
-        }]
+        }
+        return ensure_action_acknowledgements([action])
 
     transfer_target = requested_transfer_target(text)
     if transfer_target:
-        return [{
+        action = {
             "name": "transfer_call",
             "arguments": {
                 "call_id": call_id,
                 "target": transfer_target,
                 "response_to_event_id": event_id,
             },
-        }]
+        }
+        return ensure_action_acknowledgements([action])
 
     return []
 
@@ -680,7 +772,7 @@ def main() -> None:
                 latest = pending[-1]
                 deterministic_calls = fast_tool_calls(latest)
                 if deterministic_calls:
-                    execute_tool_calls(args.base_url, deterministic_calls)
+                    execute_conversational_tool_calls(args.base_url, deterministic_calls)
                     seen.add(latest["id"])
                     print(
                         f"executed {len(deterministic_calls)} deterministic tool(s) for event {latest['id']}",
@@ -700,20 +792,12 @@ def main() -> None:
                         raise RuntimeError(f"agent returned echo response twice: {answer}")
                 tool_calls = attach_response_event_id(tool_calls, latest["id"])
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
-                for call in tool_calls:
-                    execute_tool_call(args.base_url, call)
-                if answer:
-                    execute_tool_call(
-                        args.base_url,
-                        {
-                            "name": "say",
-                            "arguments": {
-                                "call_id": latest["call_id"],
-                                "text": answer,
-                                "response_to_event_id": latest["id"],
-                            },
-                        },
-                    )
+                calls_to_execute = []
+                say_call = answer_as_say_call(answer, latest)
+                if say_call:
+                    calls_to_execute.append(say_call)
+                calls_to_execute.extend(tool_calls)
+                execute_conversational_tool_calls(args.base_url, ensure_action_acknowledgements(calls_to_execute))
             for task in pending:
                 seen.add(task["id"])
             claimed_pending = []

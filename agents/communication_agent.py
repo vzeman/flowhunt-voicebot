@@ -14,8 +14,10 @@ from local_command_agent import (
     build_tool_result_prompt,
     ClaimRenewer,
     claim_tasks,
+    answer_as_say_call,
+    ensure_action_acknowledgements,
+    execute_conversational_tool_calls,
     execute_tool_call,
-    execute_tool_calls,
     fast_tool_calls,
     filter_voice_agent_tools,
     http_json,
@@ -74,7 +76,7 @@ def run_communication_agent(
                 latest = pending[-1]
                 deterministic_calls = fast_tool_calls(latest)
                 if deterministic_calls:
-                    execute_tool_calls(config.base_url, deterministic_calls)
+                    execute_conversational_tool_calls(config.base_url, deterministic_calls)
                     seen.add(latest["id"])
                     print(
                         f"executed {len(deterministic_calls)} deterministic tool(s) for event {latest['id']}",
@@ -97,7 +99,13 @@ def run_communication_agent(
 
                 tool_calls = attach_response_event_id(tool_calls, latest["id"])
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
-                tool_results = execute_tool_calls(config.base_url, tool_calls)
+                tool_calls = ensure_action_acknowledgements(tool_calls)
+                initial_say = answer_as_say_call(answer, latest)
+                calls_for_initial_execution = list(tool_calls)
+                if initial_say and tool_calls and not needs_spoken_followup(tool_calls):
+                    calls_for_initial_execution = [initial_say, *tool_calls]
+                    answer = ""
+                tool_results = execute_conversational_tool_calls(config.base_url, calls_for_initial_execution)
                 if tool_calls and needs_spoken_followup(tool_calls):
                     follow_up_prompt = build_tool_result_prompt(prompt, tool_results)
                     try:
@@ -113,17 +121,7 @@ def run_communication_agent(
                         answer = provider_failure_answer(exc)
                         print(f"provider follow-up failed for event {latest['id']}: {exc}", flush=True)
                 if answer:
-                    execute_tool_call(
-                        config.base_url,
-                        {
-                            "name": "say",
-                            "arguments": {
-                                "call_id": latest["call_id"],
-                                "text": answer,
-                                "response_to_event_id": latest["id"],
-                            },
-                        },
-                    )
+                    execute_conversational_tool_calls(config.base_url, [answer_as_say_call(answer, latest)])
                 elif tool_results and needs_spoken_followup(tool_calls):
                     execute_tool_call(
                         config.base_url,

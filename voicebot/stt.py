@@ -117,7 +117,7 @@ class OpenAISTTProvider(STTProvider):
         if not api_key:
             raise ValueError(f"API key is required when VOICEBOT_STT_PROVIDER={provider}")
         print(f"Using {provider} STT model: {model}")
-        client_kwargs = {"api_key": api_key}
+        client_kwargs = {"api_key": api_key, "timeout": settings.stt_timeout_seconds}
         if base_url:
             client_kwargs["base_url"] = base_url
         self._client = OpenAI(**client_kwargs)

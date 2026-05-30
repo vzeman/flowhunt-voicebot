@@ -26,6 +26,14 @@ class FakeSTT:
         raise AssertionError("not used")
 
 
+class ExplodingSTT:
+    def transcribe(self, call_audio, sample_rate=8000):
+        raise RuntimeError("stt provider timeout")
+
+    def transcribe_stream(self, call_audio, sample_rate=8000):
+        raise RuntimeError("stt provider timeout")
+
+
 class FakeTranscriptionResult:
     def __init__(self, text: str, is_final: bool = True) -> None:
         self.text = text
@@ -875,6 +883,55 @@ class PlaybackControlTests(unittest.TestCase):
             self.assertIn("bot_playback_interrupted", event_types)
         finally:
             session.stop()
+
+    def test_webrtc_stt_failure_is_recorded_without_silent_worker_loss(self) -> None:
+        events = EventStore(max_context_events=40)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(greet_on_connect=False),
+            events,
+            ExplodingSTT(),
+            FakeTTS(),
+        )
+        try:
+            session._speech_jobs.put((1, np.ones(160, dtype=np.float32), session._current_interrupt_generation()))
+            deadline = time.monotonic() + 1.0
+            event_types: list[str] = []
+            while time.monotonic() < deadline:
+                event_types = [event.type for event in events.list_events(call_id="call-1")]
+                if "stt_failed" in event_types:
+                    break
+                time.sleep(0.01)
+
+            self.assertIn("stt_started", event_types)
+            self.assertIn("stt_failed", event_types)
+        finally:
+            session.stop()
+
+    def test_call_session_stt_failure_is_recorded_without_silent_worker_loss(self) -> None:
+        events = EventStore(max_context_events=40)
+        left, right = socket.socketpair()
+        session = CallSession("call-1", left, Settings(), events, ExplodingSTT(), FakeTTS())
+        worker = threading.Thread(target=session._speech_worker_loop, daemon=True)
+        try:
+            worker.start()
+            session._speech_jobs.put((1, np.ones(160, dtype=np.float32), session._current_interrupt_generation()))
+            deadline = time.monotonic() + 1.0
+            event_types: list[str] = []
+            while time.monotonic() < deadline:
+                event_types = [event.type for event in events.list_events(call_id="call-1")]
+                if "stt_failed" in event_types:
+                    break
+                time.sleep(0.01)
+
+            self.assertIn("stt_started", event_types)
+            self.assertIn("stt_failed", event_types)
+        finally:
+            session.stop_event.set()
+            worker.join(timeout=1.0)
+            left.close()
+            right.close()
 
 
 if __name__ == "__main__":

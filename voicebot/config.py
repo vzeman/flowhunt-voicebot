@@ -62,6 +62,7 @@ class Settings:
     stt_no_speech_threshold: float = env_float("VOICEBOT_STT_NO_SPEECH_THRESHOLD", 0.60)
     stt_logprob_threshold: float = env_float("VOICEBOT_STT_LOGPROB_THRESHOLD", -1.0)
     stt_min_chars: int = env_int("VOICEBOT_STT_MIN_CHARS", 2)
+    stt_timeout_seconds: float = env_float("VOICEBOT_STT_TIMEOUT_SECONDS", 8.0)
     debug_audio_capture: bool = env_bool("VOICEBOT_DEBUG_AUDIO_CAPTURE", False)
     debug_audio_dir: str = os.getenv("VOICEBOT_DEBUG_AUDIO_DIR", "/data/debug-audio")
 

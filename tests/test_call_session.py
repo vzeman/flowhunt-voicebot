@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import socket
 import threading
+import time
+from types import SimpleNamespace
 import unittest
 import uuid
 
@@ -29,6 +31,20 @@ class FakeTTS:
 
     def synthesize_stream(self, text: str):
         yield self.synthesize(text)
+
+
+class SnapshotPartialSTT:
+    def __init__(self) -> None:
+        self.partial_calls = 0
+        self.final_calls = 0
+
+    def transcribe(self, call_audio, sample_rate=8000):
+        self.partial_calls += 1
+        return SimpleNamespace(text="partial hello", metadata={"sample_rate": sample_rate}, is_final=True)
+
+    def transcribe_stream(self, call_audio, sample_rate=8000):
+        self.final_calls += 1
+        yield SimpleNamespace(text="final hello", metadata={"sample_rate": sample_rate}, is_final=True)
 
 
 class GatedStreamingTTS:
@@ -160,6 +176,67 @@ class CallSessionPipelineTests(unittest.TestCase):
         finally:
             left.close()
             right.close()
+
+    def test_partial_stt_snapshots_emit_partials_without_duplicate_agent_requests(self) -> None:
+        left, right = socket.socketpair()
+        events = EventStore(max_context_events=50)
+        stt = SnapshotPartialSTT()
+        try:
+            session = CallSession(
+                "pending",
+                left,
+                Settings(
+                    greet_on_connect=False,
+                    audiosocket_jitter_buffer_enabled=False,
+                    stt_partial_enabled=True,
+                    stt_partial_interval_seconds=0.0,
+                    stt_partial_min_seconds=0.04,
+                    stt_partial_min_chars=4,
+                    vad_start_ms=20,
+                    silence_ms=40,
+                    min_seconds=0.04,
+                    turn_coalesce_window_ms=0,
+                ),
+                events,
+                stt,
+                FakeTTS(),
+            )
+            thread = threading.Thread(target=session.run)
+            thread.start()
+            write_audiosocket_message(right, MSG_UUID, uuid.uuid4().bytes)
+
+            speech = np.ones(160, dtype=np.float32) * 0.2
+            silence = np.zeros(160, dtype=np.float32)
+            for _ in range(5):
+                write_audiosocket_message(right, MSG_SLIN8, float32_to_pcm16_bytes(speech))
+            self._wait_for_event(events, "user_transcript_partial")
+            for _ in range(3):
+                write_audiosocket_message(right, MSG_SLIN8, float32_to_pcm16_bytes(silence))
+            self._wait_for_event(events, "agent_response_requested")
+
+            write_audiosocket_message(right, MSG_TERMINATE)
+            thread.join(timeout=2)
+
+            persisted = events.list_events()
+            partials = [event for event in persisted if event.type == "user_transcript_partial"]
+            requests = [event for event in persisted if event.type == "agent_response_requested"]
+            self.assertGreaterEqual(len(partials), 1)
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(requests[0].data["text"], "final hello")
+            self.assertEqual(partials[0].data["metadata"]["source"], "partial_snapshot")
+            self.assertGreaterEqual(stt.partial_calls, 1)
+            self.assertEqual(stt.final_calls, 1)
+        finally:
+            left.close()
+            right.close()
+
+    def _wait_for_event(self, events: EventStore, event_type: str, timeout: float = 2.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if any(event.type == event_type for event in events.list_events()):
+                return
+            time.sleep(0.02)
+        self.fail(f"timed out waiting for {event_type}")
 
     def test_audiosocket_vad_decisions_emit_runtime_metrics(self) -> None:
         left, right = socket.socketpair()

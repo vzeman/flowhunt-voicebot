@@ -399,6 +399,10 @@ VOICEBOT_OPENAI_STT_MODEL=gpt-4o-transcribe
 VOICEBOT_LANGUAGE=en
 VOICEBOT_STT_PROMPT=
 VOICEBOT_STT_TIMEOUT_SECONDS=8
+VOICEBOT_STT_PARTIAL_ENABLED=false
+VOICEBOT_STT_PARTIAL_INTERVAL_SECONDS=1.0
+VOICEBOT_STT_PARTIAL_MIN_SECONDS=1.0
+VOICEBOT_STT_PARTIAL_MIN_CHARS=4
 VOICEBOT_START_THRESHOLD=0.020
 VOICEBOT_STOP_THRESHOLD=0.010
 VOICEBOT_VAD_START_MS=60
@@ -437,6 +441,13 @@ can leak into transcriptions when the input audio is unclear.
 `VOICEBOT_STT_TIMEOUT_SECONDS` bounds each provider transcription request; a
 timeout is recorded as `stt_failed` so stalled STT calls are visible in the
 event timeline instead of leaving the call silent.
+
+`VOICEBOT_STT_PARTIAL_ENABLED=true` enables throttled active-turn STT snapshots
+for SIP AudioSocket and WebRTC calls. These snapshots emit
+`user_transcript_partial` events while the caller is still speaking. They are
+used for preparation and observability only; the final endpointed transcript is
+still the default source for communication-agent requests, so partials do not
+create duplicate tasks.
 
 Provider names:
 

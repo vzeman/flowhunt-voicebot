@@ -197,6 +197,11 @@ class CallSession:
         self._startup_response_event_ids: set[int] = set()
         self._startup_playback_guard = False
         self._speech_jobs: queue.Queue[tuple[int, np.ndarray, int]] = queue.Queue()
+        self._partial_stt_jobs: queue.Queue[tuple[int, np.ndarray, int]] = queue.Queue()
+        self._partial_stt_last_queued_at: dict[int, float] = {}
+        self._partial_stt_last_text: dict[int, str] = {}
+        self._partial_stt_inflight: set[int] = set()
+        self._partial_stt_lock = threading.Lock()
         self._active_turn = 0
         self._active_turn_lock = threading.Lock()
         self._call_id_change_callback = None
@@ -220,8 +225,10 @@ class CallSession:
     def run(self) -> None:
         sender = threading.Thread(target=self._send_loop, daemon=True)
         speech_worker = threading.Thread(target=self._speech_worker_loop, daemon=True)
+        partial_stt_worker = threading.Thread(target=self._partial_stt_worker_loop, daemon=True)
         sender.start()
         speech_worker.start()
+        partial_stt_worker.start()
         try:
             self._receive_loop()
         finally:
@@ -231,6 +238,7 @@ class CallSession:
                 self._jitter_buffer.clear()
             sender.join(timeout=1.0)
             speech_worker.join(timeout=1.0)
+            partial_stt_worker.join(timeout=1.0)
             self.events.append(self.call_id, "call_ended", {})
 
     def submit_agent_response(self, response: AgentResponse) -> VoicebotEvent:
@@ -549,6 +557,8 @@ class CallSession:
             return
 
         if not result.finished:
+            if result.decision == "speech_continues":
+                self._maybe_queue_partial_stt(self._current_turn())
             return
 
         self.recording_event.clear()
@@ -574,6 +584,68 @@ class CallSession:
                 self._record_metric("stt_audio_trimmed_seconds", trimmed_seconds, {"turn_id": turn_id})
             self.actors.queued("stt", correlation_id=str(turn_id), reason="speech_finished")
             self._speech_jobs.put((turn_id, audio, self._current_interrupt_generation()))
+
+    def _maybe_queue_partial_stt(self, turn_id: int) -> None:
+        if not self.settings.stt_partial_enabled or turn_id <= 0:
+            return
+        now = time.monotonic()
+        with self._partial_stt_lock:
+            if turn_id in self._partial_stt_inflight:
+                return
+            last_queued_at = self._partial_stt_last_queued_at.get(turn_id, 0.0)
+            if now - last_queued_at < self.settings.stt_partial_interval_seconds:
+                return
+            audio = self._turn_detector.current_audio()
+            if len(audio) / CALL_SAMPLE_RATE < self.settings.stt_partial_min_seconds:
+                return
+            self._partial_stt_inflight.add(turn_id)
+            self._partial_stt_last_queued_at[turn_id] = now
+        self.actors.queued("stt", correlation_id=str(turn_id), reason="partial_snapshot")
+        self._partial_stt_jobs.put((turn_id, audio, self._current_interrupt_generation()))
+
+    def _partial_stt_worker_loop(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                turn_id, audio, turn_generation = self._partial_stt_jobs.get(timeout=0.2)
+            except queue.Empty:
+                continue
+
+            self.actors.started("stt", correlation_id=str(turn_id), reason="partial_snapshot")
+            try:
+                started = time.perf_counter()
+                result = self.stt.transcribe(audio, CALL_SAMPLE_RATE)
+                elapsed = time.perf_counter() - started
+                if turn_generation == self._current_interrupt_generation() and result.text:
+                    self._emit_partial_transcript(turn_id, result.text, elapsed, result.metadata or {})
+            except Exception as exc:
+                self.events.append(
+                    self.call_id,
+                    "stt_failed",
+                    {"turn_id": turn_id, "error": str(exc), "partial": True},
+                )
+            finally:
+                with self._partial_stt_lock:
+                    self._partial_stt_inflight.discard(turn_id)
+                self.actors.completed("stt", correlation_id=str(turn_id), reason="partial_snapshot_done")
+
+    def _emit_partial_transcript(self, turn_id: int, text: str, elapsed: float, metadata: dict) -> None:
+        text = text.strip()
+        if len(text) < self.settings.stt_partial_min_chars:
+            return
+        with self._partial_stt_lock:
+            if self._partial_stt_last_text.get(turn_id) == text:
+                return
+            self._partial_stt_last_text[turn_id] = text
+        self.events.append(
+            self.call_id,
+            "user_transcript_partial",
+            {
+                "turn_id": turn_id,
+                "text": text,
+                "elapsed": elapsed,
+                "metadata": {**metadata, "source": "partial_snapshot"},
+            },
+        )
 
     def _speech_worker_loop(self) -> None:
         while not self.stop_event.is_set():

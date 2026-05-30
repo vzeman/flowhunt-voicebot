@@ -144,7 +144,9 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertIn("/ws/events", html)
         self.assertIn('event.type === "call_control_completed"', html)
         self.assertIn('event.data?.action === "hangup"', html)
-        self.assertIn("closeLocalPeer();", html)
+        self.assertIn("setIdleButtons()", html)
+        self.assertIn('closeLocalPeer("server hangup completed")', html)
+        self.assertIn('closeLocalPeer(`connection ${state}`)', html)
 
     def test_webrtc_manager_persists_routed_session_lifecycle(self) -> None:
         events = EventStore(max_context_events=20)

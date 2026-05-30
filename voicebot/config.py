@@ -67,6 +67,8 @@ class Settings:
     stt_partial_interval_seconds: float = env_float("VOICEBOT_STT_PARTIAL_INTERVAL_SECONDS", 1.0)
     stt_partial_min_seconds: float = env_float("VOICEBOT_STT_PARTIAL_MIN_SECONDS", 1.0)
     stt_partial_min_chars: int = env_int("VOICEBOT_STT_PARTIAL_MIN_CHARS", 4)
+    agent_min_transcript_chars: int = env_int("VOICEBOT_AGENT_MIN_TRANSCRIPT_CHARS", 5)
+    agent_min_transcript_tokens: int = env_int("VOICEBOT_AGENT_MIN_TRANSCRIPT_TOKENS", 2)
     debug_audio_capture: bool = env_bool("VOICEBOT_DEBUG_AUDIO_CAPTURE", False)
     debug_audio_dir: str = os.getenv("VOICEBOT_DEBUG_AUDIO_DIR", "/data/debug-audio")
 

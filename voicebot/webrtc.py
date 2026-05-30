@@ -24,6 +24,7 @@ from .processor_registry import ProcessorDependencies, ProcessorRegistry, Proces
 from .realtime_audio import AudioJitterBuffer, JitterBufferConfig, TurnDetector, trim_trailing_silence, turn_detection_config_from_settings
 from .realtime_quality import metric_latency_budget_seconds
 from .spoken_text import limit_spoken_response_text, split_spoken_response_text
+from .transcript_filter import should_drop_agent_transcript
 from .turn_coalescing import TurnCoalescer
 from .transports import WEBRTC_CAPABILITIES, StaticMediaTransport
 from .workspace_model import VoicebotSessionRecord, VoicebotSessionStore
@@ -612,13 +613,35 @@ class WebRTCCallSession:
                         )
                     if isinstance(frame, TextFrame) and frame.kind == "agent_request":
                         transcript_frame_id = str(frame.data.get("transcript_frame_id", ""))
+                        transcript_event_id = transcript_event_ids.get(transcript_frame_id)
+                        drop_decision = should_drop_agent_transcript(
+                            frame.text,
+                            stale=stale_turn,
+                            min_chars=self.settings.agent_min_transcript_chars,
+                            min_tokens=self.settings.agent_min_transcript_tokens,
+                        )
+                        if drop_decision.should_drop:
+                            self.events.append(
+                                self.call_id,
+                                "stt_result_dropped",
+                                {
+                                    "turn_id": frame.data.get("turn_id"),
+                                    "transcript_event_id": transcript_event_id,
+                                    "text": frame.text,
+                                    "reason": drop_decision.reason,
+                                    **(
+                                        {"stale": True, "stale_reason": "newer_caller_speech_started"}
+                                        if stale_turn
+                                        else {}
+                                    ),
+                                },
+                            )
+                            continue
                         self._turn_coalescer.handle(
                             {
-                                **({"reason": "stale_transcript"} if stale_turn else {}),
                                 "turn_id": frame.data.get("turn_id"),
-                                "transcript_event_id": transcript_event_ids.get(transcript_frame_id),
+                                "transcript_event_id": transcript_event_id,
                                 "text": frame.text,
-                                **({"stale": True, "stale_reason": "newer_caller_speech_started"} if stale_turn else {}),
                             }
                         )
                     continue

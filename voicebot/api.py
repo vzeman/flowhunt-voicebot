@@ -39,6 +39,9 @@ from .api_models import (
     SessionLeaseReleaseRequest,
     SessionLeaseRequest,
     SipTrunkRequest,
+    SpeculativeSubagentCancelRequest,
+    SpeculativeSubagentConfirmRequest,
+    SpeculativeSubagentTaskRequest,
     SubagentTaskCancelRequest,
     SubagentTaskSubmitRequest,
     VoicebotAdminPatchRequest,
@@ -1975,6 +1978,67 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from None
         return {"task": subagent_task_to_dict(task), "ok": task.status != "failed"}
 
+    @app.post("/subagent/tasks/speculative")
+    def submit_speculative_subagent_task(request: SpeculativeSubagentTaskRequest) -> dict[str, Any]:
+        if subagent_coordinator is None:
+            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
+        if subagent_lifecycle is None:
+            raise HTTPException(status_code=503, detail="Subagent lifecycle runner is not configured")
+        require_workspace_access(request.workspace_id)
+        try:
+            task = subagent_coordinator.request_speculative(
+                SubagentTaskRequest(
+                    workspace_id=request.workspace_id,
+                    voicebot_id=request.voicebot_id,
+                    session_id=request.session_id,
+                    request_event_id=request.request_event_id,
+                    provider=request.provider,  # type: ignore[arg-type]
+                    input_text=request.input_text,
+                    dedupe_key=request.dedupe_key,
+                    metadata=request.metadata,
+                ),
+                speculative_key=request.speculative_key,
+            )
+            task = subagent_lifecycle.schedule(task)
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"task": subagent_task_to_dict(task), "ok": task.status != "failed"}
+
+    @app.post("/subagent/tasks/{task_id}/confirm-speculative")
+    async def confirm_speculative_subagent_task(task_id: str, request: SpeculativeSubagentConfirmRequest) -> dict[str, Any]:
+        if subagent_coordinator is None:
+            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
+        require_workspace_access(request.workspace_id)
+        try:
+            task = subagent_coordinator.confirm_speculative(
+                task_id,
+                request.workspace_id,
+                final_request_event_id=request.final_request_event_id,
+                final_input_text=request.final_input_text,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        if request.notify_if_terminal and task.status == "completed":
+            await notify_subagent_terminal_task(task)
+        return {"task": subagent_task_to_dict(task), "ok": True}
+
+    @app.post("/subagent/tasks/{task_id}/cancel-speculative")
+    def cancel_speculative_subagent_task(task_id: str, request: SpeculativeSubagentCancelRequest) -> dict[str, Any]:
+        if subagent_coordinator is None:
+            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
+        require_workspace_access(request.workspace_id)
+        try:
+            task = subagent_coordinator.cancel_speculative(task_id, request.workspace_id, reason=request.reason)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"task": subagent_task_to_dict(task), "ok": task.metadata.get("speculative_status") == "cancelled"}
+
     @app.post("/subagent/tasks/{task_id}/cancel")
     def cancel_subagent_task(task_id: str, request: SubagentTaskCancelRequest) -> dict[str, Any]:
         if subagent_lifecycle is None:
@@ -2737,6 +2801,17 @@ def create_app(
 
     async def notify_subagent_terminal_task(task: SubagentTask, terminal_event: VoicebotEvent | None = None) -> None:
         if registry.get(task.session_id) is None:
+            return
+        if task.metadata.get("speculative") and task.metadata.get("speculative_status") != "confirmed":
+            events.append(
+                task.session_id,
+                "subagent_task_updated",
+                {
+                    **task.event_context(),
+                    "suppressed_result": True,
+                    "reason": "speculative_task_not_confirmed",
+                },
+            )
             return
         if task.status == "completed":
             result = task.result

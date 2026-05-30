@@ -177,6 +177,51 @@ class SubagentTests(unittest.TestCase):
         self.assertEqual(context["result"]["summary"], "The colleague found the answer.")
         self.assertNotIn("provider_payload", context["result"])
 
+    def test_speculative_task_can_be_confirmed_or_cancelled(self) -> None:
+        provider = FakeProvider()
+        events = EventStore(max_context_events=50)
+        coordinator = SubagentCoordinator(events=events)
+        coordinator.register(provider)
+
+        task = coordinator.request_speculative(self.request(), speculative_key="turn-1")
+        confirmed = coordinator.confirm_speculative(
+            task.task_id,
+            "workspace-1",
+            final_request_event_id=11,
+            final_input_text="How many pages are on the site?",
+        )
+        cancelled = coordinator.cancel_speculative(task.task_id, "workspace-1", reason="superseded_by_final_text")
+
+        self.assertTrue(task.metadata["speculative"])
+        self.assertEqual(confirmed.metadata["speculative_status"], "confirmed")
+        self.assertEqual(confirmed.metadata["final_request_event_id"], 11)
+        self.assertEqual(cancelled.metadata["speculative_status"], "cancelled")
+        event_types = [event.type for event in events.list_events(call_id="call-1")]
+        self.assertIn("subagent_task_speculative_started", event_types)
+        self.assertIn("subagent_task_speculative_confirmed", event_types)
+        self.assertIn("subagent_task_speculative_cancelled", event_types)
+
+    def test_speculative_task_can_be_superseded_by_replacement_request(self) -> None:
+        provider = FakeProvider()
+        events = EventStore(max_context_events=50)
+        coordinator = SubagentCoordinator(events=events)
+        coordinator.register(provider)
+
+        original = coordinator.request_speculative(self.request(), speculative_key="turn-1")
+        replacement = dataclasses_replace(
+            self.request(),
+            request_event_id=12,
+            input_text="Check the final corrected request.",
+            dedupe_key="final-12",
+        )
+        superseded, new_task = coordinator.supersede_speculative(original.task_id, "workspace-1", replacement)
+
+        self.assertEqual(superseded.metadata["speculative_status"], "superseded")
+        self.assertNotEqual(superseded.task_id, new_task.task_id)
+        self.assertEqual(new_task.input_text, "Check the final corrected request.")
+        event_types = [event.type for event in events.list_events(call_id="call-1")]
+        self.assertIn("subagent_task_speculative_superseded", event_types)
+
     def test_flowhunt_provider_uses_flow_invoke_task_protocol(self) -> None:
         client = FakeFlowHuntClient()
         provider = FlowHuntSubagentProvider("flowhunt_flow", client, "flow-1")

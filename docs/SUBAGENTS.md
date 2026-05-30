@@ -86,12 +86,24 @@ not need hardcoded language heuristics or FlowHunt-only behavior:
 
 - `GET /subagent/providers`
 - `POST /subagent/tasks`
+- `POST /subagent/tasks/speculative`
+- `POST /subagent/tasks/{task_id}/confirm-speculative`
+- `POST /subagent/tasks/{task_id}/cancel-speculative`
 - `POST /subagent/tasks/{task_id}/cancel`
 - `delegate_to_subagent` agent tool
 
 `POST /subagent/tasks` accepts workspace, session, request event, provider,
 input text, optional voicebot id, dedupe key, and provider metadata. When
 `schedule=true`, the task lifecycle runner assigns the first poll/deadline.
+
+Speculative delegation is available for partial-STT or intent-detector paths
+that recognize stable external-work intent before final endpointing. A
+speculative task starts with `metadata.speculative=true` and
+`metadata.speculative_status=started`. Final STT must either confirm it with
+`confirm-speculative` or cancel it with `cancel-speculative`. Completed
+speculative results are held in task state and are not sent to the
+communication agent until the task is confirmed, so speculative work can reduce
+latency without speaking unconfirmed results to the caller.
 
 The `delegate_to_subagent` tool derives workspace/session scope from the active
 call route when available and falls back to local FlowHunt workspace settings

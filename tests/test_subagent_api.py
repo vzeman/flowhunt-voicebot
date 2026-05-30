@@ -79,6 +79,50 @@ class SubagentApiTests(unittest.TestCase):
         self.assertEqual(cancelled.json()["task"]["status"], "cancelled")
         self.assertTrue(cancelled.json()["task"]["terminal_event_emitted_at"])
 
+    def test_speculative_subagent_api_starts_confirms_and_cancels(self) -> None:
+        client, events = self.build_client()
+
+        response = client.post(
+            "/subagent/tasks/speculative",
+            json={
+                "workspace_id": "workspace-1",
+                "voicebot_id": "voicebot-1",
+                "session_id": "call-1",
+                "request_event_id": 7,
+                "provider": "internal_worker",
+                "input_text": "Check sta",
+                "speculative_key": "turn-1",
+                "metadata": {},
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        task = response.json()["task"]
+        self.assertTrue(task["metadata"]["speculative"])
+        self.assertEqual(task["metadata"]["speculative_status"], "started")
+
+        confirmed = client.post(
+            f"/subagent/tasks/{task['task_id']}/confirm-speculative",
+            json={
+                "workspace_id": "workspace-1",
+                "final_request_event_id": 8,
+                "final_input_text": "Check status page.",
+            },
+        )
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(confirmed.json()["task"]["metadata"]["speculative_status"], "confirmed")
+
+        cancelled = client.post(
+            f"/subagent/tasks/{task['task_id']}/cancel-speculative",
+            json={"workspace_id": "workspace-1", "reason": "newer_turn"},
+        )
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertEqual(cancelled.json()["task"]["metadata"]["speculative_status"], "cancelled")
+        event_types = [event.type for event in events.list_events(call_id="call-1")]
+        self.assertIn("subagent_task_speculative_started", event_types)
+        self.assertIn("subagent_task_speculative_confirmed", event_types)
+        self.assertIn("subagent_task_speculative_cancelled", event_types)
+
     def test_delegate_to_subagent_tool_uses_generic_provider(self) -> None:
         client, events = self.build_client()
 

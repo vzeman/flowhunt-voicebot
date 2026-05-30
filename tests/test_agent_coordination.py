@@ -67,6 +67,7 @@ class AgentCoordinationTests(unittest.TestCase):
 
         self.assertEqual([call["name"] for call in calls], ["say", "transfer_call"])
         self.assertIn("transfer you to 123", calls[0]["arguments"]["text"])
+        self.assertEqual(calls[0]["arguments"]["response_kind"], "call_control_ack")
 
     def test_action_acknowledgement_uses_existing_say(self) -> None:
         calls = ensure_action_acknowledgements(

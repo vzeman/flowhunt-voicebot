@@ -1289,7 +1289,9 @@ Response:
       "description": "Speak text into an active call.",
       "arguments": {
         "call_id": "Active call ID.",
-        "text": "Text to synthesize and play."
+        "text": "Text to synthesize and play.",
+        "response_to_event_id": "Optional event ID this answers.",
+        "response_kind": "Optional structured response kind for runtime playback policy."
       }
     }
   ]
@@ -1359,6 +1361,11 @@ Supported tool names:
 | `get_runtime_config` | Read redacted runtime config. |
 | `get_agent_task_status` | Read task tracker status. |
 | `get_agent_task_summary` | Read agent task events with derived state. |
+
+The `say` tool accepts optional `response_kind` metadata. Runtime-generated
+call-control acknowledgements use `call_control_ack` so the media layer can
+play the acknowledgement before hangup, transfer, or DTMF without relying on
+hardcoded caller-language keywords.
 
 Tool argument details are available from `GET /agent/tools/schema`.
 

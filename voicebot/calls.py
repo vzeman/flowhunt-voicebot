@@ -56,6 +56,13 @@ DEFAULT_STT_PIPELINE = (ProcessorSpec("stt"), ProcessorSpec("agent-request"))
 DEFAULT_TTS_PIPELINE = (ProcessorSpec("tts"),)
 
 
+def _optional_int(value: object) -> int | None:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 class PlaybackBuffer:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -198,6 +205,8 @@ class CallSession:
         self._response_request_times: dict[int, float] = {}
         self._startup_response_event_ids: set[int] = set()
         self._startup_playback_guard = False
+        self._last_persistent_response: dict[str, object] | None = None
+        self._pending_persistent_resume: dict[str, object] | None = None
         self._speech_jobs: queue.Queue[tuple[int, np.ndarray, int]] = queue.Queue()
         self._partial_stt_jobs: queue.Queue[tuple[int, np.ndarray, int]] = queue.Queue()
         self._partial_stt_last_queued_at: dict[int, float] = {}
@@ -378,6 +387,14 @@ class CallSession:
                         "response_kind": response.response_kind,
                     },
                 )
+                if persistent_response:
+                    self._last_persistent_response = {
+                        "text": text,
+                        "response_to_event_id": response.response_to_event_id,
+                        "response_kind": response.response_kind,
+                    }
+                elif not queued:
+                    self._pending_persistent_resume = None
                 if startup_response and self.recording_event.is_set():
                     self._startup_playback_guard = True
                 if not queued:
@@ -432,6 +449,7 @@ class CallSession:
                 yield from synthesize_stream(chunk_text)
 
     def interrupt_playback(self, reason: str = "agent_requested") -> VoicebotEvent:
+        self._remember_interrupted_persistent_response(reason)
         interrupted = self.playback.interrupt()
         self._mark_interrupted(reason)
         self.actors.cancel("tts_playback", reason=reason)
@@ -555,6 +573,8 @@ class CallSession:
             self._record_vad_decision(result.decision, result.level, result.block_ms, {"turn_id": turn_id})
             self._mark_interrupted("user_speech_started")
 
+            if result.interrupt_playback and self.playback.is_active():
+                self._remember_interrupted_persistent_response("user_speech_started")
             if result.interrupt_playback and self.playback.interrupt():
                 self.actors.cancel("tts_playback", reason="user_speech_started", correlation_id=str(turn_id))
                 self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "user_speech_started"})
@@ -715,6 +735,7 @@ class CallSession:
                                     ),
                                 },
                             )
+                            self._maybe_resume_interrupted_persistent_response(str(drop_decision.reason))
                             continue
                         self._turn_coalescer.handle(
                             {
@@ -754,6 +775,7 @@ class CallSession:
                             "metadata": frame.metadata,
                         },
                     )
+                    self._maybe_resume_interrupted_persistent_response("stt_no_text")
                 elif frame.kind == "transcription_finished":
                     self._record_metric(
                         "stt_duration_seconds",
@@ -797,6 +819,8 @@ class CallSession:
                         return
                     time.sleep(packet_seconds)
                     continue
+                if self.playback.is_active():
+                    self._remember_interrupted_persistent_response("caller_is_speaking")
                 if self.playback.interrupt():
                     self._mark_interrupted("caller_is_speaking")
                     self.actors.cancel("tts_playback", reason="caller_is_speaking")
@@ -823,6 +847,7 @@ class CallSession:
             if finished:
                 self._set_echo_tail(self.settings.echo_tail_ms)
                 self.events.append(self.call_id, "bot_playback_finished", playback_data)
+                self._forget_finished_persistent_response(playback_data)
             time.sleep(packet_seconds)
 
     def _new_turn(self) -> int:
@@ -959,6 +984,44 @@ class CallSession:
         return bool({"call_control_ack", "colleague_result"} & self.playback.active_response_kinds()) or any(
             self._should_defer_response(event_id) for event_id in self.playback.active_response_event_ids()
         )
+
+    def _remember_interrupted_persistent_response(self, reason: str) -> None:
+        if not self._has_active_persistent_response() or self._last_persistent_response is None:
+            return
+        self._pending_persistent_resume = dict(self._last_persistent_response)
+        self.events.append(
+            self.call_id,
+            "agent_response_deferred",
+            {
+                "reason": "persistent_response_interrupted",
+                "interrupt_reason": reason,
+                "response_to_event_id": self._pending_persistent_resume.get("response_to_event_id"),
+            },
+        )
+
+    def _maybe_resume_interrupted_persistent_response(self, reason: str) -> None:
+        pending = self._pending_persistent_resume
+        if pending is None or self.recording_event.is_set() or self.playback.is_active():
+            return
+        self._pending_persistent_resume = None
+        response = AgentResponse(
+            self.call_id,
+            str(pending.get("text") or ""),
+            response_to_event_id=_optional_int(pending.get("response_to_event_id")),
+            response_kind=str(pending.get("response_kind") or "colleague_result"),
+        )
+        self.events.append(
+            self.call_id,
+            "agent_response_resumed",
+            {"reason": reason, "response_to_event_id": response.response_to_event_id},
+        )
+        self.submit_agent_response(response)
+
+    def _forget_finished_persistent_response(self, playback_data: dict[str, object]) -> None:
+        if str(playback_data.get("response_kind") or "") not in {"call_control_ack", "colleague_result"}:
+            return
+        self._last_persistent_response = None
+        self._pending_persistent_resume = None
 
     def _has_newer_user_transcript(self, event_id: int | None) -> bool:
         if event_id is None:

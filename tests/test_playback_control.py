@@ -335,6 +335,60 @@ class PlaybackControlTests(unittest.TestCase):
             left.close()
             right.close()
 
+    def test_webrtc_interrupted_colleague_result_resumes_after_empty_followup(self) -> None:
+        events = EventStore(max_context_events=40)
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(greet_on_connect=False),
+            events,
+            FakeSTT(),
+            FakeTTS(),
+        )
+        try:
+            request = events.append("call-1", "agent_response_requested", {"reason": "colleague_result"})
+            session._remember_response_generation(request.id)
+            session.submit_agent_response(
+                AgentResponse("call-1", "I checked with a colleague. Here is the result.", response_to_event_id=request.id)
+            )
+
+            _packet, started, _finished, _data = session.next_playback_packet(40)
+            self.assertTrue(started)
+            session.recording_event.set()
+            session.next_playback_packet(40)
+            session.recording_event.clear()
+            session._maybe_resume_interrupted_persistent_response("stt_no_text")
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertIn("agent_response_resumed", event_types)
+            self.assertGreaterEqual(event_types.count("agent_response_queued"), 2)
+            self.assertTrue(session.playback.is_active())
+        finally:
+            session.stop()
+
+    def test_call_session_interrupted_colleague_result_resumes_after_empty_followup(self) -> None:
+        events = EventStore(max_context_events=40)
+        session, left, right = self.make_session("call-1", events)
+        try:
+            request = events.append("call-1", "agent_response_requested", {"reason": "colleague_result"})
+            session._remember_response_generation(request.id)
+            session.submit_agent_response(
+                AgentResponse("call-1", "I checked with a colleague. Here is the result.", response_to_event_id=request.id)
+            )
+
+            session.playback.next_packet_with_metadata(40)
+            session._remember_interrupted_persistent_response("user_speech_started")
+            session.playback.interrupt()
+            session._maybe_resume_interrupted_persistent_response("stt_no_text")
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertIn("agent_response_resumed", event_types)
+            self.assertGreaterEqual(event_types.count("agent_response_queued"), 2)
+            self.assertTrue(session.playback.is_active())
+        finally:
+            left.close()
+            right.close()
+
     def test_call_control_ack_is_not_lost_after_newer_speech(self) -> None:
         events = EventStore(max_context_events=30)
         session = WebRTCCallSession(

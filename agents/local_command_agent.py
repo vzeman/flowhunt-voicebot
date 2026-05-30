@@ -530,8 +530,15 @@ Requested tool call:
 Return only JSON:
 {{"allowed": true or false, "reason": "short reason"}}
 
-Allow the tool only when the current caller message clearly asks for that exact phone action.
-Reject if the message is noise, ambiguous, unrelated, a partial fragment, or only old conversation context.
+Allow the tool only when the caller directly instructs this assistant to perform
+that exact action on the current call. The request must be imperative or a clear
+first-person/second-person request such as "hang up", "please disconnect me",
+"transfer me", or equivalent wording in the caller's language.
+
+Reject third-person narration or reported speech such as "they disconnect the
+call", "the call was disconnected", "someone disconnected", or equivalents.
+Reject if the message is noise, ambiguous, unrelated, a partial STT fragment, or
+only old conversation context. If uncertain, return allowed=false.
 """
 
 

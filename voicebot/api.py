@@ -122,6 +122,7 @@ from .runtime_config import (
     VoicebotSubagentConfig,
     runtime_config_to_dict,
 )
+from .realtime_quality import realtime_audio_profile, realtime_audio_profile_issues
 from .routing_admission import IncomingSessionRequest, evaluate_incoming_session
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
@@ -341,6 +342,11 @@ def create_app(
     @app.get("/pipeline/contract")
     def pipeline_contract() -> dict[str, Any]:
         return pipeline_contract_payload()
+
+    @app.get("/realtime/audio-profile")
+    def get_realtime_audio_profile() -> dict[str, Any]:
+        profile = realtime_audio_profile(runtime_settings)
+        return {"profile": profile, "issues": realtime_audio_profile_issues(profile)}
 
     @app.get("/calls")
     def list_calls() -> dict[str, Any]:

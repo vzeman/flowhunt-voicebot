@@ -12,6 +12,14 @@ The current SIP and WebRTC sessions still contain their existing media loops, bu
 - Keep audio decisions observable and testable without live calls.
 - Support SIP and WebRTC through the same turn detection semantics.
 
+The current profile is exposed at:
+
+`GET /realtime/audio-profile`
+
+The response includes turn-detection settings, cancellation capabilities,
+streaming support, jitter/normalization settings, TTS cache status, and the
+regression areas covered by tests.
+
 ## Turn Detection
 
 `TurnDetector` processes normalized float32 audio blocks and returns a `TurnDetectionResult`.
@@ -91,6 +99,11 @@ not resumed.
 The OpenAI-compatible TTS adapter uses the Speech API streaming response with
 raw `pcm` output, converts the 24 kHz PCM stream into normalized call audio, and
 resamples it to the runtime call sample rate before playback.
+
+The runtime records `tts_first_audio_latency_seconds` when the first TTS audio
+chunk is available. Autoscaling and diagnostics also recognize
+`end_of_speech_to_playback_started_seconds` when emitted by a transport or
+worker, so STT, agent, TTS, and playback delay can be separated.
 
 Before completed caller audio is sent to STT, the runtime trims trailing silence
 that was only needed for endpointing while keeping a short tail for recognition
@@ -196,9 +209,10 @@ caller audio by default.
 
 ## Next Integration Steps
 
-1. Replace duplicated SIP and WebRTC VAD loops with `TurnDetector`.
-2. Emit metrics for every turn decision from `TurnDetectionResult.metric_data()`.
-3. Add a pluggable VAD provider interface.
-4. Replace duplicated SIP and WebRTC VAD loops with `TurnDetector`.
-5. Wire debug capture behind runtime/workspace configuration.
-6. Add stronger echo suppression strategy for real deployments.
+1. Add optional model-based VAD/noise isolation behind the existing detector
+   interface.
+2. Propagate queue cancellation to remote provider SDK calls when supported.
+3. Move TTS cache metadata to shared/object storage for multi-pod production.
+4. Add audio fixture tests for more real-world telephony noise and echo cases.
+5. Emit transport-provided first-audio and packet-level quality metrics where
+   available.

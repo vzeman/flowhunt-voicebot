@@ -1425,6 +1425,13 @@ Returns the WebRTC scale contract: local browser test behavior, Kubernetes
 signaling target, workspace/voicebot/channel routing, TURN/STUN requirements,
 reconnect semantics, admission control, and quality metrics.
 
+### GET `/realtime/audio-profile`
+
+Returns the active realtime audio quality profile and validation issues. The
+profile covers turn detection, barge-in cancellation, stale response dropping,
+streaming TTS/STT contract support, jitter buffers, TTS cache, and regression
+coverage.
+
 ### GET `/scaling/topology`
 
 Returns worker roles, queue names, concurrency, shared state, and event bus

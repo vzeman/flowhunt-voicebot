@@ -11,13 +11,27 @@ import tempfile
 import threading
 
 import numpy as np
-from openai import OpenAI
-import soundfile as sf
-from supertonic import TTS
+
+try:
+    from openai import OpenAI
+except ModuleNotFoundError:
+    OpenAI = None
+
+try:
+    import soundfile as sf
+except ModuleNotFoundError:
+    sf = None
+
+try:
+    from supertonic import TTS
+except ModuleNotFoundError:
+    TTS = None
 
 from .audio import CALL_SAMPLE_RATE, resample_audio
 from .config import Settings
 from .providers import normalize_provider, provider_api_key, provider_base_url
+
+OPENAI_TTS_PCM_SAMPLE_RATE = 24_000
 
 
 class TTSProvider(ABC):
@@ -95,6 +109,8 @@ class CachedTTSProvider(TTSProvider):
 
 class SupertonicTTSProvider(TTSProvider):
     def __init__(self, voice_name: str, language: str | None) -> None:
+        if TTS is None:
+            raise RuntimeError("The supertonic package is required when using Supertonic TTS")
         print("Loading Supertonic TTS model.")
         self._tts = TTS(auto_download=True)
         self._voice_style = self._tts.get_voice_style(voice_name=voice_name)
@@ -116,6 +132,10 @@ class SupertonicTTSProvider(TTSProvider):
 
 class OpenAITTSProvider(TTSProvider):
     def __init__(self, settings: Settings) -> None:
+        if OpenAI is None:
+            raise RuntimeError("The openai package is required when using OpenAI-compatible TTS")
+        if sf is None:
+            raise RuntimeError("The soundfile package is required when using OpenAI-compatible TTS")
         provider = normalize_provider(settings.tts_provider)
         api_key = provider_api_key(provider, settings.tts_api_key, settings.openai_api_key)
         base_url = provider_base_url(provider, settings.tts_base_url, settings.openai_base_url)
@@ -148,3 +168,33 @@ class OpenAITTSProvider(TTSProvider):
             audio = audio.mean(axis=1)
         call_audio = resample_audio(audio, sample_rate, CALL_SAMPLE_RATE)
         return call_audio, len(audio) / float(sample_rate)
+
+    def synthesize_stream(self, text: str) -> Iterable[tuple[np.ndarray, float]]:
+        with self._lock:
+            with self._client.audio.speech.with_streaming_response.create(
+                model=self._model,
+                voice=self._voice,
+                input=text,
+                response_format="pcm",
+            ) as response:
+                pending = b""
+                for chunk in response.iter_bytes(chunk_size=4096):
+                    pending += chunk
+                    even_length = len(pending) - (len(pending) % 2)
+                    if even_length <= 0:
+                        continue
+                    pcm = pending[:even_length]
+                    pending = pending[even_length:]
+                    audio = pcm16le_bytes_to_float32(pcm)
+                    if audio.size == 0:
+                        continue
+                    call_audio = resample_audio(audio, OPENAI_TTS_PCM_SAMPLE_RATE, CALL_SAMPLE_RATE)
+                    if call_audio.size:
+                        yield call_audio, audio.size / float(OPENAI_TTS_PCM_SAMPLE_RATE)
+
+
+def pcm16le_bytes_to_float32(content: bytes) -> np.ndarray:
+    even_length = len(content) - (len(content) % 2)
+    if even_length <= 0:
+        return np.zeros(0, dtype=np.float32)
+    return np.frombuffer(content[:even_length], dtype="<i2").astype(np.float32) / 32768.0

@@ -88,6 +88,10 @@ response to synthesize. If the caller starts speaking while later chunks are
 still being generated, the remaining chunks are dropped and the old response is
 not resumed.
 
+The OpenAI-compatible TTS adapter uses the Speech API streaming response with
+raw `pcm` output, converts the 24 kHz PCM stream into normalized call audio, and
+resamples it to the runtime call sample rate before playback.
+
 ## Configuration
 
 `TurnDetectionConfig` contains:

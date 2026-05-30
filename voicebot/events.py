@@ -23,6 +23,7 @@ EventType = Literal[
     "stt_started",
     "stt_finished",
     "stt_no_text",
+    "stt_result_dropped",
     "user_transcript_partial",
     "user_transcript",
     "agent_response_requested",

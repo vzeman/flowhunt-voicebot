@@ -151,6 +151,13 @@ Normal older answers are still dropped after newer caller activity, but
 completed colleague results should not disappear just because the caller barged
 in before the first playback attempt.
 
+Short conversational answers are synthesized as one TTS request even when they
+are slightly longer than the streaming chunk target. This avoids splitting a
+single customer-facing sentence at a comma, which can sound like the answer was
+cut in the middle. While a colleague result is actively queued for playback,
+ordinary non-persistent follow-up responses are dropped instead of competing
+with the result audio.
+
 Before completed caller audio is sent to STT, the runtime trims trailing silence
 that was only needed for endpointing while keeping a short tail for recognition
 context. This reduces uploaded audio duration and avoids asking the STT provider

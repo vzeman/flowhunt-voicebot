@@ -151,6 +151,9 @@ the caller can ask for details instead of waiting through a long readout.
 These result responses are persistent across caller barge-in: playback may be
 deferred or interrupted, but the completed colleague result is not discarded as
 an ordinary stale answer before the caller has heard it.
+Short colleague-result answers are kept as a single TTS phrase when possible,
+and unrelated non-persistent responses are suppressed while the result is
+actively queued so the caller hears the colleague result cleanly.
 
 Remaining production follow-up:
 

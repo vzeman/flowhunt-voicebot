@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+SHORT_CONVERSATIONAL_RESPONSE_CHARS = 180
+
 
 def clean_spoken_response_text(text: str) -> str:
     cleaned = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
@@ -31,6 +33,8 @@ def split_spoken_response_text(text: str, max_chunk_chars: int) -> list[str]:
     cleaned = clean_spoken_response_text(text)
     if not cleaned:
         return []
+    if max_chunk_chars >= 80 and len(cleaned) <= SHORT_CONVERSATIONAL_RESPONSE_CHARS:
+        return [cleaned]
     if max_chunk_chars <= 0 or len(cleaned) <= max_chunk_chars:
         return [cleaned]
 

@@ -3228,11 +3228,28 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       logNode.scrollTop = logNode.scrollHeight;
     }
 
+    function setIdleButtons() {
+      startButton.disabled = false;
+      stopButton.disabled = true;
+    }
+
+    function setActiveButtons() {
+      startButton.disabled = true;
+      stopButton.disabled = false;
+    }
+
     startButton.onclick = async () => {
       startButton.disabled = true;
       try {
         pc = new RTCPeerConnection({iceServers: [{urls: "stun:stun.l.google.com:19302"}]});
-        pc.onconnectionstatechange = () => log(`connectionState=${pc.connectionState}`);
+        pc.onconnectionstatechange = () => {
+          const state = pc?.connectionState;
+          if (!state) return;
+          log(`connectionState=${state}`);
+          if (["closed", "failed", "disconnected"].includes(state)) {
+            closeLocalPeer(`connection ${state}`);
+          }
+        };
         pc.ontrack = (event) => {
           log(`received remote ${event.track.kind} track`);
           remoteAudio.srcObject = event.streams[0] || new MediaStream([event.track]);
@@ -3281,7 +3298,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         callId = payload.call_id;
         connectEventSocket();
         await pc.setRemoteDescription(payload.answer);
-        stopButton.disabled = false;
+        setActiveButtons();
         log(`started session=${sessionId} call=${payload.call_id}`);
       } catch (error) {
         log(`error: ${error}`);
@@ -3303,12 +3320,10 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         const event = JSON.parse(message.data);
         if (event.call_id !== callId) return;
         if (event.type === "call_control_completed" && event.data?.action === "hangup" && event.data?.ok) {
-          log("server hangup completed");
-          closeLocalPeer();
+          closeLocalPeer("server hangup completed");
         }
         if (event.type === "call_ended") {
-          log("server call ended");
-          closeLocalPeer();
+          closeLocalPeer("server call ended");
         }
       };
       eventSocket.onclose = () => {
@@ -3316,24 +3331,25 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       };
     }
 
-    function closeLocalPeer() {
-      stopButton.disabled = true;
+    function closeLocalPeer(reason = "") {
+      setIdleButtons();
       sessionId = null;
       callId = null;
       if (localStream) {
         for (const track of localStream.getTracks()) track.stop();
       }
       localStream = null;
-      if (pc) {
-        pc.close();
-      }
+      const peer = pc;
       pc = null;
+      if (peer) {
+        peer.close();
+      }
       remoteAudio.srcObject = null;
       if (eventSocket) {
         eventSocket.close();
         eventSocket = null;
       }
-      startButton.disabled = false;
+      if (reason) log(reason);
     }
 
     async function stopCall() {

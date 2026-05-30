@@ -3219,7 +3219,9 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     const logNode = document.getElementById("log");
     let pc = null;
     let sessionId = null;
+    let callId = null;
     let localStream = null;
+    let eventSocket = null;
 
     function log(message) {
       logNode.textContent += `${new Date().toISOString()} ${message}\\n`;
@@ -3276,6 +3278,8 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         }
         const payload = await response.json();
         sessionId = payload.session_id;
+        callId = payload.call_id;
+        connectEventSocket();
         await pc.setRemoteDescription(payload.answer);
         stopButton.disabled = false;
         log(`started session=${sessionId} call=${payload.call_id}`);
@@ -3291,16 +3295,31 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       startButton.disabled = false;
     };
 
-    async function stopCall() {
-      stopButton.disabled = true;
-      if (sessionId) {
-        try {
-          await fetch(`/webrtc/sessions/${sessionId}`, {method: "DELETE"});
-        } catch (error) {
-          log(`delete failed: ${error}`);
+    function connectEventSocket() {
+      if (eventSocket) eventSocket.close();
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      eventSocket = new WebSocket(`${protocol}//${window.location.host}/ws/events`);
+      eventSocket.onmessage = (message) => {
+        const event = JSON.parse(message.data);
+        if (event.call_id !== callId) return;
+        if (event.type === "call_control_completed" && event.data?.action === "hangup" && event.data?.ok) {
+          log("server hangup completed");
+          closeLocalPeer();
         }
-      }
+        if (event.type === "call_ended") {
+          log("server call ended");
+          closeLocalPeer();
+        }
+      };
+      eventSocket.onclose = () => {
+        eventSocket = null;
+      };
+    }
+
+    function closeLocalPeer() {
+      stopButton.disabled = true;
       sessionId = null;
+      callId = null;
       if (localStream) {
         for (const track of localStream.getTracks()) track.stop();
       }
@@ -3310,6 +3329,23 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       }
       pc = null;
       remoteAudio.srcObject = null;
+      if (eventSocket) {
+        eventSocket.close();
+        eventSocket = null;
+      }
+      startButton.disabled = false;
+    }
+
+    async function stopCall() {
+      stopButton.disabled = true;
+      if (sessionId) {
+        try {
+          await fetch(`/webrtc/sessions/${sessionId}`, {method: "DELETE"});
+        } catch (error) {
+          log(`delete failed: ${error}`);
+        }
+      }
+      closeLocalPeer();
       log("stopped");
     }
   </script>

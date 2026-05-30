@@ -16,6 +16,7 @@ Workspace
       STT/TTS/agent providers
       FlowHunt flow/project bindings
       prompts, language, voice
+      config_version
     Sessions
       customer calls and browser sessions
     Events, transcripts, external tasks
@@ -83,6 +84,17 @@ the voicebot session. `require_same_workspace()` makes this invariant explicit.
 - Local worker lease state for agent tasks
 - Local JSON stores for events and external task records
 - Prototype browser test endpoint outside workspace routing
+
+## Runtime Config Versioning
+
+`VoicebotRuntimeConfig` is the control-plane object for runtime behavior inside
+one workspace and voicebot. It bundles provider selections, secret references,
+prompts, language, realtime audio tuning, quotas, enabled actions, and subagent
+bindings under a monotonically increasing `config_version`.
+
+Saving a runtime config emits `runtime_config_updated`. New sessions should use
+the latest enabled version, while active sessions keep the version they started
+with for auditability and predictable call behavior.
 
 ## Follow-Up Implementation Work
 

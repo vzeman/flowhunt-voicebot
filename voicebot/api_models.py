@@ -115,6 +115,50 @@ class VoicebotProviderConfigRequest(BaseModel):
     agent: ProviderChoiceRequest
 
 
+class VoicebotPromptConfigRequest(BaseModel):
+    greeting: str = "The call has connected. Greet the caller and ask how you can help."
+    system_prompt: str = ""
+    stt_prompt: str = ""
+    language: str = "en"
+
+
+class VoicebotRealtimeConfigRequest(BaseModel):
+    silence_ms: int = 450
+    vad_start_ms: int = 60
+    min_seconds: float = 0.35
+    max_seconds: float = 20.0
+    start_threshold: float = 0.020
+    stop_threshold: float = 0.010
+    barge_in_threshold: float = 0.08
+    echo_tail_ms: int = 300
+    max_reply_chars: int = 240
+    tts_chunk_chars: int = 90
+
+
+class VoicebotQuotaConfigRequest(BaseModel):
+    max_concurrent_sessions: int = 1
+    max_provider_inflight: int = 10
+    enabled_actions: list[str] = Field(
+        default_factory=lambda: ["say", "hangup_call", "transfer_call", "send_dtmf", "invoke_flowhunt_flow"]
+    )
+
+
+class VoicebotSubagentConfigRequest(BaseModel):
+    flowhunt_workspace_id: str = ""
+    flowhunt_flow_id: str = ""
+    flowhunt_project_id: str = ""
+    complex_backend: str = "flow"
+
+
+class VoicebotRuntimeConfigRequest(BaseModel):
+    providers: VoicebotProviderConfigRequest
+    prompts: VoicebotPromptConfigRequest = Field(default_factory=VoicebotPromptConfigRequest)
+    realtime: VoicebotRealtimeConfigRequest = Field(default_factory=VoicebotRealtimeConfigRequest)
+    quotas: VoicebotQuotaConfigRequest = Field(default_factory=VoicebotQuotaConfigRequest)
+    subagents: VoicebotSubagentConfigRequest = Field(default_factory=VoicebotSubagentConfigRequest)
+    enabled: bool = True
+
+
 class VoicebotAdminRequest(BaseModel):
     voicebot_id: str
     display_name: str = ""

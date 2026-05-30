@@ -42,6 +42,7 @@ EventType = Literal[
     "flowhunt_flow_updated",
     "flowhunt_flow_completed",
     "provider_call_failed",
+    "runtime_config_updated",
     "subagent_task_requested",
     "subagent_task_deduplicated",
     "subagent_task_updated",

@@ -19,6 +19,12 @@ workspace-scoped subagent events. If the call is still active, completed and
 failed tasks also enqueue an `agent_response_requested` event so the
 communication agent can present the colleague result naturally to the caller.
 
+Spoken delegated-work progress uses per-call/task cadence memory. Initial
+"I will ask a colleague" acknowledgements are spoken once per delegated request,
+and repeated background progress with the same normalized text is suppressed.
+Provider enum strings such as `TaskStatus.WAITING_FOR_WORKER` are normalized
+before they can reach caller-facing progress events or speech.
+
 `GET /subagent/tasks` exposes stored delegated work for debugging and operations,
 with optional `workspace_id` and `session_id` filters.
 
@@ -79,6 +85,12 @@ poll loop or a task that never reaches the provider.
 Polling uses the registered subagent provider only. For FlowHunt flows, that
 means the official invoke task protocol: submit once, store the task id, then
 poll by `flow_id + task_id`.
+
+Progress polling should emit caller-facing updates only when the message changes
+and the configured progress cadence has elapsed. Suppressed duplicate progress
+is recorded as `agent_response_dropped` with reason
+`duplicate_progress_suppressed` so operations can distinguish intentional
+cadence control from playback failures.
 
 Providers that declare `supports_async_polling=False` are not polled by the
 runner. The task remains running, receives a diagnostic progress message, and is

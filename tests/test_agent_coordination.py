@@ -132,6 +132,20 @@ class AgentCoordinationTests(unittest.TestCase):
     def test_flowhunt_invocation_does_not_need_immediate_followup(self) -> None:
         self.assertFalse(needs_spoken_followup([{"name": "invoke_flowhunt_flow", "arguments": {}}]))
 
+    def test_colleague_result_fast_path_marks_response_as_persistent_result(self) -> None:
+        calls = fast_tool_calls(
+            {
+                "id": 10,
+                "call_id": "call-1",
+                "data": {
+                    "reason": "colleague_result",
+                    "data": {"summary": "The latest LiveAgent incident was resolved in 56 minutes."},
+                },
+            }
+        )
+
+        self.assertEqual(calls[0]["arguments"]["response_kind"], "colleague_result")
+
     def test_caller_text_is_not_interpreted_by_fast_path(self) -> None:
         task = {
             "id": 10,

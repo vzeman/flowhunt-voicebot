@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 import threading
 import time
@@ -109,6 +110,18 @@ def run_communication_agent(
                     latest,
                     lambda task, call: validate_call_control_tool(client, providers, config, task, call),
                 )
+                if not tool_calls and answer:
+                    tool_calls = recover_missing_colleague_tool_call(
+                        client,
+                        providers,
+                        config,
+                        latest,
+                        response.get("context", {}),
+                        answer,
+                        native_tools,
+                    )
+                    if tool_calls:
+                        print(f"recovered missing colleague tool call for event {latest['id']}", flush=True)
                 if delayed_ack.delivered:
                     tool_calls = suppress_colleague_tool_progress(tool_calls)
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
@@ -250,6 +263,113 @@ def validate_call_control_tool(
             flush=True,
         )
     return allowed
+
+
+def recover_missing_colleague_tool_call(
+    client: Any,
+    providers: AgentProviderRegistry,
+    config: CommunicationAgentConfig,
+    task: dict,
+    context: dict,
+    draft_answer: str,
+    native_tools: list[dict],
+) -> list[dict]:
+    tool_name = preferred_colleague_tool_name(native_tools)
+    if not tool_name or str(task.get("data", {}).get("reason") or "") in {"call_connected", "colleague_result", "colleague_progress"}:
+        return []
+    prompt = colleague_tool_recovery_prompt(task, context, draft_answer, tool_name)
+    try:
+        raw_answer, _tool_calls = providers.run(
+            client,
+            config.provider,
+            config.model,
+            prompt,
+            min(config.timeout, 3.0),
+            min(config.max_output_tokens, 180),
+            None,
+        )
+    except Exception as exc:
+        print(f"colleague tool recovery failed for event {task['id']}: {exc}", flush=True)
+        return []
+    recovery = parse_colleague_tool_recovery(raw_answer)
+    if not recovery.get("delegate"):
+        return []
+    message = str(recovery.get("message") or task.get("data", {}).get("text") or "").strip()
+    if not message:
+        return []
+    arguments: dict[str, Any] = {
+        "call_id": task["call_id"],
+        "message": message,
+        "response_to_event_id": task["id"],
+    }
+    if tool_name == "create_flowhunt_project_issue":
+        arguments = {
+            "call_id": task["call_id"],
+            "title": str(recovery.get("title") or "Caller request").strip()[:120],
+            "description": message,
+            "response_to_event_id": task["id"],
+        }
+    return [{"name": tool_name, "arguments": arguments}]
+
+
+def preferred_colleague_tool_name(native_tools: list[dict]) -> str:
+    available = {str(tool.get("name") or "") for tool in native_tools if isinstance(tool, dict)}
+    if "invoke_flowhunt_flow" in available:
+        return "invoke_flowhunt_flow"
+    if "create_flowhunt_project_issue" in available:
+        return "create_flowhunt_project_issue"
+    return ""
+
+
+def colleague_tool_recovery_prompt(task: dict, context: dict, draft_answer: str, tool_name: str) -> str:
+    recent_events = context.get("events", [])
+    if isinstance(recent_events, list):
+        recent_events = recent_events[-12:]
+    else:
+        recent_events = []
+    return f"""Decide if the voice agent failed to call a colleague tool.
+
+The voice agent can answer simple conversational questions directly. It must use
+{tool_name} when the caller asks for external work, website/status checks,
+research, account work, comparisons, or when the draft answer promises future
+checking but does not contain a final factual result.
+
+Caller message:
+{task.get("data", {}).get("text") or ""}
+
+Draft spoken answer:
+{draft_answer}
+
+Conversation summary:
+{context.get("summary") or "(none)"}
+
+Recent events:
+{json.dumps(recent_events, ensure_ascii=False, indent=2)[:6000]}
+
+Return only JSON:
+{{"delegate": true or false, "message": "exact colleague request if delegate is true", "title": "short title"}}
+
+Use the caller's language and the conversation context to reconstruct the exact
+request. Do not delegate greetings, thanks, unclear noise, or ordinary small
+talk.
+"""
+
+
+def parse_colleague_tool_recovery(raw: str) -> dict:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start < 0 or end < start:
+            return {}
+        try:
+            data = json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(data, dict):
+        return {}
+    return data
 
 
 def provider_failure_answer(exc: Exception) -> str:

@@ -153,6 +153,10 @@ defers it until silence instead of treating it like an ordinary stale answer.
 Normal older answers are still dropped after newer caller activity, but
 completed colleague results should not disappear just because the caller barged
 in before the first playback attempt.
+The deterministic colleague-result fast path tags spoken results with
+`response_kind=colleague_result`, so results generated outside the normal model
+turn get the same persistence and priority behavior as model-generated result
+speech.
 
 Call-control acknowledgements use the same structured persistence path. When an
 agent chooses `hangup_call`, `transfer_call`, or `send_dtmf`, the communication

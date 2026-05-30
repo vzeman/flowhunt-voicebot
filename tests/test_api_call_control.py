@@ -11,6 +11,13 @@ from voicebot.api import WebSocketHub, _seconds_between_timestamps, create_app
 from voicebot.calls import CallRegistry
 from voicebot.config import Settings
 from voicebot.events import EventStore
+from voicebot.provider_config import ProviderChoice, SecretReference, VoicebotProviderConfig
+from voicebot.runtime_config import (
+    SubagentPromptConfig,
+    VoicebotRuntimeConfig,
+    VoicebotRuntimeConfigStore,
+    VoicebotSubagentConfig,
+)
 from voicebot.subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, SubagentTaskResult, SubagentTaskStore
 from voicebot.transcripts import TranscriptStore
 
@@ -38,11 +45,12 @@ class FakeControlResult:
 
 
 class FakeWebRTCSession:
-    def __init__(self, call_id: str) -> None:
+    def __init__(self, call_id: str, route: dict | None = None) -> None:
         self.call_id = call_id
+        self.route = route or {}
 
     def snapshot(self):
-        return {"call_id": self.call_id, "transport": "webrtc", "session_id": "session-1"}
+        return {"call_id": self.call_id, "transport": "webrtc", "session_id": "session-1", "route": self.route}
 
 
 class SlowProgressSession:
@@ -159,6 +167,7 @@ class ApiCallControlTests(unittest.TestCase):
         webrtc=None,
         settings: Settings | None = None,
         subagent_coordinator: SubagentCoordinator | None = None,
+        runtime_configs: VoicebotRuntimeConfigStore | None = None,
     ) -> tuple[TestClient, EventStore, AgentTaskTracker]:
         events = EventStore(max_context_events=20)
         if subagent_coordinator is not None and subagent_coordinator.events is None:
@@ -174,8 +183,39 @@ class ApiCallControlTests(unittest.TestCase):
             settings=settings,
             webrtc=webrtc,
             subagent_coordinator=subagent_coordinator,
+            runtime_configs=runtime_configs,
         )
         return TestClient(app), events, tracker
+
+    def runtime_config_store_with_subagent_prompts(self) -> VoicebotRuntimeConfigStore:
+        secret = SecretReference("openai-main", "workspace-1")
+        store = VoicebotRuntimeConfigStore()
+        store.save(
+            VoicebotRuntimeConfig(
+                workspace_id="workspace-1",
+                voicebot_id="voicebot-1",
+                config_version=1,
+                providers=VoicebotProviderConfig(
+                    workspace_id="workspace-1",
+                    voicebot_id="voicebot-1",
+                    stt=ProviderChoice("stt", "openai", secret_ref=secret),
+                    tts=ProviderChoice("tts", "openai", secret_ref=secret),
+                    agent=ProviderChoice("agent", "openai-responses", secret_ref=secret),
+                ),
+                subagents=VoicebotSubagentConfig(
+                    flowhunt_workspace_id="workspace-1",
+                    flowhunt_flow_id="configured-flow-id",
+                    prompts={
+                        "flowhunt_flow": SubagentPromptConfig(
+                            before_call_prompt="I will ask the specialist now.",
+                            after_call_prompt="The specialist is checking it now.",
+                            result_prompt="Use this colleague result for the caller: {result}",
+                        )
+                    },
+                ),
+            )
+        )
+        return store
 
     def assert_call_control_event_sequence(self, persisted, action: str):
         self.assertEqual(
@@ -615,6 +655,47 @@ class ApiCallControlTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("flow_id", provider.requests[0].metadata)
+        invoked = [event for event in events.list_events(call_id="call-1") if event.type == "flowhunt_flow_invoked"]
+        self.assertEqual(invoked[-1].data["flow_id"], "configured-flow-id")
+
+    def test_flowhunt_flow_tool_uses_runtime_subagent_prompt_hooks(self) -> None:
+        provider = FakeSubagentProvider()
+        coordinator = SubagentCoordinator()
+        coordinator.register(provider)
+        registry = CallRegistry()
+        registry.add(FakeWebRTCSession("call-1", {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"}))
+        settings = Settings(
+            flowhunt_api_key="key",
+            flowhunt_workspace_id="workspace-1",
+            flowhunt_flow_id="fallback-flow-id",
+            subagent_task_initial_poll_seconds=0.1,
+        )
+        client, events, _tracker = self.build_client(
+            registry=registry,
+            settings=settings,
+            subagent_coordinator=coordinator,
+            runtime_configs=self.runtime_config_store_with_subagent_prompts(),
+        )
+
+        response = client.post(
+            "/agent/tools/invoke_flowhunt_flow",
+            json={
+                "arguments": {
+                    "call_id": "call-1",
+                    "message": "Review the caller website.",
+                    "response_to_event_id": 53,
+                }
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["message"], "The specialist is checking it now.")
+        self.assertEqual(provider.requests[0].workspace_id, "workspace-1")
+        self.assertEqual(provider.requests[0].metadata["after_call_text"], "The specialist is checking it now.")
+        self.assertEqual(
+            provider.requests[0].metadata["subagent_prompts"]["result_prompt"],
+            "Use this colleague result for the caller: {result}",
+        )
         invoked = [event for event in events.list_events(call_id="call-1") if event.type == "flowhunt_flow_invoked"]
         self.assertEqual(invoked[-1].data["flow_id"], "configured-flow-id")
 

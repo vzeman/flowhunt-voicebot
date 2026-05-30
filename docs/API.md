@@ -517,6 +517,33 @@ For FlowHunt providers, flow/project target IDs are taken from the registered
 integration configuration. They are not accepted from communication agent tool
 calls and are ignored as task metadata for target selection.
 
+Per-provider subagent prompt hooks can be configured in versioned runtime
+config under `subagents.prompts`. Keys are provider kinds such as
+`flowhunt_flow`, `flowhunt_project`, or `internal_worker`.
+
+```json
+{
+  "subagents": {
+    "prompts": {
+      "flowhunt_flow": {
+        "before_call_prompt": "I will ask the specialist now.",
+        "after_call_prompt": "The specialist is checking it now.",
+        "result_prompt": "Use this colleague result for the caller: {result}"
+      }
+    }
+  }
+}
+```
+
+`before_call_prompt` is the immediate spoken acknowledgement before a subagent
+is called. `after_call_prompt` is stored with the task and used as the provider
+progress message after submission. `result_prompt` is rendered when the task
+finishes and supports `{result}`, `{provider}`, `{status}`, `{error}`,
+`{call_id}`, `{task_id}`, `{external_task_id}`, and `{input_text}`. When a
+custom result prompt exists, the communication agent receives it as
+`consume_prompt` and uses the model path to turn the subagent result into a
+customer-facing spoken answer.
+
 ### POST `/subagent/tasks/speculative`
 
 Starts cancellable delegated work from stable partial intent. The task is marked

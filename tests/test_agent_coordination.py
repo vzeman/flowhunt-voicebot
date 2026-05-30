@@ -462,6 +462,19 @@ class AgentCoordinationTests(unittest.TestCase):
 
         self.assertEqual(colleague_update_answer(task), "I am still checking that with a colleague.")
 
+    def test_colleague_update_with_consume_prompt_uses_model_path(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {
+                "reason": "colleague_result",
+                "consume_prompt": "Turn this colleague result into a concise customer answer.",
+                "data": {"summary": "Raw colleague result."},
+            },
+        }
+
+        self.assertEqual(fast_tool_calls(task), [])
+
 
 if __name__ == "__main__":
     unittest.main()

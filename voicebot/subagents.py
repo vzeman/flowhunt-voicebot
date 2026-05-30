@@ -605,7 +605,7 @@ class FlowHuntSubagentProvider:
             completed = self._completed_task_from_result(task, result)
             if completed is not None:
                 return completed
-        return task.with_status("running", progress_message="A FlowHunt colleague is working on the request.")
+        return task.with_status("running", progress_message=_metadata_text(request.metadata, "after_call_text", "A FlowHunt colleague is working on the request."))
 
     def poll(self, task: SubagentTask) -> SubagentTask:
         target_id = str(task.provider_references.get("target_id") or self.target_id)
@@ -674,6 +674,13 @@ def _extract_external_task_id(data: dict[str, Any]) -> str | None:
     if isinstance(response, dict):
         return _extract_external_task_id(response)
     return None
+
+
+def _metadata_text(metadata: dict[str, Any], key: str, default: str) -> str:
+    value = metadata.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return default
 
 
 def subagent_task_to_dict(task: SubagentTask) -> dict[str, Any]:

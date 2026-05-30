@@ -101,6 +101,7 @@ they cannot be permission-scoped in FlowHunt product APIs.
 `JsonSessionLeaseStore` persists active session ownership leases:
 
 - workspace, voicebot, and session id
+- optional call id, transport kind, and routing metadata
 - lease owner
 - absolute expiration timestamp
 - load diagnostics for malformed JSON, invalid rows, duplicate lease keys, and
@@ -117,10 +118,25 @@ Internal worker/session orchestration APIs use:
 - `POST /scaling/session-leases/acquire`
 - `POST /scaling/session-leases/renew`
 - `POST /scaling/session-leases/release`
+- `POST /scaling/session-leases/expire`
+- `POST /scaling/session-leases/enforce`
 
 These leases are the local coordination contract for active sessions. In
 production, the same semantics should move to Redis or another shared
 lease-capable store.
+
+Acquire and renew requests may include `call_id`, `transport`, and metadata
+such as pod/node identifiers. The runtime emits `session_lease_acquired`,
+`session_lease_renewed`, `session_lease_released`, and
+`session_lease_expired` events for operational timelines.
+
+`/scaling/session-leases/enforce` compares active session snapshots with the
+lease store for the supplied owner. If a live media session is missing its
+lease, or the lease belongs to another owner, the runtime emits
+`session_lease_lost`. It can then stop the active media session and emit
+`session_interrupted` while also emitting `session_recovered` for non-media
+work that can continue, such as subagent polling, transcript storage, summaries,
+and late task result handling.
 
 ## External Tasks
 

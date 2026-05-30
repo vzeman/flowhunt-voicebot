@@ -225,6 +225,9 @@ class SessionLeaseRequest(BaseModel):
     session_id: str
     owner: str
     ttl_seconds: float = 30.0
+    call_id: str | None = None
+    transport: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class SessionLeaseReleaseRequest(BaseModel):
@@ -232,6 +235,12 @@ class SessionLeaseReleaseRequest(BaseModel):
     voicebot_id: str
     session_id: str
     owner: str | None = None
+
+
+class SessionLeaseEnforceRequest(BaseModel):
+    owner: str
+    stop_unleased_sessions: bool = True
+    recover_non_media_work: bool = True
 
 
 class AgentToolRequest(BaseModel):

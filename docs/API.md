@@ -1446,6 +1446,65 @@ Lists active workers. Optional query filters: `role`, `workspace_id`,
 Summarizes active worker capacity by role. Optional query filter:
 `workspace_id`, `voicebot_id`.
 
+### GET `/scaling/session-leases`
+
+Lists active session ownership leases. Optional query filters:
+`workspace_id`, `voicebot_id`.
+
+### POST `/scaling/session-leases/acquire`
+
+Acquires ownership for one active session.
+
+```json
+{
+  "workspace_id": "workspace-1",
+  "voicebot_id": "voicebot-1",
+  "session_id": "session-1",
+  "owner": "voicebot-pod-1",
+  "ttl_seconds": 30,
+  "call_id": "call-1",
+  "transport": "webrtc",
+  "metadata": {"node": "local-docker"}
+}
+```
+
+### POST `/scaling/session-leases/renew`
+
+Renews ownership for a session when the current owner still holds the lease.
+The request shape matches acquire.
+
+### POST `/scaling/session-leases/release`
+
+Releases ownership on clean call end.
+
+```json
+{
+  "workspace_id": "workspace-1",
+  "voicebot_id": "voicebot-1",
+  "session_id": "session-1",
+  "owner": "voicebot-pod-1"
+}
+```
+
+### POST `/scaling/session-leases/expire`
+
+Expires abandoned leases and emits `session_lease_expired` events. This is a
+local operational endpoint for Docker testing; production should run equivalent
+expiration through the shared lease backend or a coordinator.
+
+### POST `/scaling/session-leases/enforce`
+
+Stops active media sessions that no longer have a valid owner lease and emits
+`session_lease_lost`, `session_interrupted`, and `session_recovered` events.
+
+```json
+{
+  "owner": "voicebot-pod-1",
+  "stop_unleased_sessions": true,
+  "recover_non_media_work": true
+}
+```
+
 ### GET `/scaling/queue`
 
 Returns local worker queue pending and claimed snapshots.

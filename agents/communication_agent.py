@@ -9,7 +9,7 @@ from typing import Any
 
 from agent_provider_registry import AgentProviderRegistry, default_agent_provider_registry
 from local_command_agent import (
-    attach_response_event_id,
+    attach_task_context,
     build_prompt,
     build_retry_prompt,
     build_tool_result_prompt,
@@ -102,7 +102,7 @@ def run_communication_agent(
                 finally:
                     delayed_ack.stop()
 
-                tool_calls = attach_response_event_id(tool_calls, latest["id"])
+                tool_calls = attach_task_context(tool_calls, latest)
                 if delayed_ack.delivered:
                     tool_calls = suppress_colleague_tool_progress(tool_calls)
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)

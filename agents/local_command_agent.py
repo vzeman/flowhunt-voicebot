@@ -565,7 +565,18 @@ def attach_response_event_id(tool_calls: list[dict], event_id: int) -> list[dict
     for call in tool_calls:
         arguments = call.setdefault("arguments", {})
         if isinstance(arguments, dict):
-            arguments.setdefault("response_to_event_id", event_id)
+            arguments["response_to_event_id"] = event_id
+    return tool_calls
+
+
+def attach_task_context(tool_calls: list[dict], task: dict) -> list[dict]:
+    event_id = int(task["id"])
+    call_id = str(task["call_id"])
+    for call in tool_calls:
+        arguments = call.setdefault("arguments", {})
+        if isinstance(arguments, dict):
+            arguments["call_id"] = call_id
+            arguments["response_to_event_id"] = event_id
     return tool_calls
 
 
@@ -943,7 +954,7 @@ def main() -> None:
                     answer, tool_calls = parse_agent_output(raw_answer)
                     if answer and is_echo_answer(answer, pending):
                         raise RuntimeError(f"agent returned echo response twice: {answer}")
-                tool_calls = attach_response_event_id(tool_calls, latest["id"])
+                tool_calls = attach_task_context(tool_calls, latest)
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
                 calls_to_execute = []
                 say_call = answer_as_say_call(answer, latest)

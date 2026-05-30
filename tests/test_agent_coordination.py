@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agents"))
 
 from local_command_agent import (
     action_acknowledgement,
+    attach_response_event_id,
+    attach_task_context,
     build_prompt,
     colleague_update_answer,
     customer_facing_colleague_text,
@@ -24,6 +26,27 @@ from local_command_agent import (
 
 
 class AgentCoordinationTests(unittest.TestCase):
+    def test_attach_response_event_id_overwrites_stale_model_value(self) -> None:
+        calls = [{"name": "hangup_call", "arguments": {"call_id": "call-1", "response_to_event_id": 3042}}]
+
+        sanitized = attach_response_event_id(calls, 3073)
+
+        self.assertEqual(sanitized[0]["arguments"]["response_to_event_id"], 3073)
+
+    def test_attach_task_context_overwrites_stale_model_call_context(self) -> None:
+        task = {"id": 3073, "call_id": "webrtc-current", "data": {"text": "Check LiveAgent status page."}}
+        calls = [
+            {
+                "name": "hangup_call",
+                "arguments": {"call_id": "webrtc-old", "response_to_event_id": 3042},
+            }
+        ]
+
+        sanitized = attach_task_context(calls, task)
+
+        self.assertEqual(sanitized[0]["arguments"]["call_id"], "webrtc-current")
+        self.assertEqual(sanitized[0]["arguments"]["response_to_event_id"], 3073)
+
     def test_colleague_result_cannot_invoke_another_colleague_task(self) -> None:
         tasks = [
             {

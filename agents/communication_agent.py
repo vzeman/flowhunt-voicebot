@@ -144,7 +144,17 @@ def run_communication_agent(
                 if delayed_ack.delivered and has_colleague_tool_call(tool_calls):
                     initial_say = None
                     answer = ""
-                calls_for_initial_execution = list(tool_calls)
+                if should_prepend_colleague_progress_ack(
+                    latest,
+                    tool_calls,
+                    initial_say=initial_say,
+                    delayed_ack_delivered=delayed_ack.delivered,
+                    streamed_response=streamed_response,
+                ):
+                    tool_calls = suppress_colleague_tool_progress(tool_calls)
+                    calls_for_initial_execution = [progress_ack_tool_call(latest), *tool_calls]
+                else:
+                    calls_for_initial_execution = list(tool_calls)
                 if initial_say and tool_calls and not needs_spoken_followup(tool_calls):
                     calls_for_initial_execution = [initial_say, *tool_calls]
                     answer = ""
@@ -503,7 +513,7 @@ def has_http_failed_say(results: list[dict]) -> bool:
 
 
 class DelayedProgressAcknowledgement:
-    def __init__(self, base_url: str, task: dict, delay_seconds: float = 1.8) -> None:
+    def __init__(self, base_url: str, task: dict, delay_seconds: float = 0.8) -> None:
         self.base_url = base_url
         self.task = task
         self.delay_seconds = delay_seconds
@@ -529,7 +539,7 @@ class DelayedProgressAcknowledgement:
                 "POST",
                 f"{self.base_url}/calls/{self.task['call_id']}/responses",
                 {
-                    "text": "Give me a moment.",
+                    "text": progress_ack_text_for_task(self.task),
                     "response_to_event_id": None,
                     "response_kind": "progress_ack",
                 },
@@ -542,6 +552,50 @@ class DelayedProgressAcknowledgement:
 def should_send_delayed_acknowledgement(task: dict) -> bool:
     reason = str(task.get("data", {}).get("reason") or "")
     return reason not in {"call_connected", "colleague_result", "colleague_progress"}
+
+
+def progress_ack_text_for_task(task: dict) -> str:
+    data = task.get("data", {}) if isinstance(task.get("data"), dict) else {}
+    session_language = data.get("session_language") if isinstance(data.get("session_language"), dict) else {}
+    language = str(session_language.get("language") or "").lower()
+    texts = {
+        "sk": "Hneď sa na to pozriem.",
+        "cs": "Hned se na to podívám.",
+        "de": "Ich schaue mir das kurz an.",
+        "es": "Lo reviso enseguida.",
+        "fr": "Je regarde cela tout de suite.",
+        "hu": "Mindjárt megnézem.",
+    }
+    return texts.get(language, "Give me a moment.")
+
+
+def progress_ack_tool_call(task: dict) -> dict:
+    return {
+        "name": "say",
+        "arguments": {
+            "call_id": task["call_id"],
+            "text": progress_ack_text_for_task(task),
+            "response_to_event_id": None,
+            "response_kind": "progress_ack",
+        },
+    }
+
+
+def should_prepend_colleague_progress_ack(
+    task: dict,
+    tool_calls: list[dict],
+    *,
+    initial_say: dict | None,
+    delayed_ack_delivered: bool,
+    streamed_response: bool,
+) -> bool:
+    return (
+        should_send_delayed_acknowledgement(task)
+        and has_colleague_tool_call(tool_calls)
+        and initial_say is None
+        and not delayed_ack_delivered
+        and not streamed_response
+    )
 
 
 def suppress_colleague_tool_progress(tool_calls: list[dict]) -> list[dict]:

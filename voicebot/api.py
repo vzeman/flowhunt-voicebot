@@ -2509,11 +2509,12 @@ def create_app(
             base_url=runtime_settings.flowhunt_base_url,
             timeout=runtime_settings.flowhunt_timeout,
         )
+        description_for_subagent = input_text_for_subagent(call_id, description)
         result = await run_flowhunt_issue_with_progress(
             client,
             project_id,
             title,
-            description,
+            description_for_subagent,
             {"call_id": call_id, "response_to_event_id": response_to_event_id, **prompt_meta},
             runtime_settings.flowhunt_issue_wait_seconds,
             runtime_settings.flowhunt_issue_poll_interval_seconds,
@@ -2576,6 +2577,7 @@ def create_app(
             }
         scope = subagent_scope_from_call(call_id)
         prompt_meta = subagent_prompt_metadata(call_id, provider, input_text=message)
+        subagent_message = input_text_for_subagent(call_id, message)
         if not args.get("suppress_progress"):
             schedule_tool_progress(
                 call_id,
@@ -2604,7 +2606,7 @@ def create_app(
                     session_id=scope["session_id"],
                     request_event_id=requested.id,
                     provider=provider,  # type: ignore[arg-type]
-                    input_text=message,
+                    input_text=subagent_message,
                     dedupe_key=str(args.get("dedupe_key") or response_to_event_id or requested.id),
                     metadata={**metadata, **prompt_meta},
                 )
@@ -2637,6 +2639,7 @@ def create_app(
                 "duplicate": True,
             }
         prompt_meta = subagent_prompt_metadata(call_id, "flowhunt_flow", input_text=message)
+        subagent_message = input_text_for_subagent(call_id, message)
         if not args.get("suppress_progress"):
             schedule_tool_progress(
                 call_id,
@@ -2666,7 +2669,7 @@ def create_app(
                     session_id=call_id,
                     request_event_id=invoked.id,
                     provider="flowhunt_flow",
-                    input_text=message,
+                    input_text=subagent_message,
                     dedupe_key=str(response_to_event_id or invoked.id),
                     metadata={
                         "response_to_event_id": response_to_event_id,
@@ -2692,7 +2695,7 @@ def create_app(
         result = await asyncio.to_thread(
             client.invoke_flow_and_wait,
             flow_id,
-            message,
+            subagent_message,
             runtime_settings.flowhunt_flow_wait_seconds,
             runtime_settings.flowhunt_flow_poll_interval_seconds,
         )
@@ -2871,6 +2874,19 @@ def create_app(
             "subagent_prompts_explicit": explicit,
             **rendered,
         }
+
+    def session_language_for_call(call_id: str) -> dict[str, Any]:
+        return detected_session_language(events.list_events(call_id=call_id, limit=1000))
+
+    def input_text_for_subagent(call_id: str, message: str) -> str:
+        session_language = session_language_for_call(call_id)
+        language = str(session_language.get("language") or "").strip().lower()
+        if not language:
+            return message
+        return (
+            f"Caller language: {language}. Answer in this language unless the caller explicitly asks "
+            f"for a different language.\n\nCaller request:\n{message}"
+        )
 
     def subagent_result_text(task: SubagentTask, message: str, *, ok: bool) -> tuple[str, dict[str, Any]]:
         metadata_prompts = task.metadata.get("subagent_prompts")

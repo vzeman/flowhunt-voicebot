@@ -14,9 +14,12 @@ from communication_agent import (
     has_colleague_tool_call,
     parse_colleague_tool_recovery,
     preferred_colleague_tool_name,
+    progress_ack_text_for_task,
+    progress_ack_tool_call,
     recover_missing_colleague_tool_call,
     run_model_turn_streaming,
     should_send_delayed_acknowledgement,
+    should_prepend_colleague_progress_ack,
     split_stable_stream_text,
     submit_stream_chunk,
     suppress_colleague_tool_progress,
@@ -176,6 +179,34 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
                 "response_to_event_id": None,
                 "response_kind": "progress_ack",
             },
+        )
+
+    def test_progress_ack_uses_session_language(self) -> None:
+        task = {"id": 1, "call_id": "call-1", "data": {"session_language": {"language": "sk"}}}
+
+        self.assertEqual(progress_ack_text_for_task(task), "Hneď sa na to pozriem.")
+        self.assertEqual(progress_ack_tool_call(task)["arguments"]["text"], "Hneď sa na to pozriem.")
+
+    def test_colleague_progress_ack_is_prepended_when_model_only_calls_tool(self) -> None:
+        task = {"id": 1, "call_id": "call-1", "data": {"text": "Check it"}}
+
+        self.assertTrue(
+            should_prepend_colleague_progress_ack(
+                task,
+                [{"name": "invoke_flowhunt_flow", "arguments": {"call_id": "call-1", "message": "Check it"}}],
+                initial_say=None,
+                delayed_ack_delivered=False,
+                streamed_response=False,
+            )
+        )
+        self.assertFalse(
+            should_prepend_colleague_progress_ack(
+                task,
+                [{"name": "invoke_flowhunt_flow", "arguments": {"call_id": "call-1", "message": "Check it"}}],
+                initial_say={"name": "say", "arguments": {"text": "I will check."}},
+                delayed_ack_delivered=False,
+                streamed_response=False,
+            )
         )
 
     def test_colleague_tool_progress_can_be_suppressed_after_delayed_ack(self) -> None:

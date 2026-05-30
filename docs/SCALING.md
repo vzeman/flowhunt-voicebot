@@ -73,6 +73,15 @@ active sessions for the workspace/voicebot with `max_concurrent_sessions` and
 with remaining burst returns `decision=queue_or_overflow`; full burst capacity
 returns `decision=reject` and emits a `capacity_rejection` metric.
 
+`POST /routing/admission` is the incoming-session preflight for routed SIP and
+WebRTC sessions. It resolves the channel binding, verifies workspace access,
+voicebot enabled state, provider/runtime configuration, capacity, and optional
+session lease acquisition. It emits `session_admission_decided` for every
+decision. Rejections include a deterministic reason and a transport-specific
+fallback contract, such as SIP busy/unavailable or a WebRTC HTTP error before
+SDP answer. The local direct Docker path remains permissive unless a caller uses
+this routed admission API or passes routed metadata through a transport path.
+
 `WorkerQueueEnvelope` defines the payload shape for future queue/stream
 handoff. Every queued item carries an item id, idempotency key, work kind,
 queue name, routing key with workspace/voicebot/session/provider fields,

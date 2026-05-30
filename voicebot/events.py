@@ -50,6 +50,7 @@ EventType = Literal[
     "session_lease_lost",
     "session_recovered",
     "session_interrupted",
+    "session_admission_decided",
     "subagent_task_requested",
     "subagent_task_deduplicated",
     "subagent_task_updated",

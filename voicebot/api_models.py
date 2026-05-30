@@ -51,6 +51,19 @@ class ScalingAdmissionRequest(BaseModel):
     scale_to_zero_allowed: bool = False
 
 
+class IncomingSessionAdmissionRequest(BaseModel):
+    channel_kind: str
+    external_id: str
+    session_id: str
+    owner: str
+    transport: str
+    call_id: str | None = None
+    acquire_lease: bool = True
+    lease_ttl_seconds: float = 30.0
+    max_concurrent_sessions: int = 100
+    burst_sessions: int = 0
+
+
 class ScalingBackpressureRequest(BaseModel):
     workspace_id: str
     voicebot_id: str

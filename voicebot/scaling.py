@@ -752,6 +752,12 @@ class WorkloadProfile:
     stt_provider: str | None = None
     tts_provider: str | None = None
     agent_provider: str | None = None
+    baseline_sessions: int = 0
+    call_growth_per_minute: float = 0.0
+    worker_warmup_seconds: float = 30.0
+    max_concurrent_sessions: int = 100
+    burst_sessions: int = 0
+    scale_to_zero_allowed: bool = False
 
     def __post_init__(self) -> None:
         if not self.workspace_id:
@@ -760,11 +766,81 @@ class WorkloadProfile:
             raise ValueError("voicebot_id is required")
         if self.concurrent_sessions < 0:
             raise ValueError("concurrent_sessions must be non-negative")
+        if self.baseline_sessions < 0:
+            raise ValueError("baseline_sessions must be non-negative")
+        if self.call_growth_per_minute < 0:
+            raise ValueError("call_growth_per_minute must be non-negative")
+        if self.worker_warmup_seconds < 0:
+            raise ValueError("worker_warmup_seconds must be non-negative")
+        if self.max_concurrent_sessions < 1:
+            raise ValueError("max_concurrent_sessions must be greater than or equal to 1")
+        if self.burst_sessions < 0:
+            raise ValueError("burst_sessions must be non-negative")
+
+
+@dataclass(frozen=True)
+class WarmCapacityPolicy:
+    min_media_sessions: int = 1
+    min_stt_workers: int = 1
+    min_tts_workers: int = 1
+    min_agent_workers: int = 1
+    min_task_pollers: int = 1
+    max_concurrent_sessions: int = 100
+    burst_sessions: int = 0
+    scale_to_zero_allowed: bool = False
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "min_media_sessions",
+            "min_stt_workers",
+            "min_tts_workers",
+            "min_agent_workers",
+            "min_task_pollers",
+            "burst_sessions",
+        ):
+            if getattr(self, field_name) < 0:
+                raise ValueError(f"{field_name} must be non-negative")
+        if self.max_concurrent_sessions < 1:
+            raise ValueError("max_concurrent_sessions must be greater than or equal to 1")
+
+    def role_minimums(self) -> dict[str, int]:
+        minimums = {
+            "media_ingress": self.min_media_sessions,
+            "stt_worker": self.min_stt_workers,
+            "tts_worker": self.min_tts_workers,
+            "agent_worker": self.min_agent_workers,
+            "task_poller": self.min_task_pollers,
+        }
+        if self.scale_to_zero_allowed:
+            return {role: 0 for role in minimums}
+        return minimums
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "min_media_sessions": self.min_media_sessions,
+            "min_stt_workers": self.min_stt_workers,
+            "min_tts_workers": self.min_tts_workers,
+            "min_agent_workers": self.min_agent_workers,
+            "min_task_pollers": self.min_task_pollers,
+            "max_concurrent_sessions": self.max_concurrent_sessions,
+            "burst_sessions": self.burst_sessions,
+            "scale_to_zero_allowed": self.scale_to_zero_allowed,
+        }
 
 
 def build_workload_plan(profile: WorkloadProfile, topology: DeploymentTopology | None = None) -> dict:
     topology = topology or default_deployment_topology()
     session_key = RoutingKey(profile.workspace_id, profile.voicebot_id, session_id=profile.session_id)
+    projected_sessions = projected_peak_sessions(
+        profile.baseline_sessions or profile.concurrent_sessions,
+        profile.call_growth_per_minute,
+        profile.worker_warmup_seconds,
+    )
+    policy = WarmCapacityPolicy(
+        max_concurrent_sessions=profile.max_concurrent_sessions,
+        burst_sessions=profile.burst_sessions,
+        scale_to_zero_allowed=profile.scale_to_zero_allowed,
+    )
     provider_by_role = {
         "stt_worker": profile.stt_provider,
         "tts_worker": profile.tts_provider,
@@ -784,6 +860,7 @@ def build_workload_plan(profile: WorkloadProfile, topology: DeploymentTopology |
                 "workspace_capacity_ok": _capacity_ok(profile.concurrent_sessions, binding.max_inflight_per_workspace),
                 "voicebot_capacity_ok": _capacity_ok(profile.concurrent_sessions, binding.max_inflight_per_voicebot),
                 "provider_capacity_ok": _capacity_ok(profile.concurrent_sessions, binding.max_inflight_per_provider),
+                "projected_peak_capacity_ok": _capacity_ok(projected_sessions, binding.max_inflight_per_workspace),
             }
         )
     return {
@@ -794,9 +871,218 @@ def build_workload_plan(profile: WorkloadProfile, topology: DeploymentTopology |
             "partition_key": session_key.partition_key(),
         },
         "concurrent_sessions": profile.concurrent_sessions,
+        "warm_capacity": {
+            "policy": policy.as_dict(),
+            "baseline_sessions": profile.baseline_sessions,
+            "projected_peak_sessions": projected_sessions,
+            "worker_warmup_seconds": profile.worker_warmup_seconds,
+            "call_growth_per_minute": profile.call_growth_per_minute,
+            "hard_cap_ok": profile.concurrent_sessions <= profile.max_concurrent_sessions,
+            "burst_cap_ok": profile.concurrent_sessions <= profile.max_concurrent_sessions + profile.burst_sessions,
+        },
         "event_bus": topology.event_bus,
         "queues": queues,
     }
+
+
+def projected_peak_sessions(baseline_sessions: int, call_growth_per_minute: float, worker_warmup_seconds: float) -> int:
+    projected = baseline_sessions + (call_growth_per_minute * max(worker_warmup_seconds, 0.0) / 60.0)
+    return int(projected) if projected.is_integer() else int(projected) + 1
+
+
+def admission_decision(
+    *,
+    active_session_snapshots: list[dict[str, Any]],
+    workspace_id: str,
+    voicebot_id: str,
+    policy: WarmCapacityPolicy,
+) -> dict[str, Any]:
+    active = count_active_sessions(active_session_snapshots, workspace_id=workspace_id, voicebot_id=voicebot_id)
+    hard_cap = policy.max_concurrent_sessions
+    burst_cap = hard_cap + policy.burst_sessions
+    if active < hard_cap:
+        decision = "accept"
+        allowed = True
+        reason = "capacity_available"
+    elif active < burst_cap:
+        decision = "queue_or_overflow"
+        allowed = False
+        reason = "hard_cap_reached_burst_available"
+    else:
+        decision = "reject"
+        allowed = False
+        reason = "burst_cap_reached"
+    return {
+        "allowed": allowed,
+        "decision": decision,
+        "reason": reason,
+        "workspace_id": workspace_id,
+        "voicebot_id": voicebot_id,
+        "active_sessions": active,
+        "max_concurrent_sessions": hard_cap,
+        "burst_sessions": policy.burst_sessions,
+        "burst_cap": burst_cap,
+    }
+
+
+def autoscaling_signals(
+    *,
+    active_session_snapshots: list[dict[str, Any]],
+    worker_registry: WorkerRegistry,
+    worker_queue: WorkerQueueStore,
+    events: list[Any],
+    policy: WarmCapacityPolicy | None = None,
+    workspace_id: str | None = None,
+    voicebot_id: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current = now or datetime.now(UTC)
+    policy = policy or WarmCapacityPolicy()
+    filtered_sessions = [
+        snapshot
+        for snapshot in active_session_snapshots
+        if _snapshot_matches_scope(snapshot, workspace_id=workspace_id, voicebot_id=voicebot_id)
+    ]
+    topology = default_deployment_topology()
+    queue_to_role = {binding.queue: binding.role for binding in topology.queues}
+    queue_snapshot = worker_queue.snapshot(now=current)
+    queue_depths: dict[str, dict[str, int]] = {}
+    for queue, items in queue_snapshot.get("pending", {}).items():
+        role = queue_to_role.get(queue, queue)
+        queue_depths.setdefault(role, {"pending": 0, "claimed": 0, "dead_lettered": 0})["pending"] += len(items)
+    for claim in queue_snapshot.get("claimed", []):
+        queue = claim["item"]["queue"]
+        role = queue_to_role.get(queue, queue)
+        queue_depths.setdefault(role, {"pending": 0, "claimed": 0, "dead_lettered": 0})["claimed"] += 1
+    for item in queue_snapshot.get("dead_lettered", []):
+        role = queue_to_role.get(item["queue"], item["queue"])
+        queue_depths.setdefault(role, {"pending": 0, "claimed": 0, "dead_lettered": 0})["dead_lettered"] += 1
+
+    warm_capacity = {}
+    capacity = worker_registry.capacity_summary(workspace_id=workspace_id, voicebot_id=voicebot_id, now=current)
+    role_minimums = policy.role_minimums()
+    for role, minimum in sorted(role_minimums.items()):
+        ready = capacity["roles"].get(role, {}).get("capacity", 0)
+        warm_capacity[role] = {"minimum": minimum, "ready": ready, "deficit": max(0, minimum - ready)}
+
+    return {
+        "scope": {"workspace_id": workspace_id, "voicebot_id": voicebot_id},
+        "active_sessions": {
+            "total": len(filtered_sessions),
+            "by_workspace_voicebot": active_sessions_by_workspace_voicebot(filtered_sessions),
+        },
+        "queue_depth": dict(sorted(queue_depths.items())),
+        "warm_capacity": warm_capacity,
+        "capacity": capacity,
+        "provider_metrics": provider_metric_signals(events),
+        "latency_metrics": latency_metric_signals(events),
+        "calls_per_second": calls_per_second(events, now=current),
+        "policy": policy.as_dict(),
+    }
+
+
+def autoscaling_signals_prometheus(signals: dict[str, Any]) -> str:
+    lines = [
+        "# TYPE voicebot_active_sessions gauge",
+        f"voicebot_active_sessions {signals['active_sessions']['total']}",
+        "# TYPE voicebot_calls_per_second gauge",
+        f"voicebot_calls_per_second {signals['calls_per_second']}",
+    ]
+    for role, data in sorted(signals["queue_depth"].items()):
+        labels = f'role="{role}"'
+        lines.append(f"voicebot_queue_pending{{{labels}}} {data['pending']}")
+        lines.append(f"voicebot_queue_claimed{{{labels}}} {data['claimed']}")
+        lines.append(f"voicebot_queue_dead_lettered{{{labels}}} {data['dead_lettered']}")
+    for role, data in sorted(signals["warm_capacity"].items()):
+        labels = f'role="{role}"'
+        lines.append(f"voicebot_warm_capacity_ready{{{labels}}} {data['ready']}")
+        lines.append(f"voicebot_warm_capacity_minimum{{{labels}}} {data['minimum']}")
+        lines.append(f"voicebot_warm_capacity_deficit{{{labels}}} {data['deficit']}")
+    for name, metric in sorted(signals["latency_metrics"].items()):
+        lines.append(f'voicebot_latency_seconds_avg{{name="{name}"}} {metric["avg"]}')
+        lines.append(f'voicebot_latency_seconds_count{{name="{name}"}} {metric["count"]}')
+    return "\n".join(lines) + "\n"
+
+
+def count_active_sessions(
+    snapshots: list[dict[str, Any]],
+    *,
+    workspace_id: str | None = None,
+    voicebot_id: str | None = None,
+) -> int:
+    return sum(1 for snapshot in snapshots if _snapshot_matches_scope(snapshot, workspace_id=workspace_id, voicebot_id=voicebot_id))
+
+
+def active_sessions_by_workspace_voicebot(snapshots: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for snapshot in snapshots:
+        route = snapshot.get("route") if isinstance(snapshot.get("route"), dict) else {}
+        workspace = route.get("workspace_id") or snapshot.get("workspace_id") or "unknown"
+        voicebot = route.get("voicebot_id") or snapshot.get("voicebot_id") or "unknown"
+        key = f"{workspace}:{voicebot}"
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def provider_metric_signals(events: list[Any]) -> dict[str, Any]:
+    failures: dict[str, int] = {}
+    for event in events:
+        if getattr(event, "type", None) != "provider_call_failed":
+            continue
+        provider = str(getattr(event, "data", {}).get("provider") or "unknown")
+        failures[provider] = failures.get(provider, 0) + 1
+    return {"failures": dict(sorted(failures.items()))}
+
+
+def latency_metric_signals(events: list[Any]) -> dict[str, Any]:
+    names = {
+        "stt_duration_seconds",
+        "tts_duration_seconds",
+        "tts_synthesis_latency_seconds",
+        "agent_response_latency_seconds",
+        "end_of_speech_to_first_audio_seconds",
+    }
+    values: dict[str, list[float]] = {}
+    for event in events:
+        if getattr(event, "type", None) != "metrics":
+            continue
+        data = getattr(event, "data", {})
+        name = data.get("name")
+        if name not in names:
+            continue
+        try:
+            value = float(data.get("value"))
+        except (TypeError, ValueError):
+            continue
+        values.setdefault(name, []).append(value)
+    return {
+        name: {"count": len(items), "avg": sum(items) / len(items), "max": max(items)}
+        for name, items in sorted(values.items())
+        if items
+    }
+
+
+def calls_per_second(events: list[Any], *, now: datetime | None = None, window_seconds: float = 60.0) -> float:
+    current = now or datetime.now(UTC)
+    cutoff = current - timedelta(seconds=window_seconds)
+    count = 0
+    for event in events:
+        if getattr(event, "type", None) != "call_started":
+            continue
+        try:
+            timestamp = _parse_time(str(getattr(event, "timestamp")))
+        except ValueError:
+            continue
+        if timestamp >= cutoff:
+            count += 1
+    return count / window_seconds
+
+
+def _snapshot_matches_scope(snapshot: dict[str, Any], *, workspace_id: str | None, voicebot_id: str | None) -> bool:
+    route = snapshot.get("route") if isinstance(snapshot.get("route"), dict) else {}
+    snapshot_workspace = route.get("workspace_id") or snapshot.get("workspace_id")
+    snapshot_voicebot = route.get("voicebot_id") or snapshot.get("voicebot_id")
+    return (workspace_id is None or snapshot_workspace == workspace_id) and (voicebot_id is None or snapshot_voicebot == voicebot_id)
 
 
 def _capacity_ok(concurrent_sessions: int, limit: int | None) -> bool | None:

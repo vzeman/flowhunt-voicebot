@@ -1428,9 +1428,43 @@ Request:
   "session_id": "session-1",
   "stt_provider": "openai",
   "tts_provider": "openai",
-  "agent_provider": "anthropic"
+  "agent_provider": "anthropic",
+  "baseline_sessions": 40,
+  "call_growth_per_minute": 30,
+  "worker_warmup_seconds": 20,
+  "max_concurrent_sessions": 100,
+  "burst_sessions": 20,
+  "scale_to_zero_allowed": false
 }
 ```
+
+The response includes queue capacity flags plus a `warm_capacity` block with
+projected peak sessions and hard/burst cap checks.
+
+### GET `/scaling/signals`
+
+Returns autoscaling signals for active sessions, queue depth, warm-capacity
+deficits, provider failures, latency metrics, calls per second, and worker
+capacity. Optional query filters: `workspace_id`, `voicebot_id`.
+
+Use `GET /scaling/signals?format=prometheus` for Prometheus text format.
+
+### POST `/scaling/admission`
+
+Evaluates whether a new call/session should be accepted before allocating
+expensive media and provider resources.
+
+```json
+{
+  "workspace_id": "workspace-1",
+  "voicebot_id": "voicebot-1",
+  "max_concurrent_sessions": 100,
+  "burst_sessions": 20,
+  "scale_to_zero_allowed": false
+}
+```
+
+The response returns `decision=accept`, `queue_or_overflow`, or `reject`.
 
 ### POST `/scaling/workers/heartbeat`
 

@@ -20,7 +20,11 @@ from voicebot.scaling import (
     WorkerQueueStore,
     WorkerRegistry,
     WorkloadProfile,
+    WarmCapacityPolicy,
     WorkspaceBackpressure,
+    admission_decision,
+    autoscaling_signals,
+    autoscaling_signals_prometheus,
     build_workload_plan,
     default_deployment_topology,
 )
@@ -30,6 +34,16 @@ from voicebot.transcripts import TranscriptStore
 
 
 class ScalingTests(unittest.TestCase):
+    def test_warm_capacity_policy_validates_and_serializes_role_minimums(self) -> None:
+        policy = WarmCapacityPolicy(min_media_sessions=2, min_stt_workers=3, scale_to_zero_allowed=False)
+
+        self.assertEqual(policy.role_minimums()["media_ingress"], 2)
+        self.assertEqual(policy.role_minimums()["stt_worker"], 3)
+        self.assertEqual(WarmCapacityPolicy(scale_to_zero_allowed=True).role_minimums()["agent_worker"], 0)
+        self.assertEqual(policy.as_dict()["max_concurrent_sessions"], 100)
+        with self.assertRaisesRegex(ValueError, "max_concurrent_sessions"):
+            WarmCapacityPolicy(max_concurrent_sessions=0)
+
     def test_routing_key_partitions_by_workspace_voicebot_and_session(self) -> None:
         key = RoutingKey("workspace-1", "voicebot-1", session_id="call-1", provider="openai")
 
@@ -332,6 +346,11 @@ class ScalingTests(unittest.TestCase):
                 stt_provider="openai",
                 tts_provider="openai",
                 agent_provider="anthropic",
+                baseline_sessions=80,
+                call_growth_per_minute=60,
+                worker_warmup_seconds=30,
+                max_concurrent_sessions=100,
+                burst_sessions=25,
             )
         )
 
@@ -341,6 +360,74 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(stt_queue["provider_key"], "workspace-1:voicebot-1:openai")
         self.assertFalse(stt_queue["workspace_capacity_ok"])
         self.assertEqual(agent_queue["provider_key"], "workspace-1:voicebot-1:anthropic")
+        self.assertEqual(plan["warm_capacity"]["projected_peak_sessions"], 110)
+        self.assertFalse(plan["warm_capacity"]["hard_cap_ok"])
+        self.assertTrue(plan["warm_capacity"]["burst_cap_ok"])
+
+    def test_admission_decision_accepts_queues_or_rejects_by_capacity_policy(self) -> None:
+        snapshots = [
+            {"call_id": "call-1", "route": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"}},
+            {"call_id": "call-2", "route": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"}},
+        ]
+
+        accept = admission_decision(
+            active_session_snapshots=snapshots,
+            workspace_id="workspace-1",
+            voicebot_id="voicebot-1",
+            policy=WarmCapacityPolicy(max_concurrent_sessions=3),
+        )
+        burst = admission_decision(
+            active_session_snapshots=snapshots,
+            workspace_id="workspace-1",
+            voicebot_id="voicebot-1",
+            policy=WarmCapacityPolicy(max_concurrent_sessions=2, burst_sessions=1),
+        )
+        reject = admission_decision(
+            active_session_snapshots=snapshots,
+            workspace_id="workspace-1",
+            voicebot_id="voicebot-1",
+            policy=WarmCapacityPolicy(max_concurrent_sessions=2),
+        )
+
+        self.assertTrue(accept["allowed"])
+        self.assertEqual(burst["decision"], "queue_or_overflow")
+        self.assertEqual(reject["decision"], "reject")
+
+    def test_autoscaling_signals_include_sessions_queues_warm_capacity_and_metrics(self) -> None:
+        events = EventStore(max_context_events=20)
+        now = datetime.now(UTC)
+        events.append("call-1", "call_started", {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"})
+        events.append("call-1", "metrics", {"name": "stt_duration_seconds", "value": 0.3, "provider": "openai"})
+        events.append("call-1", "provider_call_failed", {"provider": "openai"})
+        workers = WorkerRegistry()
+        workers.heartbeat(WorkerInstance("stt-1", "stt_worker", "voicebot.stt", workspace_id="workspace-1", capacity=1), now)
+        queue = WorkerQueueStore()
+        queue.enqueue(
+            WorkerQueueEnvelope(
+                item_id="item-1",
+                kind="stt_turn",
+                routing=RoutingKey("workspace-1", "voicebot-1", session_id="call-1"),
+                queue="voicebot.stt",
+            )
+        )
+
+        signals = autoscaling_signals(
+            active_session_snapshots=[{"call_id": "call-1", "route": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"}}],
+            worker_registry=workers,
+            worker_queue=queue,
+            events=events.list_events(),
+            policy=WarmCapacityPolicy(min_stt_workers=2),
+            workspace_id="workspace-1",
+            voicebot_id="voicebot-1",
+            now=now,
+        )
+        prometheus = autoscaling_signals_prometheus(signals)
+
+        self.assertEqual(signals["active_sessions"]["total"], 1)
+        self.assertEqual(signals["queue_depth"]["stt_worker"]["pending"], 1)
+        self.assertEqual(signals["warm_capacity"]["stt_worker"], {"minimum": 2, "ready": 1, "deficit": 1})
+        self.assertEqual(signals["provider_metrics"]["failures"], {"openai": 1})
+        self.assertIn("voicebot_active_sessions 1", prometheus)
 
     def test_worker_registry_tracks_active_workers_by_role_and_workspace(self) -> None:
         registry = WorkerRegistry(heartbeat_ttl_seconds=30)
@@ -521,11 +608,64 @@ class ScalingTests(unittest.TestCase):
                 "concurrent_sessions": 50,
                 "session_id": "session-1",
                 "stt_provider": "openai",
+                "baseline_sessions": 25,
+                "call_growth_per_minute": 30,
+                "worker_warmup_seconds": 20,
+                "max_concurrent_sessions": 60,
             },
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["routing"]["partition_key"], "workspace-1:voicebot-1:session-1")
+        self.assertEqual(response.json()["warm_capacity"]["projected_peak_sessions"], 35)
+
+    def test_scaling_signals_endpoint_returns_json_and_prometheus(self) -> None:
+        client = self.build_client()
+        client.post(
+            "/scaling/queue/enqueue",
+            json={
+                "item_id": "item-1",
+                "kind": "agent_turn",
+                "routing": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"},
+                "queue": "voicebot.agent",
+            },
+        )
+
+        json_response = client.get("/scaling/signals?workspace_id=workspace-1&voicebot_id=voicebot-1")
+        prometheus_response = client.get("/scaling/signals?format=prometheus")
+
+        self.assertEqual(json_response.status_code, 200)
+        self.assertIn("queue_depth", json_response.json())
+        self.assertEqual(prometheus_response.status_code, 200)
+        self.assertIn("voicebot_active_sessions", prometheus_response.text)
+
+    def test_scaling_admission_endpoint_rejects_when_session_capacity_is_full(self) -> None:
+        class FakeSession:
+            call_id = "call-1"
+
+            def snapshot(self):
+                return {"call_id": "call-1", "route": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"}}
+
+        registry = CallRegistry()
+        registry.add(FakeSession())
+        app = create_app(
+            EventStore(max_context_events=20),
+            registry,
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/scaling/admission",
+            json={"workspace_id": "workspace-1", "voicebot_id": "voicebot-1", "max_concurrent_sessions": 1},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["allowed"])
+        self.assertEqual(response.json()["reason"], "burst_cap_reached")
 
     def test_scaling_worker_presence_api_tracks_capacity_and_drain(self) -> None:
         client = self.build_client()

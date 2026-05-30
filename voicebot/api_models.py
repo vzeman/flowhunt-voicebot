@@ -35,6 +35,20 @@ class ScalingWorkloadPlanRequest(BaseModel):
     stt_provider: str | None = None
     tts_provider: str | None = None
     agent_provider: str | None = None
+    baseline_sessions: int = 0
+    call_growth_per_minute: float = 0.0
+    worker_warmup_seconds: float = 30.0
+    max_concurrent_sessions: int = 100
+    burst_sessions: int = 0
+    scale_to_zero_allowed: bool = False
+
+
+class ScalingAdmissionRequest(BaseModel):
+    workspace_id: str
+    voicebot_id: str
+    max_concurrent_sessions: int = 100
+    burst_sessions: int = 0
+    scale_to_zero_allowed: bool = False
 
 
 class ScalingBackpressureRequest(BaseModel):

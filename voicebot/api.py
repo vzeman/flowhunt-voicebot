@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, get_args
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from .agent_tasks import AgentTaskTracker
 from .api_surface import (
@@ -28,6 +28,7 @@ from .api_models import (
     ConversationEvaluationRequest,
     MultimodalContentRequest,
     PlaybackInterruptRequest,
+    ScalingAdmissionRequest,
     ScalingBackpressureRequest,
     ScalingWorkloadPlanRequest,
     SessionLeaseEnforceRequest,
@@ -97,7 +98,11 @@ from .scaling import (
     WorkerRegistry,
     WorkerRole,
     WorkloadProfile,
+    WarmCapacityPolicy,
     WorkspaceBackpressure,
+    admission_decision,
+    autoscaling_signals,
+    autoscaling_signals_prometheus,
     build_workload_plan,
     default_deployment_topology,
 )
@@ -789,10 +794,66 @@ def create_app(
                 stt_provider=request.stt_provider,
                 tts_provider=request.tts_provider,
                 agent_provider=request.agent_provider,
+                baseline_sessions=request.baseline_sessions,
+                call_growth_per_minute=request.call_growth_per_minute,
+                worker_warmup_seconds=request.worker_warmup_seconds,
+                max_concurrent_sessions=request.max_concurrent_sessions,
+                burst_sessions=request.burst_sessions,
+                scale_to_zero_allowed=request.scale_to_zero_allowed,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         return build_workload_plan(profile)
+
+    @app.get("/scaling/signals")
+    def scaling_signals(
+        workspace_id: str | None = None,
+        voicebot_id: str | None = None,
+        format: str = "json",
+    ):
+        signals = autoscaling_signals(
+            active_session_snapshots=registry.snapshots(),
+            worker_registry=scaling_workers,
+            worker_queue=scaling_queue,
+            events=events.list_events(limit=1000),
+            workspace_id=workspace_id,
+            voicebot_id=voicebot_id,
+        )
+        if format == "prometheus":
+            return PlainTextResponse(autoscaling_signals_prometheus(signals), media_type="text/plain; version=0.0.4")
+        if format != "json":
+            raise HTTPException(status_code=400, detail="format must be json or prometheus")
+        return signals
+
+    @app.post("/scaling/admission")
+    def scaling_admission(request: ScalingAdmissionRequest) -> dict[str, Any]:
+        try:
+            policy = WarmCapacityPolicy(
+                max_concurrent_sessions=request.max_concurrent_sessions,
+                burst_sessions=request.burst_sessions,
+                scale_to_zero_allowed=request.scale_to_zero_allowed,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        decision = admission_decision(
+            active_session_snapshots=registry.snapshots(),
+            workspace_id=request.workspace_id,
+            voicebot_id=request.voicebot_id,
+            policy=policy,
+        )
+        if not decision["allowed"]:
+            events.append(
+                request.workspace_id,
+                "metrics",
+                {
+                    "name": "capacity_rejection",
+                    "value": 1.0,
+                    "workspace_id": request.workspace_id,
+                    "voicebot_id": request.voicebot_id,
+                    "reason": decision["reason"],
+                },
+            )
+        return decision
 
     @app.post("/scaling/workers/heartbeat")
     def scaling_worker_heartbeat(request: WorkerHeartbeatRequest) -> dict[str, Any]:

@@ -23,6 +23,9 @@ PUBLIC_ROUTE_KEYS = {
     ("GET", "/health"),
     ("GET", "/health/liveness"),
     ("GET", "/openapi/public.json"),
+    ("GET", "/widget"),
+    ("GET", "/widget.js"),
+    ("DELETE", "/webrtc/sessions/{session_id}"),
     ("POST", "/webrtc/sessions"),
 }
 

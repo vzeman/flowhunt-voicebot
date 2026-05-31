@@ -3596,7 +3596,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     button:not(:disabled):hover { border-color: var(--accent); }
     button:disabled { color: #8c959f; cursor: not-allowed; background: #f6f8fa; }
     audio { display: block; margin: 1rem 0; width: 100%; max-width: 48rem; }
-    .logs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .logs { display: grid; grid-template-columns: minmax(18rem, .8fr) repeat(2, minmax(0, 1.1fr)); gap: 1rem; margin-top: 1rem; }
     .log-panel h2 { font-size: 1rem; margin: 0 0 .5rem; }
     .table-wrap { border: 1px solid var(--border); border-radius: 8px; height: 30rem; overflow: auto; background: #fff; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .8125rem; }
@@ -3643,6 +3643,17 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         </table>
       </div>
     </section>
+    <section class="log-panel">
+      <h2>Subagent Communication</h2>
+      <div class="table-wrap">
+        <table aria-label="Subagent communication">
+          <thead>
+            <tr><th class="time-col">Time</th><th class="id-col">ID</th><th class="type-col">Type</th><th>Data</th></tr>
+          </thead>
+          <tbody id="subagent-log"></tbody>
+        </table>
+      </div>
+    </section>
   </div>
   <script>
     const startButton = document.getElementById("start");
@@ -3650,6 +3661,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     const remoteAudio = document.getElementById("remote");
     const logNode = document.getElementById("log");
     const eventLogNode = document.getElementById("event-log");
+    const subagentLogNode = document.getElementById("subagent-log");
     let pc = null;
     let sessionId = null;
     let callId = null;
@@ -3708,6 +3720,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     function logVoicebotEvent(event) {
       if (seenEventIds.has(event.id)) return;
       seenEventIds.add(event.id);
+      if (isSubagentEvent(event)) logSubagentEvent(event);
       const row = eventLogNode.insertRow();
       appendCell(row, formatTime(event.timestamp), "time-col", fullTimestamp(event.timestamp));
       appendCell(row, event.id ?? "", "id-col");
@@ -3721,6 +3734,36 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       appendCell(row, hasData ? JSON.stringify(event.data) : "No data", hasData ? "data-cell" : "data-cell empty-cell");
       trimRows(eventLogNode);
       scrollTableToBottom(eventLogNode);
+    }
+
+    function isSubagentEvent(event) {
+      const data = event.data || {};
+      const reason = String(data.reason || "");
+      const responseKind = String(data.response_kind || "");
+      return String(event.type || "").startsWith("subagent_task_")
+        || ["flowhunt_flow_invoked", "flowhunt_project_issue_created"].includes(event.type)
+        || reason === "colleague_result"
+        || reason === "colleague_progress"
+        || responseKind === "colleague_result"
+        || responseKind === "colleague_progress"
+        || Boolean(data.subagent_task_id)
+        || Boolean(data.task && data.task.task_id);
+    }
+
+    function logSubagentEvent(event) {
+      const row = subagentLogNode.insertRow();
+      appendCell(row, formatTime(event.timestamp), "time-col", fullTimestamp(event.timestamp));
+      appendCell(row, event.id ?? "", "id-col");
+      const typeCell = appendCell(row, "", "type-col");
+      const type = document.createElement("span");
+      type.className = "event-type";
+      type.textContent = event.type || "";
+      type.title = event.type || "";
+      typeCell.appendChild(type);
+      const hasData = event.data && Object.keys(event.data).length;
+      appendCell(row, hasData ? JSON.stringify(event.data) : "No data", hasData ? "data-cell" : "data-cell empty-cell");
+      trimRows(subagentLogNode);
+      scrollTableToBottom(subagentLogNode);
     }
 
     async function backfillVoicebotEvents() {
@@ -3807,6 +3850,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         callId = payload.call_id;
         seenEventIds = new Set();
         eventLogNode.innerHTML = "";
+        subagentLogNode.innerHTML = "";
         connectEventSocket();
         await backfillVoicebotEvents();
         await pc.setRemoteDescription(payload.answer);

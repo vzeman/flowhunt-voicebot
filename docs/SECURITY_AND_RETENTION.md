@@ -90,11 +90,22 @@ The local implementation exposes the policy and keeps data in JSON/filesystem
 stores. Production storage must implement deletion by workspace, then narrower
 voicebot/session/artifact scope when supplied.
 
+`POST /workspaces/{workspace_id}/security/retention/delete` exposes the same
+scope as executable deletion hooks. Use `dry_run=true` to inspect which storage
+classes and hooks would be targeted. Use `dry_run=false` to record an actual
+deletion request for the configured storage drivers. Every request emits a
+redacted `security_audit` event with action `retention_delete`.
+
 ## PII-Safe Logging
 
 `VOICEBOT_PII_SAFE_LOGGING_ENABLED=true` is the default. Diagnostics and SLO
 endpoints do not include transcript text. Debug audio capture remains disabled
 by default and should be enabled only for explicit support investigations.
+
+Structured `api_access_logged` events record public and internal API requests:
+method, path, audience, status, latency, request id, origin, user agent, and
+route/workspace ids when a public route resolves. Source IP is omitted by
+default while PII-safe logging is enabled.
 
 ## Production Network Policy Assumptions
 

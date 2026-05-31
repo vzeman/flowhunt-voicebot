@@ -43,9 +43,31 @@ class InternalAuthTests(unittest.TestCase):
         self.assertEqual(invalid.status_code, 401)
         self.assertEqual(invalid.json()["detail"], "invalid_internal_api_key")
         self.assertEqual(
-            [event.type for event in events.list_events(call_id="system")],
+            [event.type for event in events.list_events(call_id="system") if event.type == "internal_api_auth_denied"],
             ["internal_api_auth_denied", "internal_api_auth_denied"],
         )
+
+    def test_access_log_events_are_structured_and_secret_safe(self) -> None:
+        client, events = self.build_client(
+            Settings(internal_auth_enabled=True, internal_api_keys=("admin:control:secret:internal:*",))
+        )
+
+        response = client.get(
+            "/config",
+            headers={
+                "X-FlowHunt-Internal-Key": "secret",
+                "X-Request-Id": "request-1",
+                "User-Agent": "test-agent",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        access = [event for event in events.list_events(call_id="access") if event.type == "api_access_logged"][-1]
+        self.assertEqual(access.data["request_id"], "request-1")
+        self.assertEqual(access.data["audience"], "internal")
+        self.assertEqual(access.data["status_code"], 200)
+        self.assertFalse(access.data["source_ip_recorded"])
+        self.assertNotIn("secret", str(access.data))
 
     def test_internal_auth_accepts_valid_key_and_redacts_configured_keys(self) -> None:
         client, events = self.build_client(

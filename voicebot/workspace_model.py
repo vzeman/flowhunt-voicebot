@@ -109,6 +109,9 @@ class VoicebotStore:
             )
         )
 
+    def workspace_ids(self) -> tuple[str, ...]:
+        return tuple(sorted({workspace_id for workspace_id, _voicebot_id in self._voicebots}))
+
     def delete(self, workspace_id: str, voicebot_id: str) -> VoicebotDefinition | None:
         return self._voicebots.pop((workspace_id, voicebot_id), None)
 

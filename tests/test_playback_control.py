@@ -798,6 +798,41 @@ class PlaybackControlTests(unittest.TestCase):
             stt.release.set()
             session.stop()
 
+    def test_webrtc_short_complete_greeting_is_sent_to_agent(self) -> None:
+        events = EventStore(max_context_events=40)
+        stt = GatedSTT("Hi.")
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(greet_on_connect=False),
+            events,
+            stt,
+            FakeTTS(),
+        )
+        try:
+            session._speech_jobs.put((1, np.ones(160, dtype=np.float32), session._current_interrupt_generation()))
+            self.assertTrue(stt.started.wait(timeout=1.0))
+            stt.release.set()
+
+            deadline = time.monotonic() + 1.0
+            requested = None
+            while time.monotonic() < deadline:
+                requests = [event for event in events.list_events(call_id="call-1") if event.type == "agent_response_requested"]
+                if requests:
+                    requested = requests[-1]
+                    break
+                time.sleep(0.01)
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertIn("user_transcript", event_types)
+            self.assertNotIn("stt_result_dropped", event_types)
+            self.assertIsNotNone(requested)
+            assert requested is not None
+            self.assertEqual(requested.data["text"], "Hi.")
+        finally:
+            stt.release.set()
+            session.stop()
+
     def test_spoken_response_text_is_limited(self) -> None:
         text = "This is a long first sentence that should stay intact. This second sentence is extra detail."
 

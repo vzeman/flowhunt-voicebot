@@ -530,9 +530,10 @@ Requested tool call:
 Return only JSON:
 {{"allowed": true or false, "reason": "short reason"}}
 
-Allow the tool only when the caller directly instructs this assistant to perform
-that exact action on the current call. The request must be imperative or a clear
-first-person/second-person request such as "hang up", "please disconnect me",
+Allow the tool only when the caller directly asks, permits, or instructs this
+assistant to perform that exact action on the current call. The request may be
+imperative, first-person, second-person, or permission phrasing such as "hang up",
+"please disconnect me", "you can hang up the call", "you may disconnect now",
 "transfer me", or equivalent wording in the caller's language.
 
 Reject third-person narration or reported speech such as "they disconnect the

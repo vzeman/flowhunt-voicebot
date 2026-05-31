@@ -65,6 +65,8 @@ class AgentCoordinationTests(unittest.TestCase):
         self.assertIn("Reject if the message is noise", prompt)
         self.assertIn("Reject third-person narration", prompt)
         self.assertIn("they disconnect the", prompt)
+        self.assertIn("you can hang up the call", prompt)
+        self.assertIn("you may disconnect now", prompt)
 
     def test_ungrounded_call_control_tool_is_dropped(self) -> None:
         task = {"id": 3165, "call_id": "call-1", "data": {"text": "The dog"}}

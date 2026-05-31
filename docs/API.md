@@ -566,6 +566,7 @@ Response:
   "source": "prompt_override",
   "prompts": {
     "greeting": "Pozdrav volajuceho po slovensky.",
+    "filler_message": "Chvíľku strpenia.",
     "system_prompt": "Use concise Slovak.",
     "stt_prompt": "LiveAgent FlowHunt",
     "language": "sk"
@@ -581,7 +582,11 @@ send every field when replacing the config.
 ### PATCH `/workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts`
 
 Updates only the supplied prompt fields. Supported fields are `greeting`,
-`system_prompt`, `stt_prompt`, and `language`.
+`filler_message`, `system_prompt`, `stt_prompt`, and `language`.
+
+`filler_message` is the short progress phrase spoken while the communication
+agent is still preparing an answer or invoking a subagent. Leave it empty to use
+the built-in localized default.
 
 Use `language: "auto"` for multilingual voicebots. In that mode the default STT
 adapter does not force a language hint, and the communication agent is

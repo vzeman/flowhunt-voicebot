@@ -57,8 +57,9 @@ workspace admin APIs or FlowHunt control plane instead of relying on this seed.
   `Voicebot Test`.
 - Workspace table showing `workspace_id` and display name. Opening a workspace
   shows its voicebots.
-- Voicebot detail view with editable basic settings and prompts, plus read-only
-  provider and runtime configuration JSON.
+- Voicebot detail view with editable basic settings and prompts, including the
+  greeting, filler message, system prompt, STT prompt, and language, plus
+  read-only provider and runtime configuration JSON.
 - Active session table showing workspace, voicebot, session id, status, start
   time, and elapsed length.
 - Finished session history table with the same operational columns.

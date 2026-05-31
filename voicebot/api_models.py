@@ -219,6 +219,7 @@ class VoicebotProviderConfigRequest(BaseModel):
 
 class VoicebotPromptConfigRequest(BaseModel):
     greeting: str = "Hello, how can I help you?"
+    filler_message: str = ""
     system_prompt: str = ""
     stt_prompt: str = ""
     language: str = "en"
@@ -226,6 +227,7 @@ class VoicebotPromptConfigRequest(BaseModel):
 
 class VoicebotPromptConfigPatchRequest(BaseModel):
     greeting: str | None = None
+    filler_message: str | None = None
     system_prompt: str | None = None
     stt_prompt: str | None = None
     language: str | None = None

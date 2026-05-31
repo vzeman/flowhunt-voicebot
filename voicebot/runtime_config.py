@@ -14,6 +14,7 @@ def utc_now_iso() -> str:
 @dataclass(frozen=True)
 class VoicebotPromptConfig:
     greeting: str = "Hello, how can I help you?"
+    filler_message: str = ""
     system_prompt: str = ""
     stt_prompt: str = ""
     language: str = "en"
@@ -27,6 +28,7 @@ class VoicebotPromptConfig:
     def as_dict(self) -> dict[str, Any]:
         return {
             "greeting": self.greeting,
+            "filler_message": self.filler_message,
             "system_prompt": self.system_prompt,
             "stt_prompt": self.stt_prompt,
             "language": self.language,

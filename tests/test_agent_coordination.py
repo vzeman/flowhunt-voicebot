@@ -113,6 +113,7 @@ class AgentCoordinationTests(unittest.TestCase):
             {
                 "voicebot_prompts": {
                     "greeting": "Pozdrav volajuceho po slovensky.",
+                    "filler_message": "Chvíľku strpenia.",
                     "system_prompt": "Use concise Slovak.",
                     "stt_prompt": "LiveAgent",
                     "language": "sk",
@@ -122,6 +123,7 @@ class AgentCoordinationTests(unittest.TestCase):
         )
 
         self.assertIn("Default response language: sk", prompt)
+        self.assertIn("Filler message: Chvíľku strpenia.", prompt)
         self.assertIn("Use concise Slovak.", prompt)
 
     def test_build_prompt_auto_language_instructs_mirroring_caller_language(self) -> None:

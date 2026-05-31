@@ -403,6 +403,7 @@ def create_app(
                 return runtime_config.prompts
         return VoicebotPromptConfig(
             greeting=runtime_settings.connect_greeting_prompt,
+            filler_message="",
             system_prompt="",
             stt_prompt=runtime_settings.stt_prompt,
             language=runtime_settings.language or "auto",
@@ -493,6 +494,12 @@ def create_app(
 
     def agent_task_event_to_dict(event: VoicebotEvent, context: dict[str, Any]) -> dict[str, Any]:
         payload = event_to_dict(event)
+        prompt_config = (context.get("prompt_configs_by_call_id") or {}).get(event.call_id)
+        if isinstance(prompt_config, dict):
+            payload["data"] = {
+                **payload.get("data", {}),
+                "prompt_config": prompt_config,
+            }
         session_language = (context.get("session_languages_by_call_id") or {}).get(event.call_id)
         if isinstance(session_language, dict):
             payload["data"] = {
@@ -1315,6 +1322,7 @@ def create_app(
                 providers=providers,
                 prompts=VoicebotPromptConfig(
                     greeting=request.prompts.greeting,
+                    filler_message=request.prompts.filler_message,
                     system_prompt=request.prompts.system_prompt,
                     stt_prompt=request.prompts.stt_prompt,
                     language=request.prompts.language,
@@ -1395,6 +1403,7 @@ def create_app(
                 voicebot_id,
                 VoicebotPromptConfig(
                     greeting=request.greeting,
+                    filler_message=request.filler_message,
                     system_prompt=request.system_prompt,
                     stt_prompt=request.stt_prompt,
                     language=request.language,
@@ -4436,6 +4445,7 @@ DASHBOARD_PAGE = """<!doctype html>
               <div class="form-grid">
                 <label>language<input id="prompt-language"></label>
                 <label class="full">greeting<textarea id="prompt-greeting"></textarea></label>
+                <label class="full">filler_message<textarea id="prompt-filler"></textarea></label>
                 <label class="full">system_prompt<textarea id="prompt-system"></textarea></label>
                 <label class="full">stt_prompt<textarea id="prompt-stt"></textarea></label>
               </div>
@@ -4608,6 +4618,7 @@ DASHBOARD_PAGE = """<!doctype html>
       const prompts = payload.prompts || {};
       document.getElementById("prompt-language").value = prompts.language || "";
       document.getElementById("prompt-greeting").value = prompts.greeting || "";
+      document.getElementById("prompt-filler").value = prompts.filler_message || "";
       document.getElementById("prompt-system").value = prompts.system_prompt || "";
       document.getElementById("prompt-stt").value = prompts.stt_prompt || "";
     }
@@ -4654,6 +4665,7 @@ DASHBOARD_PAGE = """<!doctype html>
       const payload = {
         language: document.getElementById("prompt-language").value,
         greeting: document.getElementById("prompt-greeting").value,
+        filler_message: document.getElementById("prompt-filler").value,
         system_prompt: document.getElementById("prompt-system").value,
         stt_prompt: document.getElementById("prompt-stt").value
       };

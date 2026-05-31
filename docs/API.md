@@ -18,6 +18,33 @@ FlowHunt. Set `VOICEBOT_WORKSPACE_ACCESS_CONTROL_ENABLED=true` and
 `VOICEBOT_ALLOWED_WORKSPACE_IDS=workspace-1,workspace-2` to reject other
 workspace IDs with `403`.
 
+## API Surface Audiences
+
+The local Docker runtime still serves a combined FastAPI app for development,
+but every HTTP route is now classified by audience:
+
+- `public`: caller-safe runtime endpoints that may be exposed through public
+  ingress. Current examples are public health checks and WebRTC session offer
+  creation.
+- `internal`: FlowHunt backend, worker, agent, dashboard, diagnostics,
+  call-control, storage, transcript, event, and admin endpoints. These must not
+  be exposed to public ingress.
+- `local_dev`: local developer tooling such as the browser WebRTC test page.
+
+Generated OpenAPI specs are split by audience:
+
+- `GET /openapi/public.json`
+- `GET /openapi/internal.json`
+
+The public OpenAPI spec excludes internal routes and local developer tools. The
+internal spec includes internal routes and local developer tools for the current
+Docker workflow, but it excludes public-only session creation operations. Later
+production work will bind these audiences to separate ingress/services and add
+internal service authentication.
+
+`GET /api/surface` also returns a route-audience inventory so tests and
+operators can detect unclassified endpoints before deployment.
+
 ## Common Objects
 
 ### Event

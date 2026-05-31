@@ -774,7 +774,7 @@ class PlaybackControlTests(unittest.TestCase):
             FakeTTS(),
         )
         try:
-            session._speech_jobs.put((1, np.ones(160, dtype=np.float32), session._current_interrupt_generation()))
+            session._speech_jobs.put((1, np.ones(6400, dtype=np.float32), session._current_interrupt_generation()))
             self.assertTrue(stt.started.wait(timeout=1.0))
             stt.release.set()
 
@@ -810,7 +810,7 @@ class PlaybackControlTests(unittest.TestCase):
             FakeTTS(),
         )
         try:
-            session._speech_jobs.put((1, np.ones(160, dtype=np.float32), session._current_interrupt_generation()))
+            session._speech_jobs.put((1, np.ones(6400, dtype=np.float32), session._current_interrupt_generation()))
             self.assertTrue(stt.started.wait(timeout=1.0))
             stt.release.set()
 
@@ -829,6 +829,41 @@ class PlaybackControlTests(unittest.TestCase):
             self.assertIsNotNone(requested)
             assert requested is not None
             self.assertEqual(requested.data["text"], "Hi.")
+        finally:
+            stt.release.set()
+            session.stop()
+
+    def test_webrtc_too_short_complete_transcript_is_dropped(self) -> None:
+        events = EventStore(max_context_events=40)
+        stt = GatedSTT("Hi.")
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(greet_on_connect=False),
+            events,
+            stt,
+            FakeTTS(),
+        )
+        try:
+            session._speech_jobs.put((1, np.ones(160, dtype=np.float32), session._current_interrupt_generation()))
+            self.assertTrue(stt.started.wait(timeout=1.0))
+            stt.release.set()
+
+            deadline = time.monotonic() + 1.0
+            dropped = None
+            while time.monotonic() < deadline:
+                drops = [event for event in events.list_events(call_id="call-1") if event.type == "stt_result_dropped"]
+                if drops:
+                    dropped = drops[-1]
+                    break
+                time.sleep(0.01)
+
+            event_types = [event.type for event in events.list_events(call_id="call-1")]
+            self.assertIn("user_transcript", event_types)
+            self.assertNotIn("agent_response_requested", event_types)
+            self.assertIsNotNone(dropped)
+            assert dropped is not None
+            self.assertEqual(dropped.data["reason"], "low_signal_transcript")
         finally:
             stt.release.set()
             session.stop()

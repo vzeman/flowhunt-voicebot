@@ -118,6 +118,21 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("session_language", response.json()["pending"][0]["data"])
 
+    def test_agent_tasks_do_not_switch_language_on_short_greeting_fragment(self) -> None:
+        client, events, _tracker = self.build_client()
+        events.append("call-1", "stt_finished", {"turn_id": 1, "metadata": {"language": "en"}})
+        events.append("call-1", "user_transcript", {"turn_id": 1, "text": "Can you help me?"})
+        events.append("call-1", "user_transcript", {"turn_id": 2, "text": "Dobrý deň."})
+        request = events.append("call-1", "agent_response_requested", {"text": "Dobrý deň."})
+
+        response = client.get("/agent/tasks?call_id=call-1")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["pending"][0]["id"], request.id)
+        self.assertEqual(payload["pending"][0]["data"]["session_language"]["language"], "en")
+        self.assertEqual(payload["context"]["voicebot_prompts"]["language"], "en")
+
     def test_agent_tasks_applies_limit(self) -> None:
         client, events, _tracker = self.build_client()
         first = events.append("call-1", "agent_response_requested", {"text": "first"})

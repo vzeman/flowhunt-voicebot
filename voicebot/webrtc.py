@@ -636,6 +636,7 @@ class WebRTCCallSession:
                             stale=stale_turn,
                             min_chars=self.settings.agent_min_transcript_chars,
                             min_tokens=self.settings.agent_min_transcript_tokens,
+                            audio_duration_seconds=len(audio) / STT_SAMPLE_RATE,
                         )
                         if drop_decision.should_drop:
                             self.events.append(

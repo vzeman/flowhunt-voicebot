@@ -4952,7 +4952,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FlowHunt Voicebot WebRTC Test</title>
+  <title>Voicebot WebRTC Test</title>
   <style>
     :root { color-scheme: light; --border: #d8dee4; --muted: #57606a; --header: #f6f8fa; --row: #ffffff; --detail: #fbfcfd; --accent: #0969da; --key: #8250df; --value: #1a7f37; }
     body { font-family: system-ui, sans-serif; margin: 1.25rem; line-height: 1.45; color: #24292f; background: #fff; }
@@ -4995,7 +4995,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
   </style>
 </head>
 <body>
-  <h1>FlowHunt Voicebot WebRTC Test</h1>
+  <h1>Voicebot WebRTC Test</h1>
   <p>Click Start, allow microphone access, then speak. The bot audio is played by the browser.</p>
   <div class="call-controls">
     <div class="button-group">

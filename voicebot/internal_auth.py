@@ -101,6 +101,8 @@ def internal_scope_for_request(method: str, path: str) -> str:
         return "sip:manage"
     if normalized.startswith("/events") or normalized.startswith("/metrics") or normalized.startswith("/observability"):
         return "diagnostics:read"
+    if normalized.startswith("/dashboard"):
+        return "dashboard:read"
     if normalized.startswith("/webrtc/test"):
         return "dashboard:read"
     return "internal:read"

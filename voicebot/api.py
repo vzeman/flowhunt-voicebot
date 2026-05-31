@@ -1795,6 +1795,41 @@ def create_app(
     def config() -> dict[str, Any]:
         return {"settings": redacted_settings(runtime_settings)}
 
+    @app.get("/dashboard")
+    def dashboard() -> HTMLResponse:
+        return HTMLResponse(DASHBOARD_PAGE)
+
+    @app.get("/dashboard/state")
+    def dashboard_state(workspace_id: str | None = None) -> dict[str, Any]:
+        workspace_ids = list(voicebot_store.workspace_ids())
+        selected_workspace = workspace_id or (workspace_ids[0] if workspace_ids else "")
+        voicebot_rows = []
+        if selected_workspace:
+            active_counts = active_session_counts_by_voicebot()
+            for voicebot in voicebot_store.list(selected_workspace):
+                channels_for_voicebot = channel_resolver.bindings_for_voicebot(selected_workspace, voicebot.voicebot_id)
+                routes_for_voicebot = public_route_store.list(selected_workspace, voicebot.voicebot_id)
+                voicebot_rows.append(
+                    {
+                        **voicebot.as_dict(),
+                        "channels": [binding.as_dict() for binding in channels_for_voicebot],
+                        "public_routes": [route.as_dict() for route in routes_for_voicebot],
+                        "active_sessions": active_counts.get((selected_workspace, voicebot.voicebot_id), 0),
+                    }
+                )
+        return {
+            "dashboard": {
+                "access": "internal",
+                "auth": "internal_api_key_now_flowhunt_sso_rbac_next",
+                "webrtc_test_page": "/webrtc/test",
+            },
+            "workspaces": workspace_ids,
+            "selected_workspace_id": selected_workspace,
+            "voicebots": voicebot_rows,
+            "active_sessions": webrtc.snapshots() if webrtc is not None else [],
+            "recent_events": [event_to_dict(event) for event in events.list_events(limit=80, workspace_id=selected_workspace or None)],
+        }
+
     @app.get("/.well-known/flowhunt-voicebot")
     def public_voicebot_bootstrap(request: Request) -> dict[str, Any]:
         route = resolve_public_voicebot_route(request)
@@ -1995,6 +2030,20 @@ def create_app(
             if workspace_id == route.workspace_id and voicebot_id == route.voicebot_id:
                 count += 1
         return count
+
+    def active_session_counts_by_voicebot() -> dict[tuple[str, str], int]:
+        counts: dict[tuple[str, str], int] = {}
+        if webrtc is None:
+            return counts
+        for snapshot in webrtc.snapshots():
+            metadata = snapshot.get("metadata") if isinstance(snapshot.get("metadata"), dict) else {}
+            route_data = snapshot.get("route") if isinstance(snapshot.get("route"), dict) else {}
+            workspace_id = metadata.get("workspace_id") or route_data.get("workspace_id")
+            voicebot_id = metadata.get("voicebot_id") or route_data.get("voicebot_id")
+            if workspace_id and voicebot_id:
+                key = (str(workspace_id), str(voicebot_id))
+                counts[key] = counts.get(key, 0) + 1
+        return counts
 
     def emit_public_admission(
         route: PublicVoicebotRoute,
@@ -4008,6 +4057,128 @@ def validated_transfer_target(value: Any) -> str:
     if any(ord(char) < 32 or ord(char) == 127 for char in target):
         raise HTTPException(status_code=400, detail="transfer target must not contain control characters")
     return target
+
+
+DASHBOARD_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlowHunt Voicebot Dashboard</title>
+  <style>
+    :root { --border:#d8dee4; --muted:#57606a; --bg:#f6f8fa; --text:#24292f; --accent:#0969da; }
+    body { margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif; color:var(--text); background:#fff; }
+    header { display:flex; align-items:center; gap:1rem; padding:1rem 1.25rem; border-bottom:1px solid var(--border); background:var(--bg); }
+    h1 { margin:0; font-size:1.15rem; }
+    main { display:grid; grid-template-columns:22rem minmax(0,1fr); min-height:calc(100vh - 4rem); }
+    aside { border-right:1px solid var(--border); padding:1rem; background:#fbfcfd; }
+    section { padding:1rem; }
+    select,input,button { font:inherit; }
+    select,input { width:100%; box-sizing:border-box; padding:.45rem .55rem; border:1px solid var(--border); border-radius:6px; background:#fff; }
+    button { padding:.45rem .7rem; border:1px solid var(--border); border-radius:6px; background:#fff; cursor:pointer; }
+    button:hover { border-color:var(--accent); }
+    .muted { color:var(--muted); font-size:.875rem; }
+    .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:.75rem; }
+    .card { border:1px solid var(--border); border-radius:8px; padding:.85rem; background:#fff; }
+    .card h2 { margin:0 0 .35rem; font-size:1rem; }
+    .badge { display:inline-block; padding:.1rem .4rem; border-radius:999px; background:#ddf4ff; color:#0550ae; font-size:.75rem; font-weight:700; }
+    .badge.off { background:#ffebe9; color:#cf222e; }
+    table { width:100%; border-collapse:collapse; font-size:.875rem; }
+    th,td { text-align:left; padding:.5rem; border-bottom:1px solid #eaeef2; vertical-align:top; }
+    th { color:var(--muted); background:var(--bg); position:sticky; top:0; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+    pre { margin:0; white-space:pre-wrap; overflow:auto; max-height:22rem; background:#0d1117; color:#c9d1d9; padding:.75rem; border-radius:8px; }
+    iframe { width:100%; min-height:22rem; border:1px solid var(--border); border-radius:8px; }
+    @media (max-width:900px){ main{grid-template-columns:1fr} aside{border-right:0;border-bottom:1px solid var(--border)} .grid{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>FlowHunt Voicebot Dashboard</h1>
+    <span class="muted">Internal operations and voicebot administration</span>
+  </header>
+  <main>
+    <aside>
+      <label class="muted" for="workspace">Workspace</label>
+      <select id="workspace"></select>
+      <p class="muted">Dashboard APIs are internal-only. Production login/SSO/RBAC is tracked separately.</p>
+      <button id="refresh" type="button">Refresh</button>
+    </aside>
+    <section>
+      <div class="cards" id="voicebots"></div>
+      <div class="grid">
+        <div>
+          <h2>Active Sessions</h2>
+          <table><thead><tr><th>Session</th><th>Call</th><th>State</th></tr></thead><tbody id="sessions"></tbody></table>
+        </div>
+        <div>
+          <h2>WebRTC Inference Console</h2>
+          <iframe src="/webrtc/test" title="WebRTC test console"></iframe>
+        </div>
+      </div>
+      <h2>Recent Events</h2>
+      <pre id="events"></pre>
+    </section>
+  </main>
+  <script>
+    const workspace = document.getElementById("workspace");
+    const voicebots = document.getElementById("voicebots");
+    const sessions = document.getElementById("sessions");
+    const events = document.getElementById("events");
+    document.getElementById("refresh").addEventListener("click", load);
+    workspace.addEventListener("change", load);
+    load();
+    async function load() {
+      const qs = workspace.value ? `?workspace_id=${encodeURIComponent(workspace.value)}` : "";
+      const response = await fetch(`/dashboard/state${qs}`);
+      const data = await response.json();
+      renderWorkspaces(data);
+      renderVoicebots(data.voicebots || []);
+      renderSessions(data.active_sessions || []);
+      events.textContent = JSON.stringify(data.recent_events || [], null, 2);
+    }
+    function renderWorkspaces(data) {
+      const selected = data.selected_workspace_id || "";
+      workspace.innerHTML = "";
+      for (const id of data.workspaces || []) {
+        const option = document.createElement("option");
+        option.value = id; option.textContent = id; option.selected = id === selected;
+        workspace.appendChild(option);
+      }
+    }
+    function renderVoicebots(items) {
+      voicebots.innerHTML = "";
+      for (const bot of items) {
+        const card = document.createElement("article");
+        card.className = "card";
+        card.innerHTML = `<h2>${escapeHtml(bot.display_name || bot.voicebot_id)}</h2>
+          <span class="badge ${bot.enabled ? "" : "off"}">${bot.enabled ? "enabled" : "disabled"}</span>
+          <p class="muted">${escapeHtml(bot.voicebot_id)} · active sessions: ${bot.active_sessions || 0}</p>
+          <p>Channels: ${(bot.channels || []).length}<br>Public routes: ${(bot.public_routes || []).length}</p>`;
+        voicebots.appendChild(card);
+      }
+    }
+    function renderSessions(items) {
+      sessions.innerHTML = "";
+      for (const item of items) {
+        const row = sessions.insertRow();
+        row.insertCell().textContent = item.session_id || "";
+        row.insertCell().textContent = item.call_id || "";
+        row.insertCell().textContent = item.connection_state || item.transport || "";
+      }
+    }
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, char => {
+        if (char === "&") return "&amp;";
+        if (char === "<") return "&lt;";
+        if (char === ">") return "&gt;";
+        if (char === '"') return "&quot;";
+        return "&#39;";
+      });
+    }
+  </script>
+</body>
+</html>"""
 
 
 VOICEBOT_WIDGET_JS = r"""(() => {

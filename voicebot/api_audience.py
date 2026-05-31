@@ -39,6 +39,7 @@ INTERNAL_ROUTE_PREFIXES = (
     "/calls",
     "/config",
     "/context",
+    "/dashboard",
     "/deployment",
     "/events",
     "/health",

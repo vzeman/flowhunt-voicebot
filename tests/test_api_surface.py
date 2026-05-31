@@ -106,6 +106,7 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(set(response.json()["paths"]["/webrtc/sessions/{session_id}"]), {"delete"})
         self.assertIn("/health", paths)
         self.assertNotIn("/agent/tasks", paths)
+        self.assertNotIn("/dashboard", paths)
         self.assertNotIn("/webrtc/test", paths)
         self.assertNotIn("/config", paths)
 
@@ -115,6 +116,8 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         paths = set(response.json()["paths"])
         self.assertIn("/agent/tasks", paths)
+        self.assertIn("/dashboard", paths)
+        self.assertIn("/dashboard/state", paths)
         self.assertIn("/webrtc/test", paths)
         self.assertIn("/config", paths)
         self.assertNotIn("post", response.json()["paths"]["/webrtc/sessions"])

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 import unittest
+import unittest.mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agents"))
 
@@ -11,6 +12,8 @@ from communication_agent import (
     CommunicationAgentConfig,
     DelayedProgressAcknowledgement,
     finalize_streamed_response,
+    colleague_progress_ack_text_for_task,
+    colleague_progress_ack_tool_call,
     has_colleague_tool_call,
     parse_colleague_tool_recovery,
     preferred_colleague_tool_name,
@@ -186,6 +189,13 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
 
         self.assertEqual(progress_ack_text_for_task(task), "Hneď sa na to pozriem.")
         self.assertEqual(progress_ack_tool_call(task)["arguments"]["text"], "Hneď sa na to pozriem.")
+
+    def test_colleague_progress_ack_explicitly_mentions_colleague(self) -> None:
+        task = {"id": 1, "call_id": "call-1", "data": {}}
+
+        self.assertIn("colleague", colleague_progress_ack_text_for_task(task))
+        self.assertIn("colleague", colleague_progress_ack_tool_call(task)["arguments"]["text"])
+        self.assertEqual(colleague_progress_ack_tool_call(task)["arguments"]["response_kind"], "progress_ack")
 
     def test_colleague_progress_ack_is_prepended_when_model_only_calls_tool(self) -> None:
         task = {"id": 1, "call_id": "call-1", "data": {"text": "Check it"}}

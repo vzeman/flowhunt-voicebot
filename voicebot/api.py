@@ -8,7 +8,7 @@ from typing import Any, get_args
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
 from .agent_tasks import AgentTaskTracker
 from .api_surface import (
@@ -85,6 +85,12 @@ from .flowhunt import (
     is_terminal_issue_state,
 )
 from .health import readiness_report
+from .internal_auth import (
+    internal_scope_for_request,
+    parse_internal_api_keys,
+    route_requires_internal_auth,
+    validate_internal_api_key,
+)
 from .language import detected_session_language, is_auto_language
 from .metrics import summarize_metrics
 from .multimodal import (
@@ -276,6 +282,46 @@ def create_app(
     session_lease_store = session_leases or SessionLeaseStore()
     runtime_config_store = runtime_configs or VoicebotRuntimeConfigStore()
     prompt_config_store = prompt_configs or VoicebotPromptConfigStore()
+    internal_keys = parse_internal_api_keys(runtime_settings.internal_api_keys)
+
+    @app.middleware("http")
+    async def internal_auth_middleware(request: Request, call_next):
+        if not runtime_settings.internal_auth_enabled or not route_requires_internal_auth(request.method, request.url.path):
+            return await call_next(request)
+        scope = internal_scope_for_request(request.method, request.url.path)
+        result = validate_internal_api_key(
+            request.headers.get(runtime_settings.internal_auth_header),
+            internal_keys,
+            scope,
+        )
+        if not result.ok:
+            events.append(
+                "system",
+                "internal_api_auth_denied",
+                {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "reason": result.reason,
+                    "scope": result.scope,
+                    **({"key_id": result.key.key_id} if result.key is not None else {}),
+                },
+            )
+            return JSONResponse(
+                {"detail": result.reason, "scope": result.scope},
+                status_code=result.status_code,
+            )
+        events.append(
+            "system",
+            "internal_api_auth_accepted",
+            {
+                "method": request.method,
+                "path": request.url.path,
+                "scope": result.scope,
+                "key_id": result.key.key_id if result.key else "",
+                "service": result.key.service if result.key else "",
+            },
+        )
+        return await call_next(request)
     workspace_access_policy = workspace_policy or workspace_access_policy_from_settings(runtime_settings)
     delegated_progress_memory = ProgressCadenceMemory(runtime_settings.flowhunt_progress_update_seconds)
     subagent_terminal_events: list[VoicebotEvent] = []
@@ -2574,6 +2620,26 @@ def create_app(
 
     @app.websocket("/ws/events")
     async def websocket_events(websocket: WebSocket) -> None:
+        if runtime_settings.internal_auth_enabled:
+            result = validate_internal_api_key(
+                websocket.headers.get(runtime_settings.internal_auth_header),
+                internal_keys,
+                "diagnostics:read",
+            )
+            if not result.ok:
+                events.append(
+                    "system",
+                    "internal_api_auth_denied",
+                    {
+                        "method": "WEBSOCKET",
+                        "path": "/ws/events",
+                        "reason": result.reason,
+                        "scope": result.scope,
+                        **({"key_id": result.key.key_id} if result.key is not None else {}),
+                    },
+                )
+                await websocket.close(code=1008, reason=result.reason)
+                return
         await hub.connect(websocket)
         last_id = 0
         try:

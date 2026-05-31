@@ -36,6 +36,15 @@ class SecurityContractTests(unittest.TestCase):
         issues = security_contract_issues(settings, policy)
 
         self.assertEqual(issues[0]["component"], "workspace_access")
+        self.assertIn("internal_api_auth", {issue["component"] for issue in issues})
+
+    def test_internal_auth_status_is_exposed_without_secret_values(self) -> None:
+        settings = Settings(internal_auth_enabled=True, internal_api_keys=("admin:svc:secret:internal:*",))
+        payload = security_contract_payload(settings, WorkspaceAccessPolicy(enabled=False))
+
+        self.assertTrue(payload["internal_api_auth"]["enabled"])
+        self.assertEqual(payload["internal_api_auth"]["configured_key_count"], 1)
+        self.assertNotIn("secret", str(payload["internal_api_auth"]))
 
     def test_security_contract_exposes_retention_classes(self) -> None:
         settings = Settings()

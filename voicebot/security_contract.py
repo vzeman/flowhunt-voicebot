@@ -108,6 +108,13 @@ def security_contract_payload(settings: Settings, workspace_policy: WorkspaceAcc
             "mandatory_outside_local": True,
             "production_ready": (not production_mode) or workspace_policy.enabled,
         },
+        "internal_api_auth": {
+            "enabled": settings.internal_auth_enabled,
+            "header": settings.internal_auth_header,
+            "configured_key_count": len(settings.internal_api_keys),
+            "mandatory_outside_local": True,
+            "production_ready": (not production_mode) or (settings.internal_auth_enabled and bool(settings.internal_api_keys)),
+        },
         "secret_handling": {
             "raw_secret_api_responses": False,
             "expected_storage": "workspace-scoped secret references",
@@ -158,6 +165,20 @@ def security_contract_issues(settings: Settings, workspace_policy: WorkspaceAcce
             {
                 "component": "workspace_access",
                 "issue": "workspace authorization must be enabled outside local development",
+            }
+        )
+    if production_mode and not settings.internal_auth_enabled:
+        issues.append(
+            {
+                "component": "internal_api_auth",
+                "issue": "internal API authentication must be enabled outside local development",
+            }
+        )
+    if settings.internal_auth_enabled and not settings.internal_api_keys:
+        issues.append(
+            {
+                "component": "internal_api_auth",
+                "issue": "enabled internal API authentication requires at least one configured API key",
             }
         )
     if workspace_policy.enabled and not workspace_policy.allowed_workspace_ids:

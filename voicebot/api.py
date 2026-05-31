@@ -4384,8 +4384,7 @@ DASHBOARD_PAGE = """<!doctype html>
     .session-summary { display:flex; flex-wrap:wrap; gap:.45rem; }
     .session-chip { display:inline-flex; align-items:center; gap:.25rem; padding:.18rem .5rem; border:1px solid var(--border); border-radius:999px; background:#f6f8fa; color:var(--muted); font-size:.78rem; font-weight:700; }
     .session-chip strong { color:var(--text); font-weight:700; }
-    .session-layout { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(22rem,.75fr); gap:1rem; align-items:start; }
-    .session-stack { display:grid; gap:1rem; }
+    .session-layout { display:grid; grid-template-columns:1fr; gap:1rem; align-items:start; }
     .panel-title { display:flex; align-items:baseline; justify-content:space-between; gap:.75rem; margin:0 0 .65rem; }
     .panel-title h3 { margin:0; }
     .event-table th, .event-table td, .transcript-table th, .transcript-table td { padding:.48rem .6rem; }
@@ -4538,37 +4537,33 @@ DASHBOARD_PAGE = """<!doctype html>
         <div id="session-summary" class="session-summary"></div>
       </div>
       <div class="session-layout">
-        <div class="session-stack">
-          <div class="panel">
-            <div class="panel-title"><h3>Timeline</h3><span class="muted">Click a bar to inspect details</span></div>
-            <div id="session-gantt" class="gantt-wrap"></div>
-            <div id="session-gantt-detail" class="gantt-detail muted">Click a timeline element to inspect the event details.</div>
-          </div>
-          <div class="panel">
-            <div class="panel-title"><h3>Events</h3><span class="muted" id="session-event-count"></span></div>
-            <div class="table-filter"><input data-table-filter="session-event-rows" placeholder="Filter events"></div>
-            <div class="table-wrap">
-              <table aria-label="Session events" class="event-table">
-                <thead><tr><th style="width:7rem;">Time</th><th style="width:5rem;">ID</th><th style="width:13rem;">Type</th><th>Summary</th></tr></thead>
-                <tbody id="session-event-rows"></tbody>
-              </table>
-            </div>
+        <div class="panel">
+          <div class="panel-title"><h3>Timeline</h3><span class="muted">Click a bar to inspect details</span></div>
+          <div id="session-gantt" class="gantt-wrap"></div>
+          <div id="session-gantt-detail" class="gantt-detail muted">Click a timeline element to inspect the event details.</div>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><h3>Recording</h3></div>
+          <div id="session-recording" class="muted">No recording loaded.</div>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><h3>Transcript</h3><span class="muted" id="session-transcript-count"></span></div>
+          <div class="table-filter"><input data-table-filter="session-transcript-rows" placeholder="Filter transcript"></div>
+          <div class="table-wrap compact">
+            <table aria-label="Session transcript" class="transcript-table">
+              <thead><tr><th style="width:7rem;">Time</th><th style="width:6rem;">Speaker</th><th>Text</th></tr></thead>
+              <tbody id="session-transcript-rows"></tbody>
+            </table>
           </div>
         </div>
-        <div>
-          <div class="panel">
-            <div class="panel-title"><h3>Recording</h3></div>
-            <div id="session-recording" class="muted">No recording loaded.</div>
-          </div>
-          <div class="panel" style="margin-top:1rem;">
-            <div class="panel-title"><h3>Transcript</h3><span class="muted" id="session-transcript-count"></span></div>
-            <div class="table-filter"><input data-table-filter="session-transcript-rows" placeholder="Filter transcript"></div>
-            <div class="table-wrap compact">
-              <table aria-label="Session transcript" class="transcript-table">
-                <thead><tr><th style="width:7rem;">Time</th><th style="width:6rem;">Speaker</th><th>Text</th></tr></thead>
-                <tbody id="session-transcript-rows"></tbody>
-              </table>
-            </div>
+        <div class="panel">
+          <div class="panel-title"><h3>Events</h3><span class="muted" id="session-event-count"></span></div>
+          <div class="table-filter"><input data-table-filter="session-event-rows" placeholder="Filter events"></div>
+          <div class="table-wrap">
+            <table aria-label="Session events" class="event-table">
+              <thead><tr><th style="width:7rem;">Time</th><th style="width:5rem;">ID</th><th style="width:13rem;">Type</th><th>Summary</th></tr></thead>
+              <tbody id="session-event-rows"></tbody>
+            </table>
           </div>
         </div>
       </div>

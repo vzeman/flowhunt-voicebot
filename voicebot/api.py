@@ -6,7 +6,7 @@ from datetime import datetime
 import threading
 from typing import Any, get_args
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
@@ -33,6 +33,8 @@ from .api_models import (
     IncomingSessionAdmissionRequest,
     MultimodalContentRequest,
     PlaybackInterruptRequest,
+    PublicVoicebotRoutePatchRequest,
+    PublicVoicebotRouteRequest,
     ScalingAdmissionRequest,
     ScalingBackpressureRequest,
     SecurityAuditRequest,
@@ -154,7 +156,17 @@ from .tools import tool_definitions_json_schema, tool_definitions_legacy
 from .webrtc import WebRTCSessionManager
 from .webrtc_media_plane import webrtc_media_plane_payload
 from .workspace_access import WorkspaceAccessPolicy, workspace_access_policy_from_settings
-from .workspace_model import ChannelKind, ChannelResolver, VoicebotChannelBinding, VoicebotDefinition, VoicebotSessionStore, VoicebotStore
+from .workspace_model import (
+    ChannelKind,
+    ChannelResolver,
+    PublicVoicebotRoute,
+    PublicVoicebotRouteStore,
+    VoicebotChannelBinding,
+    VoicebotDefinition,
+    VoicebotSessionStore,
+    VoicebotStore,
+    normalize_public_path,
+)
 
 _MODALITIES = set(get_args(Modality))
 _CONTENT_DIRECTIONS = set(get_args(ContentDirection))
@@ -226,6 +238,7 @@ def create_app(
     runtime_configs: VoicebotRuntimeConfigStore | None = None,
     prompt_configs: VoicebotPromptConfigStore | None = None,
     audio_artifacts=None,
+    public_routes: PublicVoicebotRouteStore | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -258,6 +271,7 @@ def create_app(
     scaling_backpressure = WorkspaceBackpressure(runtime_settings.scaling_backpressure_max_inflight)
     voicebot_store = voicebots or VoicebotStore()
     channel_resolver = channels or ChannelResolver()
+    public_route_store = public_routes or PublicVoicebotRouteStore()
     voicebot_session_store = voicebot_sessions or VoicebotSessionStore()
     session_lease_store = session_leases or SessionLeaseStore()
     runtime_config_store = runtime_configs or VoicebotRuntimeConfigStore()
@@ -789,6 +803,89 @@ def create_app(
         if binding is None:
             raise HTTPException(status_code=404, detail="Channel not found")
         return {"channel": binding.as_dict(), "deleted": True}
+
+    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/public-routes")
+    def list_public_voicebot_routes(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        return {
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "routes": [route.as_dict() for route in public_route_store.list(workspace_id, voicebot_id)],
+        }
+
+    @app.post("/workspaces/{workspace_id}/voicebots/{voicebot_id}/public-routes")
+    def create_public_voicebot_route(
+        workspace_id: str,
+        voicebot_id: str,
+        request: PublicVoicebotRouteRequest,
+    ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        if channel_resolver.get_channel(workspace_id, voicebot_id, request.channel_id) is None:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        try:
+            route = public_route_store.save(
+                PublicVoicebotRoute(
+                    route_id=request.route_id,
+                    workspace_id=workspace_id,
+                    voicebot_id=voicebot_id,
+                    channel_id=request.channel_id,
+                    host=request.host,
+                    path_prefix=request.path_prefix,
+                    status=request.status,  # type: ignore[arg-type]
+                    tls_mode=request.tls_mode,  # type: ignore[arg-type]
+                    allowed_origins=tuple(request.allowed_origins),
+                    metadata=request.metadata,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"route": route.as_dict()}
+
+    @app.patch("/workspaces/{workspace_id}/voicebots/{voicebot_id}/public-routes/{route_id}")
+    def patch_public_voicebot_route(
+        workspace_id: str,
+        voicebot_id: str,
+        route_id: str,
+        request: PublicVoicebotRoutePatchRequest,
+    ) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        existing = public_route_store.get(route_id, workspace_id)
+        if existing is None or existing.voicebot_id != voicebot_id:
+            raise HTTPException(status_code=404, detail="Public route not found")
+        channel_id = request.channel_id or existing.channel_id
+        if channel_resolver.get_channel(workspace_id, voicebot_id, channel_id) is None:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        try:
+            route = public_route_store.save(
+                PublicVoicebotRoute(
+                    route_id=existing.route_id,
+                    workspace_id=workspace_id,
+                    voicebot_id=voicebot_id,
+                    channel_id=channel_id,
+                    host=request.host or existing.host,
+                    path_prefix=request.path_prefix or existing.path_prefix,
+                    status=(request.status or existing.status),  # type: ignore[arg-type]
+                    tls_mode=(request.tls_mode or existing.tls_mode),  # type: ignore[arg-type]
+                    allowed_origins=tuple(
+                        existing.allowed_origins if request.allowed_origins is None else request.allowed_origins
+                    ),
+                    metadata=existing.metadata if request.metadata is None else request.metadata,
+                    created_at=existing.created_at,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {"route": route.as_dict()}
+
+    @app.delete("/workspaces/{workspace_id}/voicebots/{voicebot_id}/public-routes/{route_id}")
+    def delete_public_voicebot_route(workspace_id: str, voicebot_id: str, route_id: str) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        route = public_route_store.get(route_id, workspace_id)
+        if route is None or route.voicebot_id != voicebot_id:
+            raise HTTPException(status_code=404, detail="Public route not found")
+        deleted = public_route_store.delete(route_id, workspace_id)
+        assert deleted is not None
+        return {"route": deleted.as_dict(), "deleted": True}
 
     @app.post("/workspaces/{workspace_id}/voicebots/{voicebot_id}/validate")
     def validate_voicebot_runtime(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
@@ -1641,13 +1738,17 @@ def create_app(
         return webrtc_media_plane_payload()
 
     @app.post("/webrtc/sessions")
-    async def create_webrtc_session(request: WebRTCOfferRequest) -> dict[str, Any]:
+    async def create_webrtc_session(request: WebRTCOfferRequest, http_request: Request) -> dict[str, Any]:
         if webrtc is None:
             raise HTTPException(status_code=503, detail="WebRTC transport is not configured")
         if request.type != "offer":
             raise HTTPException(status_code=400, detail="WebRTC session type must be offer")
         try:
             metadata = dict(request.metadata or {})
+            route = resolve_public_voicebot_route(http_request)
+            if route is not None:
+                metadata.update(route.event_data())
+                metadata["public_route_resolved"] = True
             workspace_id = non_empty_str(metadata.get("workspace_id"))
             voicebot_id = non_empty_str(metadata.get("voicebot_id"))
             if workspace_id:
@@ -1657,6 +1758,27 @@ def create_app(
             return await webrtc.create_session(request.sdp, request.type, metadata)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
+
+    def resolve_public_voicebot_route(request: Request) -> PublicVoicebotRoute | None:
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+        path = (
+            request.headers.get("x-forwarded-prefix")
+            or request.headers.get("x-original-uri")
+            or request.headers.get("x-forwarded-uri")
+            or request.url.path
+        )
+        route = public_route_store.resolve(host, normalize_public_path(path))
+        if route is None:
+            return None
+        voicebot = voicebot_store.get(route.workspace_id, route.voicebot_id)
+        if voicebot is None:
+            raise HTTPException(status_code=404, detail="Public route target voicebot not found")
+        if not voicebot.enabled:
+            raise HTTPException(status_code=403, detail="Voicebot is disabled")
+        channel = channel_resolver.get_channel(route.workspace_id, route.voicebot_id, route.channel_id)
+        if channel is None or not channel.enabled:
+            raise HTTPException(status_code=403, detail="Public route channel is disabled")
+        return route
 
     @app.delete("/webrtc/sessions/{session_id}")
     async def delete_webrtc_session(session_id: str) -> dict[str, Any]:

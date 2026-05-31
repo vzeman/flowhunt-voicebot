@@ -8,6 +8,8 @@ from typing import Any, Literal, get_args
 
 
 ChannelKind = Literal["sip_trunk", "phone_number", "webrtc_widget"]
+PublicVoicebotRouteStatus = Literal["pending", "active", "disabled"]
+PublicVoicebotRouteTlsMode = Literal["managed", "custom"]
 VoicebotSessionStatus = Literal["active", "ended"]
 
 
@@ -246,6 +248,160 @@ class ChannelResolver:
         if binding is None:
             return None
         return self.unregister_channel(channel_id)
+
+
+@dataclass(frozen=True)
+class PublicVoicebotRoute:
+    route_id: str
+    workspace_id: str
+    voicebot_id: str
+    channel_id: str
+    host: str
+    path_prefix: str = "/"
+    status: PublicVoicebotRouteStatus = "pending"
+    tls_mode: PublicVoicebotRouteTlsMode = "managed"
+    allowed_origins: tuple[str, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+    def __post_init__(self) -> None:
+        if not self.route_id.strip():
+            raise ValueError("route_id is required")
+        WorkspaceScope(self.workspace_id, self.voicebot_id)
+        if not self.channel_id.strip():
+            raise ValueError("channel_id is required")
+        if not normalize_public_host(self.host):
+            raise ValueError("host is required")
+        if self.status not in get_args(PublicVoicebotRouteStatus):
+            raise ValueError(f"unsupported public route status: {self.status}")
+        if self.tls_mode not in get_args(PublicVoicebotRouteTlsMode):
+            raise ValueError(f"unsupported public route tls mode: {self.tls_mode}")
+        normalized_path = normalize_public_path_prefix(self.path_prefix)
+        object.__setattr__(self, "host", normalize_public_host(self.host))
+        object.__setattr__(self, "path_prefix", normalized_path)
+        object.__setattr__(self, "allowed_origins", tuple(origin.strip() for origin in self.allowed_origins if origin.strip()))
+        _parse_aware_timestamp(self.created_at, "created_at")
+        _parse_aware_timestamp(self.updated_at, "updated_at")
+
+    def scope(self) -> WorkspaceScope:
+        return WorkspaceScope(self.workspace_id, self.voicebot_id)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "route_id": self.route_id,
+            "workspace_id": self.workspace_id,
+            "voicebot_id": self.voicebot_id,
+            "channel_id": self.channel_id,
+            "host": self.host,
+            "path_prefix": self.path_prefix,
+            "status": self.status,
+            "tls_mode": self.tls_mode,
+            "allowed_origins": list(self.allowed_origins),
+            "metadata": self.metadata,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    def event_data(self) -> dict[str, Any]:
+        return {
+            "workspace_id": self.workspace_id,
+            "voicebot_id": self.voicebot_id,
+            "channel_id": self.channel_id,
+            "public_route_id": self.route_id,
+            "public_route_host": self.host,
+            "public_route_path_prefix": self.path_prefix,
+        }
+
+
+class PublicVoicebotRouteStore:
+    def __init__(self, routes: list[PublicVoicebotRoute] | None = None) -> None:
+        self._routes: dict[str, PublicVoicebotRoute] = {}
+        for route in routes or []:
+            self.save(route)
+
+    def save(self, route: PublicVoicebotRoute) -> PublicVoicebotRoute:
+        existing = self._routes.get(route.route_id)
+        if existing is not None and existing.workspace_id != route.workspace_id:
+            raise ValueError("cannot move public route across workspaces")
+        if existing is not None and existing.voicebot_id != route.voicebot_id:
+            raise ValueError("cannot move public route across voicebots")
+        conflict = self._active_conflict(route)
+        if conflict is not None:
+            raise ValueError(f"public route conflicts with active route: {conflict.route_id}")
+        self._routes[route.route_id] = route
+        return route
+
+    def get(self, route_id: str, workspace_id: str | None = None) -> PublicVoicebotRoute | None:
+        route = self._routes.get(route_id)
+        if route is None:
+            return None
+        if workspace_id is not None and route.workspace_id != workspace_id:
+            return None
+        return route
+
+    def delete(self, route_id: str, workspace_id: str | None = None) -> PublicVoicebotRoute | None:
+        route = self.get(route_id, workspace_id)
+        if route is None:
+            return None
+        return self._routes.pop(route.route_id)
+
+    def list(self, workspace_id: str | None = None, voicebot_id: str | None = None) -> tuple[PublicVoicebotRoute, ...]:
+        return tuple(
+            route
+            for route in sorted(self._routes.values(), key=lambda item: item.route_id)
+            if (workspace_id is None or route.workspace_id == workspace_id)
+            and (voicebot_id is None or route.voicebot_id == voicebot_id)
+        )
+
+    def resolve(self, host: str, path: str = "/") -> PublicVoicebotRoute | None:
+        normalized_host = normalize_public_host(host)
+        normalized_path = normalize_public_path(path)
+        candidates = [
+            route
+            for route in self._routes.values()
+            if route.status == "active"
+            and route.host == normalized_host
+            and route_path_matches(route.path_prefix, normalized_path)
+        ]
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda item: len(item.path_prefix), reverse=True)[0]
+
+    def _active_conflict(self, route: PublicVoicebotRoute) -> PublicVoicebotRoute | None:
+        if route.status != "active":
+            return None
+        for existing in self._routes.values():
+            if existing.route_id == route.route_id or existing.status != "active":
+                continue
+            if existing.host == route.host and existing.path_prefix == route.path_prefix:
+                return existing
+        return None
+
+
+def normalize_public_host(value: str) -> str:
+    host = value.strip().lower()
+    if host.startswith("http://") or host.startswith("https://"):
+        host = host.split("://", 1)[1]
+    return host.split("/", 1)[0].split(":", 1)[0]
+
+
+def normalize_public_path_prefix(value: str) -> str:
+    path = normalize_public_path(value)
+    return path.rstrip("/") or "/"
+
+
+def normalize_public_path(value: str) -> str:
+    path = value.strip() or "/"
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return path.split("?", 1)[0] or "/"
+
+
+def route_path_matches(prefix: str, path: str) -> bool:
+    normalized_prefix = normalize_public_path_prefix(prefix)
+    normalized_path = normalize_public_path(path)
+    return normalized_prefix == "/" or normalized_path == normalized_prefix or normalized_path.startswith(f"{normalized_prefix}/")
 
 
 @dataclass(frozen=True)

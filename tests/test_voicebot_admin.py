@@ -137,6 +137,83 @@ class VoicebotAdminTests(unittest.TestCase):
         self.assertIn("unsupported channel kind", invalid_kind.json()["detail"])
         self.assertEqual(missing_patch.status_code, 404)
 
+    def test_public_route_admin_crud_is_workspace_voicebot_scoped(self) -> None:
+        client, store, _channels = self.build_client()
+        store.create(VoicebotDefinition("workspace-1", "voicebot-1"))
+        client.post(
+            "/workspaces/workspace-1/voicebots/voicebot-1/channels",
+            json={"channel_id": "channel-1", "kind": "webrtc_widget", "external_id": "widget-1"},
+        )
+
+        created = client.post(
+            "/workspaces/workspace-1/voicebots/voicebot-1/public-routes",
+            json={
+                "route_id": "route-1",
+                "channel_id": "channel-1",
+                "host": "Voice.Example.com:443",
+                "path_prefix": "/support/",
+                "status": "active",
+                "allowed_origins": ["https://www.example.com"],
+            },
+        )
+        listed = client.get("/workspaces/workspace-1/voicebots/voicebot-1/public-routes")
+        patched = client.patch(
+            "/workspaces/workspace-1/voicebots/voicebot-1/public-routes/route-1",
+            json={"status": "disabled", "path_prefix": "/sales"},
+        )
+        deleted = client.delete("/workspaces/workspace-1/voicebots/voicebot-1/public-routes/route-1")
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.json()["route"]["host"], "voice.example.com")
+        self.assertEqual(created.json()["route"]["path_prefix"], "/support")
+        self.assertEqual(created.json()["route"]["channel_id"], "channel-1")
+        self.assertEqual([route["route_id"] for route in listed.json()["routes"]], ["route-1"])
+        self.assertEqual(patched.json()["route"]["status"], "disabled")
+        self.assertEqual(patched.json()["route"]["path_prefix"], "/sales")
+        self.assertTrue(deleted.json()["deleted"])
+
+    def test_public_route_admin_rejects_missing_channel_and_duplicate_active_route(self) -> None:
+        client, store, _channels = self.build_client()
+        store.create(VoicebotDefinition("workspace-1", "voicebot-1"))
+        client.post(
+            "/workspaces/workspace-1/voicebots/voicebot-1/channels",
+            json={"channel_id": "channel-1", "kind": "webrtc_widget", "external_id": "widget-1"},
+        )
+        first = client.post(
+            "/workspaces/workspace-1/voicebots/voicebot-1/public-routes",
+            json={
+                "route_id": "route-1",
+                "channel_id": "channel-1",
+                "host": "voice.example.com",
+                "path_prefix": "/support",
+                "status": "active",
+            },
+        )
+        missing_channel = client.post(
+            "/workspaces/workspace-1/voicebots/voicebot-1/public-routes",
+            json={
+                "route_id": "route-2",
+                "channel_id": "missing",
+                "host": "missing.example.com",
+                "status": "active",
+            },
+        )
+        duplicate = client.post(
+            "/workspaces/workspace-1/voicebots/voicebot-1/public-routes",
+            json={
+                "route_id": "route-3",
+                "channel_id": "channel-1",
+                "host": "voice.example.com",
+                "path_prefix": "/support/",
+                "status": "active",
+            },
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(missing_channel.status_code, 404)
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertIn("conflicts", duplicate.json()["detail"])
+
     def test_voicebot_validate_reports_missing_and_ready_runtime_dependencies(self) -> None:
         client, _store, _channels = self.build_client()
 

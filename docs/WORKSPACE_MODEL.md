@@ -12,6 +12,10 @@ Workspace
       SIP trunks
       phone numbers
       WebRTC widgets
+    Public routes
+      custom hosts
+      managed subdomains
+      path prefixes
     Runtime config
       STT/TTS/agent providers
       FlowHunt flow/project bindings
@@ -71,6 +75,35 @@ workspace, or voicebot. Dynamic disconnect/reconnect should unregister the old
 binding before registering a different route. Bindings also reject blank channel,
 workspace, voicebot, and external route ids, plus unsupported channel kinds,
 before they enter the resolver.
+
+## Public URL Routing
+
+`PublicVoicebotRoute` maps an external public URL to a workspace voicebot
+channel:
+
+```text
+Host + path prefix
+        |
+        v
+PublicVoicebotRoute
+        |
+        v
+workspace_id + voicebot_id + channel_id
+        |
+        v
+WebRTC session metadata and lifecycle events
+```
+
+Routes are workspace and voicebot scoped. One active `host + path_prefix`
+combination can only point to one route across the runtime, which keeps
+production ingress routing unambiguous. Disabled or pending routes can coexist
+with an active route but do not resolve public sessions.
+
+The first runtime resolver uses `Host`/`X-Forwarded-Host` and forwarded path
+headers such as `X-Forwarded-Prefix`, `X-Original-URI`, or `X-Forwarded-URI`.
+This lets an ingress rewrite public custom URLs to the internal
+`POST /webrtc/sessions` endpoint while preserving enough information for the
+voicebot to resolve the correct workspace, voicebot, and channel.
 
 ## Subagents
 

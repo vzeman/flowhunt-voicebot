@@ -291,6 +291,27 @@ class VoicebotChannelPatchRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class PublicVoicebotRouteRequest(BaseModel):
+    route_id: str
+    channel_id: str
+    host: str
+    path_prefix: str = "/"
+    status: str = "pending"
+    tls_mode: str = "managed"
+    allowed_origins: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PublicVoicebotRoutePatchRequest(BaseModel):
+    channel_id: str | None = None
+    host: str | None = None
+    path_prefix: str | None = None
+    status: str | None = None
+    tls_mode: str | None = None
+    allowed_origins: list[str] | None = None
+    metadata: dict[str, Any] | None = None
+
+
 class CallControlRequest(BaseModel):
     action: str
     target: str | None = None

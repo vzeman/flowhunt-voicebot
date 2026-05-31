@@ -11,6 +11,8 @@ from scipy.io import wavfile
 
 from .audio import rms, resample_audio
 
+MAX_SEGMENT_MERGE_GAP_SECONDS = 0.12
+
 
 @dataclass
 class RecordingSegment:
@@ -88,7 +90,7 @@ class SpeechOnlyCallRecorder:
                 return dict(self._finalized_metadata)
             if not self._segments or self.artifact_store is None:
                 return None
-            segments = sorted(self._segments, key=lambda item: item.start_seconds)
+            segments = coalesce_segments(sorted(self._segments, key=lambda item: item.start_seconds))
             sample_rate = segments[0].sample_rate
             playback_segments = [
                 resample_audio(segment.samples, segment.sample_rate, sample_rate) for segment in segments
@@ -129,6 +131,29 @@ def strip_silence(audio: np.ndarray, threshold: float) -> np.ndarray:
     if voiced.size == 0:
         return np.array([], dtype=np.float32)
     return samples[int(voiced[0]) : int(voiced[-1]) + 1]
+
+
+def coalesce_segments(segments: list[RecordingSegment]) -> list[RecordingSegment]:
+    if not segments:
+        return []
+    coalesced: list[RecordingSegment] = [segments[0]]
+    for segment in segments[1:]:
+        previous = coalesced[-1]
+        if can_merge_segments(previous, segment):
+            previous.samples = np.concatenate([previous.samples, segment.samples]).astype(np.float32, copy=False)
+            previous.end_seconds = max(previous.end_seconds, segment.end_seconds)
+            continue
+        coalesced.append(segment)
+    return coalesced
+
+
+def can_merge_segments(left: RecordingSegment, right: RecordingSegment) -> bool:
+    return (
+        left.source == right.source
+        and left.sample_rate == right.sample_rate
+        and left.metadata == right.metadata
+        and 0 <= right.start_seconds - left.end_seconds <= MAX_SEGMENT_MERGE_GAP_SECONDS
+    )
 
 
 def wav_bytes(audio: np.ndarray, sample_rate: int) -> bytes:

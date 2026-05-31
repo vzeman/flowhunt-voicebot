@@ -4786,9 +4786,16 @@ DASHBOARD_PAGE = """<!doctype html>
     }
 
     function sessionGanttItems(events) {
-      const parsed = events
+      const parsedAll = events
         .map((event) => ({event, time: Date.parse(event.timestamp || "")}))
         .filter((item) => Number.isFinite(item.time));
+      if (!parsedAll.length) return [];
+      const callEnded = parsedAll.find((item) => item.event.type === "call_ended");
+      const callEndTime = callEnded?.time ?? null;
+      const parsed = parsedAll.filter((item) => {
+        if (isPostCallDashboardAuditEvent(item.event)) return false;
+        return callEndTime === null || item.time <= callEndTime + 1000;
+      });
       if (!parsed.length) return [];
       const firstMs = Math.min(...parsed.map((item) => item.time));
       return parsed.map(({event, time}) => {
@@ -4803,6 +4810,12 @@ DASHBOARD_PAGE = """<!doctype html>
           end: start + duration,
         };
       });
+    }
+
+    function isPostCallDashboardAuditEvent(event) {
+      const data = event.data || {};
+      return event.type === "security_audit"
+        && ["transcript_read", "recording_read", "timeline_read"].includes(String(data.action || ""));
     }
 
     function ganttEventDuration(event) {

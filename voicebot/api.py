@@ -3742,7 +3742,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       type.textContent = parsed.label;
       type.title = parsed.label;
       typeCell.appendChild(type);
-      if (parsed.summary) {
+      if (shouldRenderClientSummary(parsed)) {
         appendDetailTextRow(logNode, parsed.summary, 2, "summary-detail-cell");
       }
       if (parsed.detail !== null) {
@@ -3775,6 +3775,31 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         return {kind: "audio", label: "media", summary: message, detail: null};
       }
       return {kind: "", label: "client", summary: message, detail: null};
+    }
+
+    function shouldRenderClientSummary(parsed) {
+      if (!parsed.summary) return false;
+      if (parsed.detail === null) return true;
+      return !jsonContainsStringValue(parsed.detail, parsed.summary);
+    }
+
+    function jsonContainsStringValue(value, expected) {
+      const normalizedExpected = normalizeSummaryText(expected);
+      if (!normalizedExpected) return false;
+      if (typeof value === "string") {
+        return normalizeSummaryText(value) === normalizedExpected;
+      }
+      if (Array.isArray(value)) {
+        return value.some((item) => jsonContainsStringValue(item, expected));
+      }
+      if (value && typeof value === "object") {
+        return Object.values(value).some((item) => jsonContainsStringValue(item, expected));
+      }
+      return false;
+    }
+
+    function normalizeSummaryText(value) {
+      return String(value ?? "").replace(/\\s+/g, " ").trim();
     }
 
     function logVoicebotEvent(event) {

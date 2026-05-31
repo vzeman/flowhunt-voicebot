@@ -3590,7 +3590,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FlowHunt Voicebot WebRTC Test</title>
   <style>
-    :root { color-scheme: light; --border: #d8dee4; --muted: #57606a; --header: #f6f8fa; --row: #ffffff; --row-alt: #fbfcfd; --accent: #0969da; }
+    :root { color-scheme: light; --border: #d8dee4; --muted: #57606a; --header: #f6f8fa; --row: #ffffff; --detail: #fbfcfd; --accent: #0969da; --key: #8250df; --value: #1a7f37; }
     body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 1320px; line-height: 1.45; color: #24292f; background: #fff; }
     button { font: inherit; margin-right: .5rem; padding: .45rem .75rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; }
     button:not(:disabled):hover { border-color: var(--accent); }
@@ -3602,14 +3602,20 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .8125rem; }
     thead th { position: sticky; top: 0; z-index: 1; background: var(--header); color: var(--muted); font-weight: 600; text-align: left; border-bottom: 1px solid var(--border); }
     th, td { padding: .45rem .55rem; vertical-align: top; border-bottom: 1px solid #eaeef2; }
-    tbody tr:nth-child(even) { background: var(--row-alt); }
-    tbody tr:nth-child(odd) { background: var(--row); }
+    tbody tr.summary-row { background: var(--row); }
+    tbody tr.detail-row { background: var(--detail); }
     .time-col { width: 6.75rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
     .id-col { width: 4.25rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .type-col { width: 12rem; }
-    .message-cell, .data-cell { overflow-wrap: anywhere; word-break: break-word; }
+    .type-col { width: 13rem; }
+    .message-cell, .summary-cell, .json-cell { overflow-wrap: anywhere; word-break: break-word; }
     .event-type { display: inline-block; max-width: 100%; padding: .1rem .4rem; border: 1px solid #c9d7e8; border-radius: 999px; color: #0550ae; background: #ddf4ff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .data-cell { color: #24292f; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .75rem; }
+    .summary-cell { color: var(--muted); }
+    .json-cell { padding: .65rem .75rem .8rem; }
+    .json-view { margin: 0; color: #24292f; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .75rem; line-height: 1.55; white-space: pre-wrap; }
+    .json-key { color: var(--key); font-weight: 600; }
+    .json-value { color: var(--value); font-weight: 700; }
+    .json-string { color: #0a3069; }
+    .json-null { color: #6e7781; font-weight: 700; }
     .empty-cell { color: #8c959f; font-family: inherit; }
     @media (max-width: 800px) { .logs { grid-template-columns: 1fr; } }
   </style>
@@ -3637,7 +3643,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       <div class="table-wrap">
         <table aria-label="Voicebot events">
           <thead>
-            <tr><th class="time-col">Time</th><th class="id-col">ID</th><th class="type-col">Type</th><th>Data</th></tr>
+            <tr><th class="time-col">Time</th><th class="id-col">ID</th><th class="type-col">Type</th><th>Summary</th></tr>
           </thead>
           <tbody id="event-log"></tbody>
         </table>
@@ -3648,7 +3654,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       <div class="table-wrap">
         <table aria-label="Subagent communication">
           <thead>
-            <tr><th class="time-col">Time</th><th class="id-col">ID</th><th class="type-col">Type</th><th>Data</th></tr>
+            <tr><th class="time-col">Time</th><th class="id-col">ID</th><th class="type-col">Type</th><th>Summary</th></tr>
           </thead>
           <tbody id="subagent-log"></tbody>
         </table>
@@ -3698,7 +3704,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     }
 
     function trimRows(tableBody, maxRows = 300) {
-      while (tableBody.rows.length > maxRows) {
+      while (tableBody.rows.length > maxRows * 2) {
         tableBody.deleteRow(0);
       }
     }
@@ -3711,6 +3717,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     function log(message) {
       const now = new Date();
       const row = logNode.insertRow();
+      row.className = "summary-row";
       appendCell(row, formatTime(now), "time-col", fullTimestamp(now));
       appendCell(row, message, "message-cell");
       trimRows(logNode);
@@ -3721,7 +3728,14 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       if (seenEventIds.has(event.id)) return;
       seenEventIds.add(event.id);
       if (isSubagentEvent(event)) logSubagentEvent(event);
-      const row = eventLogNode.insertRow();
+      appendEventRows(eventLogNode, event);
+      trimRows(eventLogNode);
+      scrollTableToBottom(eventLogNode);
+    }
+
+    function appendEventRows(tableBody, event) {
+      const row = tableBody.insertRow();
+      row.className = "summary-row";
       appendCell(row, formatTime(event.timestamp), "time-col", fullTimestamp(event.timestamp));
       appendCell(row, event.id ?? "", "id-col");
       const typeCell = appendCell(row, "", "type-col");
@@ -3730,10 +3744,84 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       type.textContent = event.type || "";
       type.title = event.type || "";
       typeCell.appendChild(type);
-      const hasData = event.data && Object.keys(event.data).length;
-      appendCell(row, hasData ? JSON.stringify(event.data) : "No data", hasData ? "data-cell" : "data-cell empty-cell");
-      trimRows(eventLogNode);
-      scrollTableToBottom(eventLogNode);
+      appendCell(row, eventSummary(event), "summary-cell");
+
+      if (event.data && Object.keys(event.data).length) {
+        const detailRow = tableBody.insertRow();
+        detailRow.className = "detail-row";
+        const detailCell = document.createElement("td");
+        detailCell.className = "json-cell";
+        detailCell.colSpan = 4;
+        detailCell.appendChild(renderJson(event.data));
+        detailRow.appendChild(detailCell);
+      }
+    }
+
+    function eventSummary(event) {
+      const data = event.data || {};
+      for (const key of ["text", "message", "reason", "action", "state", "status", "response_kind"]) {
+        if (data[key] !== undefined && data[key] !== null && String(data[key]).trim() !== "") {
+          return `${key}: ${String(data[key])}`;
+        }
+      }
+      if (data.task && data.task.status) return `task status: ${data.task.status}`;
+      if (data.task && data.task.task_id) return `task: ${data.task.task_id}`;
+      if (data.subagent_task_id) return `task: ${data.subagent_task_id}`;
+      return event.data && Object.keys(event.data).length ? "details below" : "No data";
+    }
+
+    function renderJson(value, indent = 0) {
+      const pre = document.createElement("pre");
+      pre.className = "json-view";
+      appendJsonValue(pre, value, indent);
+      return pre;
+    }
+
+    function appendJsonValue(parent, value, indent) {
+      if (Array.isArray(value)) {
+        parent.append("[");
+        if (value.length) parent.append("\\n");
+        value.forEach((item, index) => {
+          parent.append(" ".repeat(indent + 2));
+          appendJsonValue(parent, item, indent + 2);
+          if (index < value.length - 1) parent.append(",");
+          parent.append("\\n");
+        });
+        if (value.length) parent.append(" ".repeat(indent));
+        parent.append("]");
+        return;
+      }
+      if (value && typeof value === "object") {
+        const entries = Object.entries(value);
+        parent.append("{");
+        if (entries.length) parent.append("\\n");
+        entries.forEach(([key, item], index) => {
+          parent.append(" ".repeat(indent + 2));
+          const keyNode = document.createElement("span");
+          keyNode.className = "json-key";
+          keyNode.textContent = JSON.stringify(key);
+          parent.appendChild(keyNode);
+          parent.append(": ");
+          appendJsonValue(parent, item, indent + 2);
+          if (index < entries.length - 1) parent.append(",");
+          parent.append("\\n");
+        });
+        if (entries.length) parent.append(" ".repeat(indent));
+        parent.append("}");
+        return;
+      }
+      const valueNode = document.createElement("span");
+      if (typeof value === "string") {
+        valueNode.className = "json-value json-string";
+        valueNode.textContent = JSON.stringify(value);
+      } else if (value === null) {
+        valueNode.className = "json-null";
+        valueNode.textContent = "null";
+      } else {
+        valueNode.className = "json-value";
+        valueNode.textContent = JSON.stringify(value);
+      }
+      parent.appendChild(valueNode);
     }
 
     function isSubagentEvent(event) {
@@ -3751,17 +3839,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     }
 
     function logSubagentEvent(event) {
-      const row = subagentLogNode.insertRow();
-      appendCell(row, formatTime(event.timestamp), "time-col", fullTimestamp(event.timestamp));
-      appendCell(row, event.id ?? "", "id-col");
-      const typeCell = appendCell(row, "", "type-col");
-      const type = document.createElement("span");
-      type.className = "event-type";
-      type.textContent = event.type || "";
-      type.title = event.type || "";
-      typeCell.appendChild(type);
-      const hasData = event.data && Object.keys(event.data).length;
-      appendCell(row, hasData ? JSON.stringify(event.data) : "No data", hasData ? "data-cell" : "data-cell empty-cell");
+      appendEventRows(subagentLogNode, event);
       trimRows(subagentLogNode);
       scrollTableToBottom(subagentLogNode);
     }

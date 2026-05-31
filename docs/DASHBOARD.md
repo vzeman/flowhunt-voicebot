@@ -40,18 +40,26 @@ the request includes `X-FlowHunt-Dev-Login: true`.
 
 ## Current Capabilities
 
-- Workspace selector based on configured workspace-scoped voicebots.
-- Voicebot cards with enabled state, channel count, public route count, and
-  active WebRTC session count.
-- Active WebRTC session table.
-- Embedded WebRTC inference console. There is no standalone `/webrtc/test`
-  route.
-- Recent workspace event JSON for debugging.
+- Main menu with `Workspaces`, `Active Sessions`, `Sessions History`, and
+  `Voicebot Test`.
+- Workspace table showing `workspace_id` and display name. Opening a workspace
+  shows its voicebots.
+- Voicebot detail view with editable basic settings and prompts, plus read-only
+  provider and runtime configuration JSON.
+- Active session table showing workspace, voicebot, session id, status, start
+  time, and elapsed length.
+- Finished session history table with the same operational columns.
+- Session detail view with event timeline, transcript, and call recording
+  playback when a recording artifact exists.
+- Embedded WebRTC voicebot test console. The dashboard-level test selector
+  chooses workspace and voicebot, and that target is passed into the WebRTC
+  session metadata. There is no standalone `/webrtc/test` route.
 
 ## Management Model
 
-The dashboard reads state from existing internal APIs and runtime stores. Full
-editing will continue to use the workspace-scoped admin APIs:
+The dashboard reads state from existing internal APIs and runtime stores.
+Voicebot settings and prompt edits call the existing workspace-scoped admin
+APIs:
 
 - `/workspaces/{workspace_id}/voicebots`
 - `/workspaces/{workspace_id}/voicebots/{voicebot_id}/channels`

@@ -1937,9 +1937,11 @@ def create_app(
                 "webrtc_console": "embedded",
             },
             "workspaces": workspace_ids,
+            "workspace_rows": dashboard_workspace_rows(workspace_ids),
             "selected_workspace_id": selected_workspace,
             "voicebots": voicebot_rows,
-            "active_sessions": webrtc.snapshots() if webrtc is not None else [],
+            "active_sessions": dashboard_session_rows(active_only=True),
+            "session_history": dashboard_session_rows(active_only=False, ended_only=True),
             "recent_events": [event_to_dict(event) for event in events.list_events(limit=80, workspace_id=selected_workspace or None)],
         }
 
@@ -2157,6 +2159,55 @@ def create_app(
                 key = (str(workspace_id), str(voicebot_id))
                 counts[key] = counts.get(key, 0) + 1
         return counts
+
+    def dashboard_workspace_rows(workspace_ids: list[str]) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for workspace_id in workspace_ids:
+            display_names = [
+                voicebot.display_name
+                for voicebot in voicebot_store.list(workspace_id)
+                if voicebot.display_name
+            ]
+            rows.append(
+                {
+                    "workspace_id": workspace_id,
+                    "name": workspace_id if not display_names else workspace_id,
+                }
+            )
+        return rows
+
+    def dashboard_session_rows(active_only: bool = False, ended_only: bool = False) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for session in voicebot_session_store.list(active_only=active_only):
+            if ended_only and session.status != "ended":
+                continue
+            rows.append(session.as_dict())
+        if active_only and webrtc is not None:
+            known_session_ids = {str(row.get("session_id")) for row in rows}
+            for snapshot in webrtc.snapshots():
+                session_id = str(snapshot.get("session_id") or "")
+                if not session_id or session_id in known_session_ids:
+                    continue
+                metadata = snapshot.get("metadata") if isinstance(snapshot.get("metadata"), dict) else {}
+                route = snapshot.get("route") if isinstance(snapshot.get("route"), dict) else {}
+                workspace_id = str(metadata.get("workspace_id") or route.get("workspace_id") or "")
+                voicebot_id = str(metadata.get("voicebot_id") or route.get("voicebot_id") or "")
+                if not workspace_id or not voicebot_id:
+                    continue
+                rows.append(
+                    {
+                        "session_id": session_id,
+                        "workspace_id": workspace_id,
+                        "voicebot_id": voicebot_id,
+                        "channel_id": metadata.get("channel_id") or route.get("channel_id"),
+                        "external_session_id": snapshot.get("call_id"),
+                        "status": "active",
+                        "started_at": metadata.get("started_at") or "",
+                        "ended_at": None,
+                        "metadata": {"transport": snapshot.get("transport"), **metadata},
+                    }
+                )
+        return sorted(rows, key=lambda item: str(item.get("started_at") or item.get("session_id") or ""), reverse=True)
 
     def dashboard_user_auth(request: Request) -> dict[str, Any]:
         if not runtime_settings.dashboard_auth_enabled:
@@ -4227,107 +4278,490 @@ DASHBOARD_PAGE = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FlowHunt Voicebot Dashboard</title>
   <style>
-    :root { --border:#d8dee4; --muted:#57606a; --bg:#f6f8fa; --text:#24292f; --accent:#0969da; }
+    :root {
+      --border:#d8dee4; --muted:#57606a; --bg:#f6f8fa; --panel:#ffffff;
+      --text:#24292f; --accent:#0969da; --accent-bg:#ddf4ff; --danger:#cf222e;
+    }
+    * { box-sizing:border-box; }
     body { margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif; color:var(--text); background:#fff; }
-    header { display:flex; align-items:center; gap:1rem; padding:1rem 1.25rem; border-bottom:1px solid var(--border); background:var(--bg); }
-    h1 { margin:0; font-size:1.15rem; }
-    main { display:grid; grid-template-columns:22rem minmax(0,1fr); min-height:calc(100vh - 4rem); }
-    aside { border-right:1px solid var(--border); padding:1rem; background:#fbfcfd; }
-    section { padding:1rem; }
-    select,input,button { font:inherit; }
-    select,input { width:100%; box-sizing:border-box; padding:.45rem .55rem; border:1px solid var(--border); border-radius:6px; background:#fff; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.85rem 1.1rem; border-bottom:1px solid var(--border); background:var(--bg); }
+    h1 { margin:0; font-size:1.05rem; }
+    h2 { margin:0 0 .75rem; font-size:1rem; }
+    h3 { margin:1rem 0 .5rem; font-size:.95rem; }
+    main { display:grid; grid-template-columns:15rem minmax(0,1fr); min-height:calc(100vh - 3.4rem); }
+    nav { border-right:1px solid var(--border); padding:.85rem; background:#fbfcfd; }
+    nav button { display:block; width:100%; margin:0 0 .35rem; text-align:left; }
+    nav button.active { border-color:var(--accent); background:var(--accent-bg); color:#0550ae; font-weight:700; }
+    section { display:none; padding:1rem; min-width:0; }
+    section.active { display:block; }
+    button, select, input, textarea { font:inherit; }
     button { padding:.45rem .7rem; border:1px solid var(--border); border-radius:6px; background:#fff; cursor:pointer; }
     button:hover { border-color:var(--accent); }
-    .muted { color:var(--muted); font-size:.875rem; }
-    .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:.75rem; }
-    .card { border:1px solid var(--border); border-radius:8px; padding:.85rem; background:#fff; }
-    .card h2 { margin:0 0 .35rem; font-size:1rem; }
-    .badge { display:inline-block; padding:.1rem .4rem; border-radius:999px; background:#ddf4ff; color:#0550ae; font-size:.75rem; font-weight:700; }
-    .badge.off { background:#ffebe9; color:#cf222e; }
-    table { width:100%; border-collapse:collapse; font-size:.875rem; }
-    th,td { text-align:left; padding:.5rem; border-bottom:1px solid #eaeef2; vertical-align:top; }
-    th { color:var(--muted); background:var(--bg); position:sticky; top:0; }
-    .grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
-    pre { margin:0; white-space:pre-wrap; overflow:auto; max-height:22rem; background:#0d1117; color:#c9d1d9; padding:.75rem; border-radius:8px; }
-    iframe { width:100%; min-height:22rem; border:1px solid var(--border); border-radius:8px; }
-    @media (max-width:900px){ main{grid-template-columns:1fr} aside{border-right:0;border-bottom:1px solid var(--border)} .grid{grid-template-columns:1fr} }
+    select, input, textarea { width:100%; padding:.45rem .55rem; border:1px solid var(--border); border-radius:6px; background:#fff; }
+    textarea { min-height:5rem; resize:vertical; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.8rem; }
+    table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:.84rem; }
+    th, td { padding:.55rem; border-bottom:1px solid #eaeef2; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+    th { position:sticky; top:0; background:var(--bg); color:var(--muted); font-weight:700; z-index:1; }
+    tr.clickable { cursor:pointer; }
+    tr.clickable:hover { background:#f6f8fa; }
+    pre { margin:0; padding:.75rem; max-height:24rem; overflow:auto; border:1px solid var(--border); border-radius:8px; background:#0d1117; color:#c9d1d9; white-space:pre-wrap; font-size:.78rem; }
+    iframe { width:100%; min-height:43rem; border:1px solid var(--border); border-radius:8px; background:#fff; }
+    .muted { color:var(--muted); font-size:.85rem; }
+    .toolbar { display:flex; align-items:end; gap:.75rem; margin:0 0 .85rem; flex-wrap:wrap; }
+    .toolbar label { display:block; min-width:14rem; }
+    .toolbar .grow { flex:1 1 18rem; }
+    .table-wrap { border:1px solid var(--border); border-radius:8px; overflow:auto; background:#fff; max-height:34rem; }
+    .split { display:grid; grid-template-columns:minmax(18rem,24rem) minmax(0,1fr); gap:1rem; align-items:start; }
+    .panel { border:1px solid var(--border); border-radius:8px; padding:.85rem; background:var(--panel); }
+    .tabs { display:flex; gap:.35rem; margin:.75rem 0; border-bottom:1px solid var(--border); }
+    .tabs button { border-bottom:0; border-radius:6px 6px 0 0; }
+    .tabs button.active { background:var(--accent-bg); color:#0550ae; border-color:#c9d7e8; font-weight:700; }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+    .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.7rem; }
+    .form-grid label.full { grid-column:1 / -1; }
+    .badge { display:inline-block; padding:.1rem .45rem; border-radius:999px; background:#dafbe1; color:#1a7f37; font-weight:700; font-size:.75rem; }
+    .badge.off { background:#ffebe9; color:var(--danger); }
+    .session-layout { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(20rem,.8fr); gap:1rem; align-items:start; }
+    .audio-row { display:flex; align-items:center; gap:.75rem; margin:.25rem 0 .75rem; }
+    .audio-row audio { width:100%; }
+    @media (max-width:980px) {
+      main { grid-template-columns:1fr; }
+      nav { display:flex; gap:.35rem; overflow:auto; border-right:0; border-bottom:1px solid var(--border); }
+      nav button { width:auto; white-space:nowrap; margin:0; }
+      .split, .session-layout, .form-grid { grid-template-columns:1fr; }
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>FlowHunt Voicebot Dashboard</h1>
-    <span class="muted">Internal operations and voicebot administration</span>
+    <div>
+      <h1>FlowHunt Voicebot Dashboard</h1>
+      <div class="muted">Internal operations, sessions, configuration, and local voicebot testing</div>
+    </div>
+    <button id="refresh" type="button">Refresh</button>
   </header>
   <main>
-    <aside>
-      <label class="muted" for="workspace">Workspace</label>
-      <select id="workspace"></select>
-      <p class="muted">Dashboard APIs are internal-only. Production login/SSO/RBAC is tracked separately.</p>
-      <button id="refresh" type="button">Refresh</button>
-    </aside>
-    <section>
-      <div class="cards" id="voicebots"></div>
-      <div class="grid">
-        <div>
-          <h2>Active Sessions</h2>
-          <table><thead><tr><th>Session</th><th>Call</th><th>State</th></tr></thead><tbody id="sessions"></tbody></table>
+    <nav aria-label="Main menu">
+      <button class="active" type="button" data-view="workspaces">Workspaces</button>
+      <button type="button" data-view="active">Active Sessions</button>
+      <button type="button" data-view="history">Sessions History</button>
+      <button type="button" data-view="test">Voicebot Test</button>
+    </nav>
+
+    <section id="view-workspaces" class="active">
+      <div class="split">
+        <div class="panel">
+          <h2>Workspaces</h2>
+          <div class="table-wrap">
+            <table aria-label="Workspaces">
+              <thead><tr><th>workspace_id</th><th>name</th></tr></thead>
+              <tbody id="workspace-rows"></tbody>
+            </table>
+          </div>
         </div>
-        <div>
-          <h2>WebRTC Inference Console</h2>
-          <iframe srcdoc="__WEBRTC_CONSOLE_SRCDOC__" title="WebRTC test console"></iframe>
+        <div class="panel">
+          <h2 id="workspace-title">Workspace detail</h2>
+          <div class="muted" id="workspace-hint">Select a workspace to see its voicebots.</div>
+          <h3>Voicebots</h3>
+          <div class="table-wrap">
+            <table aria-label="Voicebots">
+              <thead><tr><th>voicebot_id</th><th>name</th><th>enabled</th><th>sessions</th></tr></thead>
+              <tbody id="voicebot-rows"></tbody>
+            </table>
+          </div>
+          <div id="voicebot-detail" class="panel" style="margin-top:1rem; display:none;">
+            <h3>Voicebot detail</h3>
+            <div class="tabs">
+              <button type="button" class="active" data-detail-tab="settings">Settings</button>
+              <button type="button" data-detail-tab="prompts">Prompts</button>
+              <button type="button" data-detail-tab="providers">Providers</button>
+              <button type="button" data-detail-tab="runtime">Runtime</button>
+            </div>
+            <div id="detail-settings" class="tab-panel active">
+              <div class="form-grid">
+                <label>voicebot_id<input id="detail-voicebot-id" readonly></label>
+                <label>display_name<input id="detail-display-name"></label>
+                <label>enabled<select id="detail-enabled"><option value="true">true</option><option value="false">false</option></select></label>
+                <label class="full">metadata<textarea id="detail-metadata"></textarea></label>
+              </div>
+              <div class="toolbar"><button id="save-voicebot" type="button">Save voicebot</button><span class="muted" id="save-voicebot-status"></span></div>
+            </div>
+            <div id="detail-prompts" class="tab-panel">
+              <div class="form-grid">
+                <label>language<input id="prompt-language"></label>
+                <label class="full">greeting<textarea id="prompt-greeting"></textarea></label>
+                <label class="full">system_prompt<textarea id="prompt-system"></textarea></label>
+                <label class="full">stt_prompt<textarea id="prompt-stt"></textarea></label>
+              </div>
+              <div class="toolbar"><button id="save-prompts" type="button">Save prompts</button><span class="muted" id="save-prompts-status"></span></div>
+            </div>
+            <div id="detail-providers" class="tab-panel"><pre id="provider-json">{}</pre></div>
+            <div id="detail-runtime" class="tab-panel"><pre id="runtime-json">{}</pre></div>
+          </div>
         </div>
       </div>
-      <h2>Recent Events</h2>
-      <pre id="events"></pre>
+    </section>
+
+    <section id="view-active">
+      <h2>Active Sessions</h2>
+      <div class="table-wrap">
+        <table aria-label="Active sessions">
+          <thead><tr><th>workspace_id</th><th>voicebot_id</th><th>session_id</th><th>status</th><th>datetime started</th><th>length</th></tr></thead>
+          <tbody id="active-session-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="view-history">
+      <h2>Sessions History</h2>
+      <div class="table-wrap">
+        <table aria-label="Sessions history">
+          <thead><tr><th>workspace_id</th><th>voicebot_id</th><th>session_id</th><th>status</th><th>datetime started</th><th>length</th></tr></thead>
+          <tbody id="history-session-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="view-session">
+      <button type="button" data-view-back>Back</button>
+      <h2 id="session-title">Session</h2>
+      <div class="session-layout">
+        <div>
+          <div class="panel">
+            <h3>Events</h3>
+            <div class="table-wrap">
+              <table aria-label="Session events">
+                <thead><tr><th style="width:5rem;">ID</th><th style="width:9rem;">Time</th><th style="width:13rem;">Type</th><th>Data</th></tr></thead>
+                <tbody id="session-event-rows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="panel">
+            <h3>Recording</h3>
+            <div id="session-recording" class="muted">No recording loaded.</div>
+          </div>
+          <div class="panel" style="margin-top:1rem;">
+            <h3>Transcript</h3>
+            <pre id="session-transcript">[]</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-test">
+      <h2>Voicebot Test</h2>
+      <div class="toolbar">
+        <label class="grow">Workspace<select id="test-workspace"></select></label>
+        <label class="grow">Voicebot<select id="test-voicebot"></select></label>
+      </div>
+      <iframe id="webrtc-console" srcdoc="__WEBRTC_CONSOLE_SRCDOC__" title="Voicebot WebRTC test console"></iframe>
     </section>
   </main>
   <script>
-    const workspace = document.getElementById("workspace");
-    const voicebots = document.getElementById("voicebots");
-    const sessions = document.getElementById("sessions");
-    const events = document.getElementById("events");
+    let state = null;
+    let selectedWorkspaceId = "";
+    let selectedVoicebotId = "";
+    let previousView = "active";
+    const views = ["workspaces", "active", "history", "session", "test"];
+
     document.getElementById("refresh").addEventListener("click", load);
-    workspace.addEventListener("change", load);
+    document.querySelectorAll("nav button[data-view]").forEach((button) => {
+      button.addEventListener("click", () => showView(button.dataset.view));
+    });
+    document.querySelector("[data-view-back]").addEventListener("click", () => showView(previousView));
+    document.querySelectorAll("[data-detail-tab]").forEach((button) => {
+      button.addEventListener("click", () => showDetailTab(button.dataset.detailTab));
+    });
+    document.getElementById("save-voicebot").addEventListener("click", saveVoicebot);
+    document.getElementById("save-prompts").addEventListener("click", savePrompts);
+    document.getElementById("test-workspace").addEventListener("change", () => {
+      selectedWorkspaceId = document.getElementById("test-workspace").value;
+      renderTestVoicebots();
+      load();
+    });
+    document.getElementById("test-voicebot").addEventListener("change", () => {
+      selectedVoicebotId = document.getElementById("test-voicebot").value;
+      postTestTarget();
+    });
+    document.getElementById("webrtc-console").addEventListener("load", postTestTarget);
     load();
-    async function load() {
-      const qs = workspace.value ? `?workspace_id=${encodeURIComponent(workspace.value)}` : "";
-      const response = await fetch(`/dashboard/state${qs}`);
-      const data = await response.json();
-      renderWorkspaces(data);
-      renderVoicebots(data.voicebots || []);
-      renderSessions(data.active_sessions || []);
-      events.textContent = JSON.stringify(data.recent_events || [], null, 2);
-    }
-    function renderWorkspaces(data) {
-      const selected = data.selected_workspace_id || "";
-      workspace.innerHTML = "";
-      for (const id of data.workspaces || []) {
-        const option = document.createElement("option");
-        option.value = id; option.textContent = id; option.selected = id === selected;
-        workspace.appendChild(option);
+    setInterval(() => {
+      if (["active", "history", "test"].includes(currentView())) load(false);
+    }, 5000);
+
+    async function load(showErrors = true) {
+      const qs = selectedWorkspaceId ? `?workspace_id=${encodeURIComponent(selectedWorkspaceId)}` : "";
+      try {
+        const response = await fetch(`/dashboard/state${qs}`);
+        if (!response.ok) throw new Error(await response.text());
+        state = await response.json();
+        selectedWorkspaceId = state.selected_workspace_id || selectedWorkspaceId || "";
+        selectedVoicebotId = selectedVoicebotId || ((state.voicebots || [])[0] || {}).voicebot_id || "";
+        renderAll();
+      } catch (error) {
+        if (showErrors) alert(`Dashboard load failed: ${error}`);
       }
     }
-    function renderVoicebots(items) {
-      voicebots.innerHTML = "";
-      for (const bot of items) {
-        const card = document.createElement("article");
-        card.className = "card";
-        card.innerHTML = `<h2>${escapeHtml(bot.display_name || bot.voicebot_id)}</h2>
-          <span class="badge ${bot.enabled ? "" : "off"}">${bot.enabled ? "enabled" : "disabled"}</span>
-          <p class="muted">${escapeHtml(bot.voicebot_id)} · active sessions: ${bot.active_sessions || 0}</p>
-          <p>Channels: ${(bot.channels || []).length}<br>Public routes: ${(bot.public_routes || []).length}</p>`;
-        voicebots.appendChild(card);
+
+    function renderAll() {
+      renderWorkspaces();
+      renderVoicebots();
+      renderSessions("active-session-rows", state.active_sessions || []);
+      renderSessions("history-session-rows", state.session_history || []);
+      renderTestSelectors();
+    }
+
+    function renderWorkspaces() {
+      const tbody = document.getElementById("workspace-rows");
+      tbody.innerHTML = "";
+      for (const workspace of state.workspace_rows || []) {
+        const row = tbody.insertRow();
+        row.className = "clickable";
+        row.insertCell().textContent = workspace.workspace_id || "";
+        row.insertCell().textContent = workspace.name || workspace.workspace_id || "";
+        row.onclick = () => {
+          selectedWorkspaceId = workspace.workspace_id;
+          selectedVoicebotId = "";
+          load();
+        };
+      }
+      document.getElementById("workspace-title").textContent = selectedWorkspaceId ? `Workspace ${selectedWorkspaceId}` : "Workspace detail";
+      document.getElementById("workspace-hint").textContent = selectedWorkspaceId ? "Open a voicebot to edit settings and prompts." : "Select a workspace to see its voicebots.";
+    }
+
+    function renderVoicebots() {
+      const tbody = document.getElementById("voicebot-rows");
+      tbody.innerHTML = "";
+      for (const bot of state.voicebots || []) {
+        const row = tbody.insertRow();
+        row.className = "clickable";
+        row.insertCell().textContent = bot.voicebot_id || "";
+        row.insertCell().textContent = bot.display_name || "";
+        row.insertCell().innerHTML = `<span class="badge ${bot.enabled ? "" : "off"}">${bot.enabled ? "enabled" : "disabled"}</span>`;
+        row.insertCell().textContent = bot.active_sessions || 0;
+        row.onclick = () => openVoicebot(bot);
       }
     }
-    function renderSessions(items) {
-      sessions.innerHTML = "";
+
+    async function openVoicebot(bot) {
+      selectedWorkspaceId = bot.workspace_id;
+      selectedVoicebotId = bot.voicebot_id;
+      document.getElementById("voicebot-detail").style.display = "block";
+      document.getElementById("detail-voicebot-id").value = bot.voicebot_id || "";
+      document.getElementById("detail-display-name").value = bot.display_name || "";
+      document.getElementById("detail-enabled").value = String(Boolean(bot.enabled));
+      document.getElementById("detail-metadata").value = JSON.stringify(bot.metadata || {}, null, 2);
+      await Promise.all([loadPrompts(), loadProviderConfig(), loadRuntimeConfig()]);
+    }
+
+    async function loadPrompts() {
+      const target = `/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/prompts`;
+      const payload = await fetchJson(target).catch(() => ({}));
+      const prompts = payload.prompts || {};
+      document.getElementById("prompt-language").value = prompts.language || "";
+      document.getElementById("prompt-greeting").value = prompts.greeting || "";
+      document.getElementById("prompt-system").value = prompts.system_prompt || "";
+      document.getElementById("prompt-stt").value = prompts.stt_prompt || "";
+    }
+
+    async function loadProviderConfig() {
+      const target = `/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/providers`;
+      const payload = await fetchJson(target).catch((error) => ({error: String(error)}));
+      document.getElementById("provider-json").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function loadRuntimeConfig() {
+      const target = `/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/runtime-config`;
+      const payload = await fetchJson(target).catch((error) => ({error: String(error)}));
+      document.getElementById("runtime-json").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function saveVoicebot() {
+      const status = document.getElementById("save-voicebot-status");
+      status.textContent = "Saving...";
+      let metadata = {};
+      try {
+        metadata = JSON.parse(document.getElementById("detail-metadata").value || "{}");
+      } catch (error) {
+        status.textContent = "Invalid metadata JSON";
+        return;
+      }
+      const payload = {
+        display_name: document.getElementById("detail-display-name").value,
+        enabled: document.getElementById("detail-enabled").value === "true",
+        metadata
+      };
+      await fetchJson(`/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}`, {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+      });
+      status.textContent = "Saved";
+      await load(false);
+    }
+
+    async function savePrompts() {
+      const status = document.getElementById("save-prompts-status");
+      status.textContent = "Saving...";
+      const payload = {
+        language: document.getElementById("prompt-language").value,
+        greeting: document.getElementById("prompt-greeting").value,
+        system_prompt: document.getElementById("prompt-system").value,
+        stt_prompt: document.getElementById("prompt-stt").value
+      };
+      await fetchJson(`/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/prompts`, {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+      });
+      status.textContent = "Saved";
+    }
+
+    function renderSessions(targetId, items) {
+      const tbody = document.getElementById(targetId);
+      tbody.innerHTML = "";
       for (const item of items) {
-        const row = sessions.insertRow();
+        const row = tbody.insertRow();
+        row.className = "clickable";
+        row.insertCell().textContent = item.workspace_id || "";
+        row.insertCell().textContent = item.voicebot_id || "";
         row.insertCell().textContent = item.session_id || "";
-        row.insertCell().textContent = item.call_id || "";
-        row.insertCell().textContent = item.connection_state || item.transport || "";
+        row.insertCell().textContent = item.status || "";
+        row.insertCell().textContent = formatDate(item.started_at);
+        row.insertCell().textContent = sessionLength(item);
+        row.onclick = () => openSession(item, targetId === "active-session-rows" ? "active" : "history");
       }
     }
+
+    async function openSession(item, fromView) {
+      previousView = fromView;
+      showView("session");
+      document.getElementById("session-title").textContent = `Session ${item.session_id}`;
+      const base = `/workspaces/${encodeURIComponent(item.workspace_id)}/voicebots/${encodeURIComponent(item.voicebot_id)}/sessions/${encodeURIComponent(item.session_id)}`;
+      const [timeline, transcript] = await Promise.all([
+        fetchJson(`${base}/timeline?limit=300`).catch((error) => ({events: [], error: String(error)})),
+        fetchJson(`${base}/transcript?limit=300`).catch((error) => ({events: [], error: String(error)}))
+      ]);
+      renderSessionEvents(timeline.events || []);
+      document.getElementById("session-transcript").textContent = JSON.stringify(transcript.events || transcript, null, 2);
+      renderRecording(item.external_session_id || item.session_id);
+    }
+
+    function renderSessionEvents(events) {
+      const tbody = document.getElementById("session-event-rows");
+      tbody.innerHTML = "";
+      for (const event of events) {
+        const row = tbody.insertRow();
+        row.insertCell().textContent = event.id ?? "";
+        row.insertCell().textContent = formatDate(event.timestamp);
+        row.insertCell().textContent = event.type || "";
+        const data = row.insertCell();
+        data.appendChild(renderJsonBlock(event.data || {}));
+      }
+    }
+
+    async function renderRecording(callId) {
+      const node = document.getElementById("session-recording");
+      node.textContent = "Checking recording...";
+      try {
+        const response = await fetch(`/calls/${encodeURIComponent(callId)}/recording`);
+        if (response.status === 404) {
+          node.textContent = "No recording is available for this session.";
+          return;
+        }
+        if (!response.ok) throw new Error(await response.text());
+        const payload = await response.json();
+        node.innerHTML = `<div class="audio-row"><audio controls src="/calls/${escapeAttr(callId)}/recording.wav"></audio></div><pre>${escapeHtml(JSON.stringify(payload.metadata || {}, null, 2))}</pre>`;
+      } catch (error) {
+        node.textContent = `Recording load failed: ${error}`;
+      }
+    }
+
+    function renderTestSelectors() {
+      const workspaceSelect = document.getElementById("test-workspace");
+      const previousWorkspace = workspaceSelect.value || selectedWorkspaceId;
+      workspaceSelect.innerHTML = "";
+      for (const workspace of state.workspace_rows || []) {
+        const option = new Option(workspace.name || workspace.workspace_id, workspace.workspace_id);
+        option.selected = workspace.workspace_id === previousWorkspace;
+        workspaceSelect.appendChild(option);
+      }
+      selectedWorkspaceId = workspaceSelect.value || selectedWorkspaceId;
+      renderTestVoicebots();
+    }
+
+    function renderTestVoicebots() {
+      const select = document.getElementById("test-voicebot");
+      const previous = select.value || selectedVoicebotId;
+      select.innerHTML = "";
+      for (const bot of state.voicebots || []) {
+        const option = new Option(bot.display_name || bot.voicebot_id, bot.voicebot_id);
+        option.selected = bot.voicebot_id === previous;
+        select.appendChild(option);
+      }
+      selectedVoicebotId = select.value || selectedVoicebotId;
+      postTestTarget();
+    }
+
+    function postTestTarget() {
+      const frame = document.getElementById("webrtc-console");
+      if (!frame.contentWindow || !selectedWorkspaceId || !selectedVoicebotId) return;
+      frame.contentWindow.postMessage({
+        type: "voicebot-test-target",
+        workspace_id: selectedWorkspaceId,
+        voicebot_id: selectedVoicebotId
+      }, "*");
+    }
+
+    function showView(name) {
+      for (const view of views) document.getElementById(`view-${view}`).classList.toggle("active", view === name);
+      document.querySelectorAll("nav button[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
+      if (name === "test") postTestTarget();
+    }
+
+    function currentView() {
+      return views.find((view) => document.getElementById(`view-${view}`).classList.contains("active")) || "workspaces";
+    }
+
+    function showDetailTab(name) {
+      document.querySelectorAll("[data-detail-tab]").forEach((button) => button.classList.toggle("active", button.dataset.detailTab === name));
+      document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.remove("active"));
+      document.getElementById(`detail-${name}`).classList.add("active");
+    }
+
+    async function fetchJson(url, options) {
+      const response = await fetch(url, options);
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    }
+
+    function formatDate(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleString();
+    }
+
+    function sessionLength(item) {
+      if (!item.started_at) return "";
+      const start = new Date(item.started_at);
+      const end = item.ended_at ? new Date(item.ended_at) : new Date();
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "";
+      const seconds = Math.max(0, Math.floor((end - start) / 1000));
+      const minutes = Math.floor(seconds / 60);
+      const rest = seconds % 60;
+      return `${minutes}:${String(rest).padStart(2, "0")}`;
+    }
+
+    function renderJsonBlock(value) {
+      const pre = document.createElement("pre");
+      pre.textContent = JSON.stringify(value, null, 2);
+      return pre;
+    }
+
     function escapeHtml(value) {
       return String(value).replace(/[&<>"']/g, char => {
         if (char === "&") return "&amp;";
@@ -4336,6 +4770,10 @@ DASHBOARD_PAGE = """<!doctype html>
         if (char === '"') return "&quot;";
         return "&#39;";
       });
+    }
+
+    function escapeAttr(value) {
+      return encodeURIComponent(String(value));
     }
   </script>
 </body>
@@ -4620,6 +5058,18 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     let localStream = null;
     let eventSocket = null;
     let seenEventIds = new Set();
+    let testTarget = {client: "browser-test"};
+
+    window.addEventListener("message", (message) => {
+      const data = message.data || {};
+      if (data.type !== "voicebot-test-target") return;
+      testTarget = {
+        client: "browser-test",
+        workspace_id: data.workspace_id || "",
+        voicebot_id: data.voicebot_id || ""
+      };
+      log(`target=${JSON.stringify(testTarget)}`);
+    });
 
     function formatTime(timestamp) {
       const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
@@ -4934,7 +5384,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
           body: JSON.stringify({
             sdp: pc.localDescription.sdp,
             type: pc.localDescription.type,
-            metadata: {client: "browser-test"}
+            metadata: testTarget
           })
         });
         if (!response.ok) {

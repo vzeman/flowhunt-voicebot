@@ -488,7 +488,9 @@ class ApiWebRTCTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         html = response.text
-        self.assertIn("WebRTC Inference Console", html)
+        self.assertIn("Voicebot Test", html)
+        self.assertIn('id="test-workspace"', html)
+        self.assertIn('id="test-voicebot"', html)
         self.assertIn("srcdoc=", html)
         self.assertNotIn('src="/webrtc/test"', html)
         self.assertIn("/ws/events", html)
@@ -509,6 +511,8 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertIn('class=&quot;button-group&quot;', html)
         self.assertIn("appendClientLogRows(now, message)", html)
         self.assertIn("parseClientLogMessage(message)", html)
+        self.assertIn("voicebot-test-target", html)
+        self.assertIn("metadata: testTarget", html)
         self.assertIn("message.startsWith(&quot;local audio settings=&quot;)", html)
         self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr))", html)
         self.assertIn('body { font-family: system-ui, sans-serif; margin: 1.25rem;', html)

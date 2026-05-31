@@ -27,6 +27,10 @@ class DeploymentTopologyTests(unittest.TestCase):
         self.assertTrue(roles["api_control_plane"]["enabled"])
         self.assertTrue(roles["sip_media_ingress"]["enabled"])
         self.assertTrue(roles["post_call_worker"]["enabled"])
+        services = {service["service"]: service for service in payload["target_services"]}
+        self.assertEqual(services["voicebot-public-api"]["openapi_spec"], "/openapi/public.json")
+        self.assertEqual(services["voicebot-internal-api"]["authentication"], "required internal API key or future service identity")
+        self.assertIn("voicebot-sip-media", {port["service"] for port in payload["port_matrix"]})
         self.assertFalse(payload["future_kubernetes"]["manifests_included"])
 
     def test_runtime_roles_can_select_subset_and_report_unknown_values(self) -> None:
@@ -40,6 +44,19 @@ class DeploymentTopologyTests(unittest.TestCase):
         roles = {role["role"]: role for role in payload["roles"]}
         self.assertTrue(roles["api_control_plane"]["enabled"])
         self.assertFalse(roles["sip_media_ingress"]["enabled"])
+        services = {service["service"]: service for service in payload["target_services"]}
+        self.assertTrue(services["voicebot-internal-api"]["enabled"])
+        self.assertFalse(services["voicebot-sip-media"]["enabled"])
+
+    def test_public_ingress_boundary_never_exposes_internal_surfaces(self) -> None:
+        payload = deployment_topology_payload(Settings(runtime_roles=("all",)))
+
+        public = next(boundary for boundary in payload["ingress_boundaries"] if boundary["name"] == "public-web")
+
+        self.assertEqual(public["allowed_route_audiences"], ["public"])
+        self.assertIn("internal OpenAPI", public["forbidden_surfaces"])
+        self.assertIn("dashboard", public["forbidden_surfaces"])
+        self.assertIn("task queues", public["forbidden_surfaces"])
 
     def test_role_readiness_maps_existing_checks_to_enabled_roles(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -60,6 +77,8 @@ class DeploymentTopologyTests(unittest.TestCase):
         self.assertTrue(api_role["ok"])
         self.assertFalse(sip_role["enabled"])
         self.assertFalse(sip_role["ok"])
+        self.assertTrue(payload["routing"]["internal_api"]["safe"])
+        self.assertFalse(payload["routing"]["public_http_webrtc"]["safe"])
 
 
 class DeploymentTopologyApiTests(unittest.TestCase):

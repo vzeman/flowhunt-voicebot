@@ -3590,9 +3590,13 @@ WEBRTC_TEST_PAGE = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FlowHunt Voicebot WebRTC Test</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 780px; line-height: 1.45; }
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 1200px; line-height: 1.45; }
     button { font: inherit; margin-right: .5rem; padding: .45rem .75rem; }
-    pre { background: #111; color: #eee; padding: 1rem; overflow: auto; min-height: 12rem; }
+    audio { display: block; margin: 1rem 0; width: 100%; max-width: 48rem; }
+    .logs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .log-panel h2 { font-size: 1rem; margin: 0 0 .35rem; }
+    pre { background: #111; color: #eee; padding: 1rem; overflow: auto; height: 28rem; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    @media (max-width: 800px) { .logs { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -3601,21 +3605,54 @@ WEBRTC_TEST_PAGE = """<!doctype html>
   <button id="start">Start call</button>
   <button id="stop" disabled>Stop call</button>
   <audio id="remote" autoplay playsinline controls></audio>
-  <pre id="log"></pre>
+  <div class="logs">
+    <section class="log-panel">
+      <h2>Client Log</h2>
+      <pre id="log"></pre>
+    </section>
+    <section class="log-panel">
+      <h2>Voicebot Events</h2>
+      <pre id="event-log"></pre>
+    </section>
+  </div>
   <script>
     const startButton = document.getElementById("start");
     const stopButton = document.getElementById("stop");
     const remoteAudio = document.getElementById("remote");
     const logNode = document.getElementById("log");
+    const eventLogNode = document.getElementById("event-log");
     let pc = null;
     let sessionId = null;
     let callId = null;
     let localStream = null;
     let eventSocket = null;
+    let seenEventIds = new Set();
 
     function log(message) {
       logNode.textContent += `${new Date().toISOString()} ${message}\\n`;
       logNode.scrollTop = logNode.scrollHeight;
+    }
+
+    function logVoicebotEvent(event) {
+      if (seenEventIds.has(event.id)) return;
+      seenEventIds.add(event.id);
+      const data = event.data && Object.keys(event.data).length ? ` ${JSON.stringify(event.data)}` : "";
+      eventLogNode.textContent += `${event.timestamp || ""} #${event.id} ${event.type}${data}\\n`;
+      eventLogNode.scrollTop = eventLogNode.scrollHeight;
+    }
+
+    async function backfillVoicebotEvents() {
+      if (!callId) return;
+      try {
+        const response = await fetch("/events?limit=160");
+        if (!response.ok) throw new Error(await response.text());
+        const payload = await response.json();
+        for (const event of payload.events || []) {
+          if (event.call_id === callId) logVoicebotEvent(event);
+        }
+      } catch (error) {
+        eventLogNode.textContent += `${new Date().toISOString()} event backfill failed: ${error}\\n`;
+      }
     }
 
     function setIdleButtons() {
@@ -3686,7 +3723,10 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         const payload = await response.json();
         sessionId = payload.session_id;
         callId = payload.call_id;
+        seenEventIds = new Set();
+        eventLogNode.textContent = "";
         connectEventSocket();
+        await backfillVoicebotEvents();
         await pc.setRemoteDescription(payload.answer);
         setActiveButtons();
         log(`started session=${sessionId} call=${payload.call_id}`);
@@ -3709,6 +3749,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       eventSocket.onmessage = (message) => {
         const event = JSON.parse(message.data);
         if (event.call_id !== callId) return;
+        logVoicebotEvent(event);
         if (event.type === "call_control_completed" && event.data?.action === "hangup" && event.data?.ok) {
           closeLocalPeer("server hangup completed");
         }
@@ -3725,6 +3766,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       setIdleButtons();
       sessionId = null;
       callId = null;
+      seenEventIds = new Set();
       if (localStream) {
         for (const track of localStream.getTracks()) track.stop();
       }

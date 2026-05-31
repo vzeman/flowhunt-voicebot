@@ -142,6 +142,10 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.text
         self.assertIn("/ws/events", html)
+        self.assertIn("/events?limit=160", html)
+        self.assertIn('id="event-log"', html)
+        self.assertIn("Voicebot Events", html)
+        self.assertIn("logVoicebotEvent(event)", html)
         self.assertIn('event.type === "call_control_completed"', html)
         self.assertIn('event.data?.action === "hangup"', html)
         self.assertIn("setIdleButtons()", html)

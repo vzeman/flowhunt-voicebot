@@ -24,6 +24,7 @@ from .audio import (
     write_audiosocket_message,
 )
 from .call_actor import CallActorCoordinator
+from .call_recording import SpeechOnlyCallRecorder
 from .call_state import CallStateStore
 from .config import Settings
 from .events import EventStore, VoicebotEvent
@@ -164,6 +165,7 @@ class CallSession:
         processor_registry: ProcessorRegistry | None = None,
         stt_pipeline_specs: tuple[ProcessorSpec, ...] = DEFAULT_STT_PIPELINE,
         tts_pipeline_specs: tuple[ProcessorSpec, ...] = DEFAULT_TTS_PIPELINE,
+        audio_artifact_store=None,
     ) -> None:
         self.call_id = call_id
         self.sock = sock
@@ -186,6 +188,15 @@ class CallSession:
         )
         self.playback = PlaybackBuffer()
         self.actors = CallActorCoordinator(call_id)
+        self.recorder = (
+            SpeechOnlyCallRecorder(
+                call_id,
+                audio_artifact_store,
+                silence_threshold=settings.call_recording_silence_threshold,
+            )
+            if settings.call_recording_enabled
+            else None
+        )
         self._turn_coalescer = TurnCoalescer(
             call_id=lambda: self.call_id,
             events=self.events,
@@ -250,6 +261,7 @@ class CallSession:
             sender.join(timeout=1.0)
             speech_worker.join(timeout=1.0)
             partial_stt_worker.join(timeout=1.0)
+            self._finalize_recording()
             self.events.append(self.call_id, "call_ended", {})
 
     def submit_agent_response(self, response: AgentResponse) -> VoicebotEvent:
@@ -501,6 +513,8 @@ class CallSession:
                 audiosocket_uuid = str(uuid.UUID(bytes=payload)) if len(payload) == 16 else payload.hex()
                 old_call_id = self.call_id
                 self.call_id = audiosocket_uuid
+                if self.recorder is not None:
+                    self.recorder.update_call_id(self.call_id)
                 self.actors.update_call_id(self.call_id)
                 self.descriptor = StaticMediaTransport(
                     "asterisk_audiosocket",
@@ -606,6 +620,13 @@ class CallSession:
             trimmed_seconds = max(0.0, (len(result.audio) - len(audio)) / CALL_SAMPLE_RATE)
             if trimmed_seconds > 0:
                 self._record_metric("stt_audio_trimmed_seconds", trimmed_seconds, {"turn_id": turn_id})
+            if self.recorder is not None:
+                self.recorder.append_speech(
+                    "caller",
+                    audio,
+                    CALL_SAMPLE_RATE,
+                    metadata={"turn_id": turn_id},
+                )
             self.actors.queued("stt", correlation_id=str(turn_id), reason="speech_finished")
             self._speech_jobs.put((turn_id, audio, self._current_interrupt_generation()))
 
@@ -840,6 +861,13 @@ class CallSession:
                 self._startup_playback_guard = False
                 self._set_echo_tail(self.settings.echo_tail_ms)
                 self.events.append(self.call_id, "bot_playback_started", playback_data)
+            if self.recorder is not None:
+                self.recorder.append_speech(
+                    "voicebot",
+                    packet,
+                    CALL_SAMPLE_RATE,
+                    metadata=dict(playback_data),
+                )
             try:
                 write_audiosocket_message(self.sock, MSG_SLIN8, float32_to_pcm16_bytes(packet))
             except OSError:
@@ -952,6 +980,13 @@ class CallSession:
                 **(data or {}),
             },
         )
+
+    def _finalize_recording(self) -> None:
+        if self.recorder is None:
+            return
+        metadata = self.recorder.finalize()
+        if metadata is not None:
+            self.events.append(self.call_id, "call_recording_saved", metadata)
 
     def _should_defer_response(self, event_id: int | None) -> bool:
         if event_id is None:

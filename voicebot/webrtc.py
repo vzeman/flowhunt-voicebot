@@ -14,6 +14,7 @@ from scipy.io import wavfile
 
 from .audio import CALL_SAMPLE_RATE, STT_SAMPLE_RATE, resample_audio, rms
 from .call_actor import CallActorCoordinator
+from .call_recording import SpeechOnlyCallRecorder
 from .calls import AgentResponse, DEFAULT_STT_PIPELINE, DEFAULT_TTS_PIPELINE, PlaybackBuffer, _optional_int
 from .config import Settings
 from .events import EventStore, VoicebotEvent
@@ -97,6 +98,7 @@ class WebRTCCallSession:
         stt_pipeline_specs: tuple[ProcessorSpec, ...] = DEFAULT_STT_PIPELINE,
         tts_pipeline_specs: tuple[ProcessorSpec, ...] = DEFAULT_TTS_PIPELINE,
         metadata: dict[str, Any] | None = None,
+        audio_artifact_store=None,
     ) -> None:
         self.call_id = call_id
         self.session_id = session_id
@@ -120,6 +122,15 @@ class WebRTCCallSession:
         )
         self.playback = PlaybackBuffer()
         self.actors = CallActorCoordinator(call_id)
+        self.recorder = (
+            SpeechOnlyCallRecorder(
+                call_id,
+                audio_artifact_store,
+                silence_threshold=settings.call_recording_silence_threshold,
+            )
+            if settings.call_recording_enabled
+            else None
+        )
         self._turn_coalescer = TurnCoalescer(
             call_id=lambda: self.call_id,
             events=self.events,
@@ -273,6 +284,13 @@ class WebRTCCallSession:
             trimmed_seconds = max(0.0, (len(result.audio) - len(audio)) / STT_SAMPLE_RATE)
             if trimmed_seconds > 0:
                 self._record_metric("stt_audio_trimmed_seconds", trimmed_seconds, {"turn_id": turn_id})
+            if self.recorder is not None:
+                self.recorder.append_speech(
+                    "caller",
+                    audio,
+                    STT_SAMPLE_RATE,
+                    metadata={"turn_id": turn_id},
+                )
             self.actors.queued("stt", correlation_id=str(turn_id), reason="speech_finished")
             self._speech_jobs.put((turn_id, audio, self._current_interrupt_generation()))
 
@@ -516,6 +534,13 @@ class WebRTCCallSession:
             self._set_echo_tail(self.settings.echo_tail_ms)
         if finished:
             self._forget_finished_persistent_response(playback_data)
+        if self.recorder is not None:
+            self.recorder.append_speech(
+                "voicebot",
+                packet,
+                CALL_SAMPLE_RATE,
+                metadata=dict(playback_data),
+            )
         return packet, started, finished, playback_data
 
     def snapshot(self) -> dict[str, Any]:
@@ -552,6 +577,7 @@ class WebRTCCallSession:
             self._speech_worker.join(timeout=1.0)
         if current is not self._partial_stt_worker:
             self._partial_stt_worker.join(timeout=1.0)
+        self._finalize_recording()
         self.events.append(
             self.call_id,
             "call_ended",
@@ -561,6 +587,13 @@ class WebRTCCallSession:
                 "pipeline_version": PIPELINE_CONTRACT_VERSION,
             },
         )
+
+    def _finalize_recording(self) -> None:
+        if self.recorder is None:
+            return
+        metadata = self.recorder.finalize()
+        if metadata is not None:
+            self.events.append(self.call_id, "call_recording_saved", metadata)
 
     def _jitter_buffer_snapshot(self) -> dict[str, Any]:
         if self._jitter_buffer is None:
@@ -994,6 +1027,7 @@ class WebRTCSessionManager:
         stt_pipeline_specs: tuple[ProcessorSpec, ...],
         tts_pipeline_specs: tuple[ProcessorSpec, ...],
         session_store: VoicebotSessionStore | None = None,
+        audio_artifact_store=None,
     ) -> None:
         self.settings = settings
         self.events = events
@@ -1003,6 +1037,7 @@ class WebRTCSessionManager:
         self.stt_pipeline_specs = stt_pipeline_specs
         self.tts_pipeline_specs = tts_pipeline_specs
         self.session_store = session_store
+        self.audio_artifact_store = audio_artifact_store
         self._lock = asyncio.Lock()
         self._sessions: dict[str, tuple[Any, WebRTCCallSession]] = {}
 
@@ -1025,6 +1060,7 @@ class WebRTCSessionManager:
             stt_pipeline_specs=self.stt_pipeline_specs,
             tts_pipeline_specs=self.tts_pipeline_specs,
             metadata=metadata,
+            audio_artifact_store=self.audio_artifact_store,
         )
         self.registry.add(session)
         pc.addTrack(WebRTCAudioOutputTrack(session))

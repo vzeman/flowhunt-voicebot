@@ -13,6 +13,8 @@ from voicebot.calls import CallRegistry
 from voicebot.config import Settings
 from voicebot.events import EventStore
 from voicebot.pipeline_contract import PIPELINE_CONTRACT_VERSION
+from voicebot.call_recording import recording_artifact_id
+from voicebot.storage.artifacts import FilesystemArtifactStore
 from voicebot.transcripts import TranscriptStore
 from voicebot.webrtc import WebRTCCallSession, WebRTCSessionManager, audio_frame_to_call_audio
 from voicebot.workspace_model import VoicebotSessionStore
@@ -145,6 +147,10 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertIn("/events?limit=160", html)
         self.assertIn('id="event-log"', html)
         self.assertIn('id="subagent-log"', html)
+        self.assertIn('id="recording-panel"', html)
+        self.assertIn('id="recording"', html)
+        self.assertIn("loadCallRecording(finishedCallId)", html)
+        self.assertIn('/recording.wav', html)
         self.assertIn('aria-label="Client log"', html)
         self.assertIn('aria-label="Voicebot events"', html)
         self.assertIn('aria-label="Subagent communication"', html)
@@ -183,6 +189,34 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertIn("setIdleButtons()", html)
         self.assertIn('closeLocalPeer("server hangup completed")', html)
         self.assertIn('closeLocalPeer(`connection ${state}`)', html)
+
+    def test_call_recording_endpoints_return_metadata_and_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = FilesystemArtifactStore(f"{directory}/artifacts")
+            artifacts.put(
+                recording_artifact_id("call-1"),
+                b"RIFF....WAVE",
+                {"call_id": "call-1", "segment_count": 1},
+            )
+            app = create_app(
+                EventStore(max_context_events=20),
+                CallRegistry(),
+                AgentTaskTracker(),
+                WebSocketHub(),
+                TranscriptStore(directory),
+                None,
+                audio_artifacts=artifacts,
+            )
+            client = TestClient(app)
+
+            metadata = client.get("/calls/call-1/recording")
+            audio = client.get("/calls/call-1/recording.wav")
+
+        self.assertEqual(metadata.status_code, 200)
+        self.assertEqual(metadata.json()["metadata"]["segment_count"], 1)
+        self.assertEqual(audio.status_code, 200)
+        self.assertEqual(audio.headers["content-type"], "audio/wav")
+        self.assertEqual(audio.content, b"RIFF....WAVE")
 
     def test_webrtc_manager_persists_routed_session_lifecycle(self) -> None:
         events = EventStore(max_context_events=20)

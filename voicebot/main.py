@@ -15,6 +15,7 @@ from .flowhunt import FlowHuntClient
 from .provider_registry import default_provider_registry
 from .runtime_storage import (
     build_agent_task_tracker,
+    build_audio_artifact_store,
     build_call_state_store,
     build_event_store,
     build_provider_config_store,
@@ -43,6 +44,7 @@ def main() -> None:
     worker_queue = build_worker_queue_store(settings)
     sip_trunks = build_sip_trunk_store(settings)
     provider_configs = build_provider_config_store(settings)
+    audio_artifacts = build_audio_artifact_store(settings)
     subagents = build_subagent_coordinator(settings, events)
     asterisk = (
         AsteriskAMI(settings.ami_host, settings.ami_port, settings.ami_username, settings.ami_password)
@@ -61,6 +63,7 @@ def main() -> None:
         registry,
         stt,
         tts,
+        audio_artifacts,
     )
     thread = threading.Thread(target=audiosocket_server.serve_forever, daemon=True)
     thread.start()
@@ -75,6 +78,7 @@ def main() -> None:
         audiosocket_server.stt_pipeline_specs,
         audiosocket_server.tts_pipeline_specs,
         voicebot_sessions,
+        audio_artifacts,
     )
     app = create_app(
         events,
@@ -92,6 +96,7 @@ def main() -> None:
         worker_registry=worker_registry,
         voicebot_sessions=voicebot_sessions,
         session_leases=session_leases,
+        audio_artifacts=audio_artifacts,
     )
     uvicorn.run(app, host=settings.api_host, port=settings.api_port)
 

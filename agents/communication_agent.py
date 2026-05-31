@@ -570,6 +570,10 @@ def should_send_delayed_acknowledgement(task: dict) -> bool:
 
 def progress_ack_text_for_task(task: dict) -> str:
     data = task.get("data", {}) if isinstance(task.get("data"), dict) else {}
+    prompt_config = data.get("prompt_config") if isinstance(data.get("prompt_config"), dict) else {}
+    configured_filler = str(prompt_config.get("filler_message") or "").strip()
+    if configured_filler:
+        return configured_filler
     session_language = data.get("session_language") if isinstance(data.get("session_language"), dict) else {}
     language = str(session_language.get("language") or "").lower()
     texts = {

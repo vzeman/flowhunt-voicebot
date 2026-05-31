@@ -67,6 +67,7 @@ class AgentTasksTests(unittest.TestCase):
             "voicebot-1",
             VoicebotPromptConfig(
                 greeting="Pozdrav volajuceho.",
+                filler_message="Chvíľku strpenia.",
                 system_prompt="Use Slovak.",
                 stt_prompt="LiveAgent",
                 language="sk",
@@ -88,6 +89,7 @@ class AgentTasksTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["context"]["voicebot_prompts"]["language"], "sk")
+        self.assertEqual(response.json()["pending"][0]["data"]["prompt_config"]["filler_message"], "Chvíľku strpenia.")
         self.assertEqual(
             response.json()["context"]["prompt_configs_by_call_id"]["call-1"]["system_prompt"],
             "Use Slovak.",

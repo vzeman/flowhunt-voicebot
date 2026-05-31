@@ -489,6 +489,7 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.text
         self.assertIn("Voicebot Test", html)
+        self.assertIn('id="prompt-filler"', html)
         self.assertIn('id="test-workspace"', html)
         self.assertIn('id="test-voicebot"', html)
         self.assertIn("srcdoc=", html)

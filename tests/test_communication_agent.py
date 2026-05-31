@@ -191,6 +191,19 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
         self.assertEqual(progress_ack_text_for_task(task), "Hneď sa na to pozriem.")
         self.assertEqual(progress_ack_tool_call(task)["arguments"]["text"], "Hneď sa na to pozriem.")
 
+    def test_progress_ack_uses_configured_filler_message(self) -> None:
+        task = {
+            "id": 1,
+            "call_id": "call-1",
+            "data": {
+                "prompt_config": {"filler_message": "I am checking that now."},
+                "session_language": {"language": "sk"},
+            },
+        }
+
+        self.assertEqual(progress_ack_text_for_task(task), "I am checking that now.")
+        self.assertEqual(progress_ack_tool_call(task)["arguments"]["text"], "I am checking that now.")
+
     def test_colleague_progress_ack_explicitly_mentions_colleague(self) -> None:
         task = {"id": 1, "call_id": "call-1", "data": {}}
 

@@ -113,6 +113,10 @@ to fetch prompt config on every turn. Prompt overrides take precedence over
 prompts stored inside versioned runtime config; if neither exists, local `.env`
 defaults are used.
 
+Prompt config includes `filler_message`, a short progress phrase used for
+`progress_ack` filler speech while the agent prepares an answer or asks a
+subagent for help. Empty `filler_message` keeps the built-in localized filler.
+
 For multilingual voicebots, configure prompt `language` as `auto`. The STT
 runtime treats `auto`, `detect`, `multilingual`, and `any` as no fixed language
 hint, while the communication agent mirrors the latest caller language. Use a

@@ -4393,6 +4393,10 @@ DASHBOARD_PAGE = """<!doctype html>
     .event-row:hover { background:#f6f8fa; }
     .event-detail-row td { padding:0 .6rem .65rem; background:#fbfcfd; }
     .event-json { max-height:14rem; border-color:#eaeef2; background:#f6f8fa; color:#24292f; }
+    .json-key { color:#8250df; font-weight:700; }
+    .json-value { color:#1a7f37; font-weight:700; }
+    .json-string { color:#0a3069; font-weight:700; }
+    .json-null { color:#6e7781; font-weight:700; }
     .event-type-pill { display:inline-block; max-width:100%; padding:.12rem .45rem; border:1px solid #c9d7e8; border-radius:999px; background:#ddf4ff; color:#0550ae; font-size:.75rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .event-summary { color:#57606a; font-size:.8rem; line-height:1.35; }
     .transcript-speaker { display:inline-block; padding:.12rem .45rem; border-radius:999px; font-size:.75rem; font-weight:700; }
@@ -5147,8 +5151,55 @@ DASHBOARD_PAGE = """<!doctype html>
 
     function renderJsonBlock(value) {
       const pre = document.createElement("pre");
-      pre.textContent = JSON.stringify(value, null, 2);
+      appendJsonBlockValue(pre, value, 0);
       return pre;
+    }
+
+    function appendJsonBlockValue(parent, value, indent) {
+      if (Array.isArray(value)) {
+        parent.append("[");
+        if (value.length) parent.append("\\n");
+        value.forEach((item, index) => {
+          parent.append(" ".repeat(indent + 2));
+          appendJsonBlockValue(parent, item, indent + 2);
+          if (index < value.length - 1) parent.append(",");
+          parent.append("\\n");
+        });
+        if (value.length) parent.append(" ".repeat(indent));
+        parent.append("]");
+        return;
+      }
+      if (value && typeof value === "object") {
+        const entries = Object.entries(value);
+        parent.append("{");
+        if (entries.length) parent.append("\\n");
+        entries.forEach(([key, item], index) => {
+          parent.append(" ".repeat(indent + 2));
+          const keyNode = document.createElement("span");
+          keyNode.className = "json-key";
+          keyNode.textContent = JSON.stringify(key);
+          parent.appendChild(keyNode);
+          parent.append(": ");
+          appendJsonBlockValue(parent, item, indent + 2);
+          if (index < entries.length - 1) parent.append(",");
+          parent.append("\\n");
+        });
+        if (entries.length) parent.append(" ".repeat(indent));
+        parent.append("}");
+        return;
+      }
+      const valueNode = document.createElement("span");
+      if (typeof value === "string") {
+        valueNode.className = "json-value json-string";
+        valueNode.textContent = JSON.stringify(value);
+      } else if (value === null) {
+        valueNode.className = "json-null";
+        valueNode.textContent = "null";
+      } else {
+        valueNode.className = "json-value";
+        valueNode.textContent = JSON.stringify(value);
+      }
+      parent.appendChild(valueNode);
     }
 
     function escapeHtml(value) {

@@ -49,6 +49,8 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('id="session-gantt"', page.text)
         self.assertIn("renderSessionGantt(timeline.events || [])", page.text)
         self.assertIn("ganttEventLane(event)", page.text)
+        self.assertIn("isPostCallDashboardAuditEvent(event)", page.text)
+        self.assertIn('item.time <= callEndTime + 1000', page.text)
         self.assertIn("srcdoc=", page.text)
         self.assertNotIn('src="/webrtc/test"', page.text)
         self.assertEqual(state.status_code, 200)

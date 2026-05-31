@@ -29,9 +29,7 @@ PUBLIC_ROUTE_KEYS = {
     ("POST", "/webrtc/sessions"),
 }
 
-LOCAL_DEV_ROUTE_KEYS = {
-    ("GET", "/webrtc/test"),
-}
+LOCAL_DEV_ROUTE_KEYS: set[tuple[str, str]] = set()
 
 INTERNAL_ROUTE_PREFIXES = (
     "/agent",

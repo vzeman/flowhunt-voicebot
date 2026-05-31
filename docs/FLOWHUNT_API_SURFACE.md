@@ -149,6 +149,7 @@ read or mutate task state.
 - `/scaling/session-leases/*` is an internal active-session coordination API.
 - `/scaling/backpressure/*` is an internal worker capacity accounting API.
 - `/scaling/queue/*` is an internal worker queue lifecycle API.
-- `/webrtc/test` is a prototype local browser test app.
+- The WebRTC inference console is embedded in the internal dashboard; there is
+  no standalone `/webrtc/test` route.
 
 These should not be exposed as public product endpoints.

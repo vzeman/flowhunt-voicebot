@@ -22,7 +22,8 @@ class WebRTCMediaPlaneTests(unittest.TestCase):
 
         self.assertEqual(payload["routing"]["workspace_scope"], ["workspace_id", "voicebot_id", "channel_id"])
         self.assertEqual(payload["ice"]["turn"], "required for production reliability")
-        self.assertEqual(payload["local_development"]["browser_test_page"], "/webrtc/test")
+        self.assertIsNone(payload["local_development"]["browser_test_page"])
+        self.assertEqual(payload["local_development"]["dashboard_console"], "/dashboard")
 
     def test_webrtc_media_plane_endpoint_returns_contract(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

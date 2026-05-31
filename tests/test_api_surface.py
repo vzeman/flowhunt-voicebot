@@ -48,7 +48,7 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(summary["total"], sum(summary["by_area"].values()))
         self.assertEqual(summary["total"], sum(summary["by_visibility"].values()))
         self.assertEqual(summary["total"], sum(summary["by_scope_source"].values()))
-        self.assertEqual(summary["by_visibility"]["prototype"], 1)
+        self.assertEqual(summary["by_visibility"].get("prototype", 0), 0)
 
     def test_api_surface_covers_required_areas(self) -> None:
         grouped = api_surface_by_area()
@@ -65,16 +65,13 @@ class ApiSurfaceTests(unittest.TestCase):
             "scaling",
             "security",
             "multimodal",
-            "testing",
         ):
             self.assertIn(area, grouped)
 
     def test_prototype_endpoints_are_identified(self) -> None:
         endpoints = prototype_endpoints()
 
-        self.assertEqual(len(endpoints), 1)
-        self.assertEqual(endpoints[0]["path"], "/webrtc/test")
-        self.assertEqual(endpoints[0]["visibility"], "prototype")
+        self.assertEqual(endpoints, [])
 
     def test_api_surface_endpoint_exposes_grouped_catalog(self) -> None:
         response = self.build_client().get("/api/surface")
@@ -83,7 +80,7 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(response.json()["public_endpoints_are_workspace_scoped"])
         self.assertEqual(response.json()["scope_violations"], [])
         self.assertEqual(response.json()["integrity_issues"], [])
-        self.assertEqual(response.json()["summary"]["by_visibility"]["prototype"], 1)
+        self.assertEqual(response.json()["summary"]["by_visibility"].get("prototype", 0), 0)
         self.assertIn("admin", response.json()["areas"])
         self.assertEqual(response.json()["route_audiences"][0]["audience"] in {"public", "internal", "local_dev"}, True)
 
@@ -110,7 +107,7 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertNotIn("/webrtc/test", paths)
         self.assertNotIn("/config", paths)
 
-    def test_internal_openapi_excludes_public_session_creation_but_keeps_local_dev_tools(self) -> None:
+    def test_internal_openapi_excludes_public_session_creation_and_removed_local_dev_tools(self) -> None:
         response = self.build_client().get("/openapi/internal.json")
 
         self.assertEqual(response.status_code, 200)
@@ -118,7 +115,7 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("/agent/tasks", paths)
         self.assertIn("/dashboard", paths)
         self.assertIn("/dashboard/state", paths)
-        self.assertIn("/webrtc/test", paths)
+        self.assertNotIn("/webrtc/test", paths)
         self.assertIn("/config", paths)
         self.assertNotIn("post", response.json()["paths"]["/webrtc/sessions"])
         self.assertIn("get", response.json()["paths"]["/webrtc/sessions"])
@@ -157,7 +154,7 @@ class ApiSurfaceTests(unittest.TestCase):
         response = self.build_client().get("/api/surface/prototypes")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["endpoints"][0]["path"], "/webrtc/test")
+        self.assertEqual(response.json()["endpoints"], [])
 
     def test_voicebot_transport_catalog_endpoint_exposes_capabilities(self) -> None:
         response = self.build_client().get("/workspaces/workspace-1/voicebots/voicebot-1/transports")

@@ -14,6 +14,7 @@ from communication_agent import (
     finalize_streamed_response,
     colleague_progress_ack_text_for_task,
     colleague_progress_ack_tool_call,
+    fallback_answer_for_dropped_tools,
     has_colleague_tool_call,
     parse_colleague_tool_recovery,
     preferred_colleague_tool_name,
@@ -196,6 +197,14 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
         self.assertIn("colleague", colleague_progress_ack_text_for_task(task))
         self.assertIn("colleague", colleague_progress_ack_tool_call(task)["arguments"]["text"])
         self.assertEqual(colleague_progress_ack_tool_call(task)["arguments"]["response_kind"], "progress_ack")
+
+    def test_dropped_tool_fallback_asks_for_full_request(self) -> None:
+        task = {"id": 1, "call_id": "call-1", "data": {"text": "pricing."}}
+
+        self.assertEqual(
+            fallback_answer_for_dropped_tools(task),
+            "I heard: pricing. Could you please say the full request again?",
+        )
 
     def test_colleague_progress_ack_is_prepended_when_model_only_calls_tool(self) -> None:
         task = {"id": 1, "call_id": "call-1", "data": {"text": "Check it"}}

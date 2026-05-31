@@ -118,12 +118,15 @@ def run_communication_agent(
                 finally:
                     delayed_ack.stop()
 
+                model_requested_tools = bool(tool_calls)
                 tool_calls = attach_task_context(tool_calls, latest)
                 tool_calls = filter_grounded_call_control_tools(
                     tool_calls,
                     latest,
                     lambda task, call: validate_call_control_tool(client, providers, config, task, call),
                 )
+                if not tool_calls and not answer.strip() and model_requested_tools:
+                    answer = fallback_answer_for_dropped_tools(latest)
                 if not tool_calls and answer:
                     tool_calls = recover_missing_colleague_tool_call(
                         client,
@@ -508,6 +511,15 @@ def parse_colleague_tool_recovery(raw: str) -> dict:
 def provider_failure_answer(exc: Exception) -> str:
     _ = exc
     return "I had a temporary AI error. Please repeat that once more."
+
+
+def fallback_answer_for_dropped_tools(task: dict) -> str:
+    data = task.get("data", {}) if isinstance(task.get("data"), dict) else {}
+    text = str(data.get("text") or "").strip()
+    if text:
+        separator = "" if text.endswith((".", "!", "?")) else "."
+        return f"I heard: {text}{separator} Could you please say the full request again?"
+    return "I did not catch the full request. Could you please repeat it?"
 
 
 def has_http_failed_say(results: list[dict]) -> bool:

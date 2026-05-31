@@ -69,6 +69,13 @@ def detect_text_language(text: str) -> LanguageDetection | None:
     return None
 
 
+def is_short_language_switch_fragment(text: str, detected: LanguageDetection) -> bool:
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    tokens = re.findall(r"\w+", normalized, flags=re.UNICODE)
+    _ = detected
+    return len(tokens) <= 2
+
+
 def detected_session_language(call_events: list[Any]) -> dict[str, Any]:
     dropped_transcript_ids = {
         int(event.data.get("transcript_event_id"))
@@ -99,8 +106,9 @@ def detected_session_language(call_events: list[Any]) -> dict[str, Any]:
         detected = detected or detect_text_language(text)
         if detected is None or detected.confidence < 0.75:
             continue
-        if current is not None and current.language != detected.language and detected.confidence < 0.90:
-            continue
+        if current is not None and current.language != detected.language:
+            if detected.confidence < 0.90 or is_short_language_switch_fragment(text, detected):
+                continue
         current = detected
     if current is None:
         return {}

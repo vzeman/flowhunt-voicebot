@@ -5023,7 +5023,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     .recording-panel.visible { display: flex; }
     .recording-panel h2 { flex: 0 0 auto; margin: 0; font-size: .875rem; color: var(--muted); }
     .recording-panel audio { min-width: 14rem; }
-    .logs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; width: 100%; }
+    .logs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; width: 100%; }
     .log-panel h2 { font-size: 1rem; margin: 0 0 .5rem; }
     .table-wrap { border: 1px solid var(--border); border-radius: 8px; height: 30rem; overflow: auto; background: #fff; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .8125rem; }
@@ -5039,6 +5039,8 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     .client-type.error { color: #cf222e; background: #ffebe9; border-color: #ffcecb; }
     .client-type.state { color: #8250df; background: #fbefff; border-color: #ecd8ff; }
     .client-type.audio { color: #1a7f37; background: #dafbe1; border-color: #aceebb; }
+    .client-type.caller { color: #1a7f37; background: #dafbe1; border-color: #aceebb; }
+    .client-type.voicebot { color: #8250df; background: #fbefff; border-color: #ecd8ff; }
     .summary-cell { color: var(--muted); }
     .summary-detail-cell { padding: .55rem .75rem; color: #24292f; font-size: .8125rem; line-height: 1.5; white-space: pre-wrap; }
     .json-cell { padding: .65rem .75rem .8rem; }
@@ -5089,6 +5091,17 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       </div>
     </section>
     <section class="log-panel">
+      <h2>Call Transcript</h2>
+      <div class="table-wrap">
+        <table aria-label="Call transcript">
+          <thead>
+            <tr><th class="time-col">Time</th><th class="type-col">Speaker</th></tr>
+          </thead>
+          <tbody id="transcript-log"></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="log-panel">
       <h2>Subagent Communication</h2>
       <div class="table-wrap">
         <table aria-label="Subagent communication">
@@ -5108,6 +5121,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     const recordingAudio = document.getElementById("recording");
     const logNode = document.getElementById("log");
     const eventLogNode = document.getElementById("event-log");
+    const transcriptLogNode = document.getElementById("transcript-log");
     const subagentLogNode = document.getElementById("subagent-log");
     let pc = null;
     let sessionId = null;
@@ -5168,10 +5182,15 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     }
 
     function log(message) {
+      if (shouldSuppressClientLogMessage(message)) return;
       const now = new Date();
       appendClientLogRows(now, message);
       trimRows(logNode);
       scrollTableToBottom(logNode);
+    }
+
+    function shouldSuppressClientLogMessage(message) {
+      return String(message || "").includes("browser-test");
     }
 
     function appendClientLogRows(timestamp, message) {
@@ -5249,9 +5268,40 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       if (seenEventIds.has(event.id)) return;
       seenEventIds.add(event.id);
       if (isSubagentEvent(event)) logSubagentEvent(event);
+      if (isTranscriptEvent(event)) logTranscriptEvent(event);
       appendEventRows(eventLogNode, event);
       trimRows(eventLogNode);
       scrollTableToBottom(eventLogNode);
+    }
+
+    function isTranscriptEvent(event) {
+      const kind = String(event.data?.response_kind || "");
+      if (event.type === "user_transcript" && event.data?.text) return true;
+      if (event.type === "agent_response_received" && event.data?.text) {
+        return !["progress_ack", "stream_chunk"].includes(kind);
+      }
+      return false;
+    }
+
+    function logTranscriptEvent(event) {
+      const speaker = event.type === "user_transcript" ? "Caller" : "Voicebot";
+      const kind = event.type === "user_transcript" ? "caller" : "voicebot";
+      appendTranscriptRows(transcriptLogNode, event.timestamp, speaker, kind, event.data?.text || "");
+      trimRows(transcriptLogNode);
+      scrollTableToBottom(transcriptLogNode);
+    }
+
+    function appendTranscriptRows(tableBody, timestamp, speaker, kind, text) {
+      const row = tableBody.insertRow();
+      row.className = "summary-row";
+      appendCell(row, formatTime(timestamp), "time-col", fullTimestamp(timestamp));
+      const typeCell = appendCell(row, "", "type-col");
+      const type = document.createElement("span");
+      type.className = `client-type ${kind}`;
+      type.textContent = speaker;
+      type.title = speaker;
+      typeCell.appendChild(type);
+      appendDetailTextRow(tableBody, text, 2, "summary-detail-cell");
     }
 
     function appendEventRows(tableBody, event) {
@@ -5452,6 +5502,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         callId = payload.call_id;
         seenEventIds = new Set();
         eventLogNode.innerHTML = "";
+        transcriptLogNode.innerHTML = "";
         subagentLogNode.innerHTML = "";
         connectEventSocket();
         await backfillVoicebotEvents();

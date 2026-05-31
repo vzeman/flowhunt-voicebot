@@ -4386,7 +4386,9 @@ DASHBOARD_PAGE = """<!doctype html>
     .gantt-row { display:grid; grid-template-columns:8rem minmax(40rem,1fr); gap:.5rem; align-items:center; min-height:2rem; }
     .gantt-label { color:var(--muted); font-size:.78rem; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .gantt-lane { position:relative; height:1.45rem; border-bottom:1px solid #eaeef2; background:linear-gradient(90deg,#f6f8fa 1px,transparent 1px); background-size:10% 100%; }
-    .gantt-bar { position:absolute; top:.32rem; min-width:.4rem; height:.75rem; border-radius:999px; background:#0969da; box-shadow:0 0 0 1px rgba(9,105,218,.2); }
+    .gantt-bar { position:absolute; top:.32rem; min-width:.4rem; height:.75rem; border:0; padding:0; border-radius:999px; background:#0969da; box-shadow:0 0 0 1px rgba(9,105,218,.2); cursor:pointer; }
+    .gantt-bar:hover, .gantt-bar:focus { outline:2px solid #0969da; outline-offset:2px; }
+    .gantt-bar.selected { box-shadow:0 0 0 3px rgba(9,105,218,.35); }
     .gantt-bar.marker { width:.5rem; height:.5rem; top:.45rem; border-radius:50%; }
     .gantt-bar.speech { background:#1a7f37; }
     .gantt-bar.stt { background:#8250df; }
@@ -4394,6 +4396,10 @@ DASHBOARD_PAGE = """<!doctype html>
     .gantt-bar.tts, .gantt-bar.playback { background:#bf8700; }
     .gantt-bar.subagent { background:#cf222e; }
     .gantt-empty { padding:.75rem; color:var(--muted); }
+    .gantt-detail { margin:.75rem .8rem .85rem; }
+    .gantt-detail h4 { margin:0 0 .45rem; font-size:.88rem; }
+    .gantt-detail-meta { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.5rem; }
+    .gantt-detail-meta span { padding:.12rem .45rem; border:1px solid var(--border); border-radius:999px; color:var(--muted); font-size:.75rem; background:#f6f8fa; }
     @media (max-width:980px) {
       main { grid-template-columns:1fr; }
       nav { display:flex; gap:.35rem; overflow:auto; border-right:0; border-bottom:1px solid var(--border); }
@@ -4501,6 +4507,7 @@ DASHBOARD_PAGE = """<!doctype html>
           <div class="panel">
             <h3>Timeline</h3>
             <div id="session-gantt" class="gantt-wrap"></div>
+            <div id="session-gantt-detail" class="gantt-detail muted">Click a timeline element to inspect the event details.</div>
           </div>
           <div class="panel" style="margin-top:1rem;">
             <h3>Events</h3>
@@ -4755,12 +4762,15 @@ DASHBOARD_PAGE = """<!doctype html>
         const laneNode = document.createElement("div");
         laneNode.className = "gantt-lane";
         for (const item of items.filter((entry) => entry.lane === lane)) {
-          const bar = document.createElement("div");
+          const bar = document.createElement("button");
           const duration = Math.max(0, item.end - item.start);
           bar.className = `gantt-bar ${item.kind}${duration < 0.05 ? " marker" : ""}`;
           bar.style.left = `${((item.start - start) / span) * 100}%`;
           bar.style.width = `${Math.max(0.5, (duration / span) * 100)}%`;
           bar.title = `${item.type} #${item.id} ${formatSeconds(item.start - start)}-${formatSeconds(item.end - start)}`;
+          bar.type = "button";
+          bar.setAttribute("aria-label", `Show ${item.type} event ${item.id}`);
+          bar.onclick = () => showGanttEventDetails(item, bar);
           laneNode.appendChild(bar);
         }
         row.appendChild(label);
@@ -4768,6 +4778,26 @@ DASHBOARD_PAGE = """<!doctype html>
         chart.appendChild(row);
       }
       container.appendChild(chart);
+    }
+
+    function showGanttEventDetails(item, selectedBar) {
+      document.querySelectorAll(".gantt-bar.selected").forEach((node) => node.classList.remove("selected"));
+      selectedBar.classList.add("selected");
+      const detail = document.getElementById("session-gantt-detail");
+      detail.className = "gantt-detail";
+      detail.innerHTML = "";
+      const title = document.createElement("h4");
+      title.textContent = `${item.type} #${item.id}`;
+      const meta = document.createElement("div");
+      meta.className = "gantt-detail-meta";
+      for (const value of [item.lane, `${formatSeconds(item.start)} start`, `${formatSeconds(item.end - item.start)} duration`]) {
+        const pill = document.createElement("span");
+        pill.textContent = value;
+        meta.appendChild(pill);
+      }
+      detail.appendChild(title);
+      detail.appendChild(meta);
+      detail.appendChild(renderJsonBlock(item.event));
     }
 
     function renderGanttAxis(span) {
@@ -4806,6 +4836,7 @@ DASHBOARD_PAGE = """<!doctype html>
           type: event.type || "",
           lane: ganttEventLane(event),
           kind: ganttEventKind(event),
+          event,
           start,
           end: start + duration,
         };

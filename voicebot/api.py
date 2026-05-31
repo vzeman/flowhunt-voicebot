@@ -4406,9 +4406,9 @@ DASHBOARD_PAGE = """<!doctype html>
     .audio-row audio { width:100%; }
     .gantt-wrap { border:1px solid var(--border); border-radius:8px; overflow:auto; background:#fff; margin:0 0 1rem; }
     .gantt-chart { min-width:52rem; padding:.7rem .8rem .85rem; }
-    .gantt-axis { position:relative; height:1.6rem; margin-left:8.5rem; border-bottom:1px solid var(--border); color:var(--muted); font-size:.75rem; }
+    .gantt-axis { position:relative; height:1.6rem; margin-left:12.5rem; border-bottom:1px solid var(--border); color:var(--muted); font-size:.75rem; }
     .gantt-tick { position:absolute; top:0; transform:translateX(-50%); white-space:nowrap; }
-    .gantt-row { display:grid; grid-template-columns:8rem minmax(40rem,1fr); gap:.5rem; align-items:center; min-height:2rem; }
+    .gantt-row { display:grid; grid-template-columns:12rem minmax(40rem,1fr); gap:.5rem; align-items:center; min-height:2rem; }
     .gantt-label { color:var(--muted); font-size:.78rem; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .gantt-lane { position:relative; height:1.45rem; border-bottom:1px solid #eaeef2; background:linear-gradient(90deg,#f6f8fa 1px,transparent 1px); background-size:10% 100%; }
     .gantt-bar { position:absolute; top:.32rem; min-width:.4rem; height:.75rem; border:0; padding:0; border-radius:999px; background:#0969da; box-shadow:0 0 0 1px rgba(9,105,218,.2); cursor:pointer; }
@@ -4421,7 +4421,13 @@ DASHBOARD_PAGE = """<!doctype html>
     .gantt-bar.tts, .gantt-bar.playback { background:#bf8700; }
     .gantt-bar.subagent { background:#cf222e; }
     .gantt-empty { padding:.75rem; color:var(--muted); }
-    .gantt-detail { margin:.75rem .8rem .85rem; }
+    .event-dialog { width:min(58rem,calc(100vw - 2rem)); max-height:min(42rem,calc(100vh - 2rem)); padding:0; border:1px solid var(--border); border-radius:8px; box-shadow:0 18px 48px rgba(31,35,40,.22); }
+    .event-dialog::backdrop { background:rgba(31,35,40,.42); }
+    .event-dialog-body { padding:1rem; }
+    .event-dialog-header { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin:0 0 .75rem; }
+    .event-dialog-header h4 { margin:0; font-size:1rem; }
+    .event-dialog-close { line-height:1; padding:.35rem .5rem; }
+    .gantt-detail { margin:.75rem 0 0; }
     .gantt-detail h4 { margin:0 0 .45rem; font-size:.88rem; }
     .gantt-detail-meta { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.5rem; }
     .gantt-detail-meta span { padding:.12rem .45rem; border:1px solid var(--border); border-radius:999px; color:var(--muted); font-size:.75rem; background:#f6f8fa; }
@@ -4540,7 +4546,6 @@ DASHBOARD_PAGE = """<!doctype html>
         <div class="panel">
           <div class="panel-title"><h3>Timeline</h3><span class="muted">Click a bar to inspect details</span></div>
           <div id="session-gantt" class="gantt-wrap"></div>
-          <div id="session-gantt-detail" class="gantt-detail muted">Click a timeline element to inspect the event details.</div>
         </div>
         <div class="panel">
           <div class="panel-title"><h3>Recording</h3></div>
@@ -4569,6 +4574,16 @@ DASHBOARD_PAGE = """<!doctype html>
       </div>
     </section>
 
+    <dialog id="session-gantt-dialog" class="event-dialog">
+      <div class="event-dialog-body">
+        <div class="event-dialog-header">
+          <h4 id="session-gantt-dialog-title">Timeline event</h4>
+          <button id="session-gantt-dialog-close" class="event-dialog-close" type="button" aria-label="Close timeline event details">Close</button>
+        </div>
+        <div id="session-gantt-detail" class="gantt-detail"></div>
+      </div>
+    </dialog>
+
     <section id="view-test">
       <h2>Voicebot Test</h2>
       <div class="toolbar">
@@ -4590,6 +4605,12 @@ DASHBOARD_PAGE = """<!doctype html>
       button.addEventListener("click", () => showView(button.dataset.view));
     });
     document.querySelector("[data-view-back]").addEventListener("click", () => showView(previousView));
+    document.getElementById("session-gantt-dialog-close").addEventListener("click", () => {
+      document.getElementById("session-gantt-dialog").close();
+    });
+    document.getElementById("session-gantt-dialog").addEventListener("click", (event) => {
+      if (event.target.id === "session-gantt-dialog") event.target.close();
+    });
     document.querySelectorAll("[data-detail-tab]").forEach((button) => {
       button.addEventListener("click", () => showDetailTab(button.dataset.detailTab));
     });
@@ -4814,28 +4835,25 @@ DASHBOARD_PAGE = """<!doctype html>
       const end = Math.max(...items.map((item) => item.end));
       const span = Math.max(1, end - start);
       chart.appendChild(renderGanttAxis(span));
-      const lanes = [...new Set(items.map((item) => item.lane))];
-      for (const lane of lanes) {
+      for (const item of items) {
         const row = document.createElement("div");
         row.className = "gantt-row";
         const label = document.createElement("div");
         label.className = "gantt-label";
-        label.textContent = lane;
-        label.title = lane;
+        label.textContent = `${item.lane} #${item.id}`;
+        label.title = `${item.type} #${item.id}`;
         const laneNode = document.createElement("div");
         laneNode.className = "gantt-lane";
-        for (const item of items.filter((entry) => entry.lane === lane)) {
-          const bar = document.createElement("button");
-          const duration = Math.max(0, item.end - item.start);
-          bar.className = `gantt-bar ${item.kind}${duration < 0.05 ? " marker" : ""}`;
-          bar.style.left = `${((item.start - start) / span) * 100}%`;
-          bar.style.width = `${Math.max(0.5, (duration / span) * 100)}%`;
-          bar.title = `${item.type} #${item.id} ${formatSeconds(item.start - start)}-${formatSeconds(item.end - start)}`;
-          bar.type = "button";
-          bar.setAttribute("aria-label", `Show ${item.type} event ${item.id}`);
-          bar.onclick = () => showGanttEventDetails(item, bar);
-          laneNode.appendChild(bar);
-        }
+        const bar = document.createElement("button");
+        const duration = Math.max(0, item.end - item.start);
+        bar.className = `gantt-bar ${item.kind}${duration < 0.05 ? " marker" : ""}`;
+        bar.style.left = `${((item.start - start) / span) * 100}%`;
+        bar.style.width = `${Math.max(0.5, (duration / span) * 100)}%`;
+        bar.title = `${item.type} #${item.id} ${formatSeconds(item.start - start)}-${formatSeconds(item.end - start)}`;
+        bar.type = "button";
+        bar.setAttribute("aria-label", `Show ${item.type} event ${item.id}`);
+        bar.onclick = () => showGanttEventDetails(item, bar);
+        laneNode.appendChild(bar);
         row.appendChild(label);
         row.appendChild(laneNode);
         chart.appendChild(row);
@@ -4846,11 +4864,10 @@ DASHBOARD_PAGE = """<!doctype html>
     function showGanttEventDetails(item, selectedBar) {
       document.querySelectorAll(".gantt-bar.selected").forEach((node) => node.classList.remove("selected"));
       selectedBar.classList.add("selected");
+      document.getElementById("session-gantt-dialog-title").textContent = `${item.type} #${item.id}`;
       const detail = document.getElementById("session-gantt-detail");
       detail.className = "gantt-detail";
       detail.innerHTML = "";
-      const title = document.createElement("h4");
-      title.textContent = `${item.type} #${item.id}`;
       const meta = document.createElement("div");
       meta.className = "gantt-detail-meta";
       for (const value of [item.lane, `${formatSeconds(item.start)} start`, `${formatSeconds(item.end - item.start)} duration`]) {
@@ -4858,9 +4875,9 @@ DASHBOARD_PAGE = """<!doctype html>
         pill.textContent = value;
         meta.appendChild(pill);
       }
-      detail.appendChild(title);
       detail.appendChild(meta);
       detail.appendChild(renderJsonBlock(item.event));
+      document.getElementById("session-gantt-dialog").showModal();
     }
 
     function renderGanttAxis(span) {

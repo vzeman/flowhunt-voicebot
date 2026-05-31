@@ -19,6 +19,8 @@ from .errors import (
     StorageValidationError,
 )
 from .health import storage_component_diagnostics, storage_component_health
+from .redis_leases import RedisSessionLeaseStore
+from .sqlite_events import SQLiteEventStore
 from .protocols import (
     AgentTaskStoreProtocol,
     ArtifactStoreProtocol,
@@ -43,6 +45,7 @@ __all__ = [
     "EventStoreProtocol",
     "FilesystemArtifactStore",
     "ProviderConfigStoreProtocol",
+    "RedisSessionLeaseStore",
     "SessionLeaseStoreProtocol",
     "SipTrunkStoreProtocol",
     "StorageDriverDefinition",
@@ -58,6 +61,7 @@ __all__ = [
     "StorageUnavailable",
     "StorageValidationError",
     "StoreHealth",
+    "SQLiteEventStore",
     "SubagentTaskStoreProtocol",
     "TranscriptStoreProtocol",
     "VoicebotSessionStoreProtocol",

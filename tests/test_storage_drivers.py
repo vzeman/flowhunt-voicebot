@@ -22,7 +22,10 @@ from voicebot.runtime_storage import (
     storage_drivers_payload,
 )
 from voicebot.storage import attached_storage_driver, normalize_driver_name
+from voicebot.storage.redis_leases import RedisSessionLeaseStore
+from voicebot.storage.sqlite_events import SQLiteEventStore
 from voicebot.transcripts import TranscriptStore
+from storage_contract_cases import assert_event_store_contract
 
 
 class StorageDriverTests(unittest.TestCase):
@@ -30,10 +33,15 @@ class StorageDriverTests(unittest.TestCase):
         registry = default_storage_registry()
 
         event_drivers = {definition.driver for definition in registry.definitions_for_family("events")}
+        artifact_drivers = {definition.driver for definition in registry.definitions_for_family("audio_artifacts")}
         queue_drivers = {definition.driver for definition in registry.definitions_for_family("worker_queue")}
 
         self.assertIn("jsonl", event_drivers)
+        self.assertIn("sqlite", event_drivers)
+        self.assertIn("postgres", event_drivers)
         self.assertIn("flowhunt_db", event_drivers)
+        self.assertIn("s3", artifact_drivers)
+        self.assertIn("redis", {definition.driver for definition in registry.definitions_for_family("session_leases")})
         self.assertIn("redis_streams", queue_drivers)
         self.assertIn("flowhunt_queue", queue_drivers)
 
@@ -98,6 +106,38 @@ class StorageDriverTests(unittest.TestCase):
         self.assertEqual(attached_storage_driver(tracker).driver, "json")
         self.assertEqual(attached_storage_driver(tracker).configured_driver, "jsonl")
 
+    def test_sqlite_event_store_satisfies_event_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            assert_event_store_contract(
+                self,
+                lambda: SQLiteEventStore(f"sqlite:///{directory}/events.sqlite3", max_context_events=20),
+            )
+
+    def test_redis_session_lease_store_uses_client_boundary(self) -> None:
+        store = RedisSessionLeaseStore("redis://test", client=FakeRedis())
+
+        lease = store.acquire("ws-1", "bot-1", "session-1", "owner-1", 30)
+
+        self.assertIsNotNone(lease)
+        self.assertIsNotNone(store.get("ws-1", "bot-1", "session-1"))
+        self.assertIsNone(store.acquire("ws-1", "bot-1", "session-1", "owner-2", 30))
+        self.assertEqual(store.release("ws-1", "bot-1", "session-1", owner="owner-1").owner, "owner-1")
+
+    def test_family_level_driver_settings_select_managed_targets(self) -> None:
+        settings = Settings(
+            event_store_provider="sqlite",
+            session_lease_store_provider="redis",
+            relational_database_url="sqlite:////data/voicebot.sqlite3",
+            redis_url="redis://redis:6379/0",
+        )
+
+        payload = storage_drivers_payload(settings)
+
+        self.assertEqual(payload["selected"]["events"]["driver"], "sqlite")
+        self.assertEqual(payload["selected"]["session_leases"]["driver"], "redis")
+        self.assertEqual(payload["selected"]["events"]["options"]["database_url"]["redacted"], True)
+        self.assertEqual(payload["selected"]["session_leases"]["options"]["redis_url"]["redacted"], True)
+
     def test_unknown_storage_driver_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported storage driver"):
             storage_drivers_payload(Settings(event_store_provider="unknown"))
@@ -119,6 +159,31 @@ class StorageDriverTests(unittest.TestCase):
         self.assertIn("events", payload["registry"]["families"])
         self.assertEqual(payload["selected"]["events"]["driver"], "jsonl")
         self.assertEqual(payload["selected"]["provider_config"]["driver"], "json")
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    def ping(self) -> bool:
+        return True
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    def set(self, key: str, value: str, ex: int | None = None) -> bool:
+        _ = ex
+        self.values[key] = value
+        return True
+
+    def delete(self, key: str) -> int:
+        existed = key in self.values
+        self.values.pop(key, None)
+        return 1 if existed else 0
+
+    def keys(self, pattern: str) -> list[str]:
+        prefix = pattern.rstrip("*")
+        return [key for key in self.values if key.startswith(prefix)]
 
 
 if __name__ == "__main__":

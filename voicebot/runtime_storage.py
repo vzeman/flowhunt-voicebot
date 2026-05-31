@@ -10,6 +10,8 @@ from .session_leases import JsonSessionLeaseStore, SessionLeaseStore
 from .sip_trunks import SipTrunkStore
 from .storage import (
     FilesystemArtifactStore,
+    RedisSessionLeaseStore,
+    SQLiteEventStore,
     StorageDriverDefinition,
     StorageDriverSelection,
     StorageRegistry,
@@ -26,12 +28,18 @@ def default_storage_registry() -> StorageRegistry:
         [
             _definition("events", "memory", "process", False, True, False, "in-memory append-only event list"),
             _definition("events", "jsonl", "node", False, True, False, "append-only JSONL event log"),
+            _definition("events", "sqlite", "node", False, True, False, "SQLite event table with workspace indexes"),
+            _definition("events", "postgres", "shared", True, False, True, "PostgreSQL event table with workspace indexes"),
             _definition("events", "flowhunt_db", "shared", True, False, True, "workspace-scoped durable DB event rows"),
             _definition("events", "append_only_event_log", "shared", True, False, True, "managed append-only event log"),
             _definition("transcripts", "jsonl", "node", False, True, False, "per-call JSONL transcript files"),
+            _definition("transcripts", "sqlite", "node", False, True, False, "SQLite transcript metadata and text index"),
+            _definition("transcripts", "postgres", "shared", True, False, True, "PostgreSQL transcript metadata and text index"),
             _definition("transcripts", "flowhunt_db", "shared", True, False, True, "workspace-scoped transcript rows"),
             _definition("voicebot_sessions", "memory", "process", False, True, False, "in-memory routed session records"),
             _definition("voicebot_sessions", "json", "node", False, True, False, "local JSON session records"),
+            _definition("voicebot_sessions", "sqlite", "node", False, True, False, "SQLite session records"),
+            _definition("voicebot_sessions", "postgres", "shared", True, False, True, "PostgreSQL session records"),
             _definition("voicebot_sessions", "flowhunt_db", "shared", True, False, True, "workspace-scoped session table"),
             _definition("session_leases", "memory", "process", False, True, False, "best-effort in-memory leases"),
             _definition("session_leases", "json", "node", False, True, False, "local JSON leases"),
@@ -56,8 +64,12 @@ def default_storage_registry() -> StorageRegistry:
             _definition("call_states", "flowhunt_db", "shared", True, False, True, "durable call state snapshots"),
             _definition("provider_config", "memory", "process", False, True, False, "in-memory provider config"),
             _definition("provider_config", "json", "node", False, True, False, "local JSON provider config records"),
+            _definition("provider_config", "sqlite", "node", False, True, False, "SQLite provider config records"),
+            _definition("provider_config", "postgres", "shared", True, False, True, "PostgreSQL provider config records"),
             _definition("provider_config", "flowhunt_db", "shared", True, False, True, "versioned provider config records"),
             _definition("sip_trunks", "json", "node", False, True, False, "local trunk registry plus generated PJSIP include"),
+            _definition("sip_trunks", "sqlite", "node", False, True, False, "SQLite trunk records plus generated PJSIP include"),
+            _definition("sip_trunks", "postgres", "shared", True, False, True, "PostgreSQL trunk records with secret references"),
             _definition("sip_trunks", "flowhunt_db", "shared", True, False, True, "workspace-scoped trunk records"),
             _definition("subagent_tasks", "memory", "process", False, True, False, "in-memory delegated task lifecycle"),
             _definition("subagent_tasks", "json", "node", False, True, False, "local JSON delegated task lifecycle"),
@@ -66,6 +78,7 @@ def default_storage_registry() -> StorageRegistry:
             _definition("subagent_tasks", "flowhunt_queue", "shared", True, False, True, "FlowHunt task queue handoff"),
             _definition("audio_artifacts", "filesystem", "node", False, True, False, "local filesystem artifacts/cache"),
             _definition("audio_artifacts", "object_storage", "shared", True, False, True, "managed object storage"),
+            _definition("audio_artifacts", "s3", "shared", True, False, True, "S3-compatible object storage"),
         ]
     )
 
@@ -100,6 +113,17 @@ def build_event_store(settings: Settings, transcripts: TranscriptStore) -> Event
             JsonEventStore(settings.event_store_path, settings.max_context_events, transcript_store=transcripts),
             selection,
         )
+    if driver == "sqlite":
+        return attach_storage_driver(
+            SQLiteEventStore(settings.relational_database_url, settings.max_context_events, transcript_store=transcripts),
+            storage_driver_selection(
+                "events",
+                driver,
+                settings.event_store_provider,
+                None,
+                {"database_url": settings.relational_database_url},
+            ),
+        )
     if driver == "memory":
         return attach_storage_driver(EventStore(settings.max_context_events, transcript_store=transcripts), selection)
     raise_unsupported_storage("VOICEBOT_EVENT_STORE_PROVIDER", settings.event_store_provider, selection)
@@ -132,6 +156,17 @@ def build_session_lease_store(settings: Settings) -> SessionLeaseStore:
         return attach_storage_driver(JsonSessionLeaseStore(settings.session_lease_store_path), selection)
     if driver == "memory":
         return attach_storage_driver(SessionLeaseStore(), selection)
+    if driver == "redis":
+        return attach_storage_driver(
+            RedisSessionLeaseStore(settings.redis_url),
+            storage_driver_selection(
+                "session_leases",
+                driver,
+                settings.session_lease_store_provider,
+                None,
+                {"redis_url": settings.redis_url},
+            ),
+        )
     raise_unsupported_storage("VOICEBOT_SESSION_LEASE_STORE_PROVIDER", settings.session_lease_store_provider, selection)
 
 
@@ -266,7 +301,10 @@ def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelec
             "events",
             "jsonl" if normalize_driver_name(settings.event_store_provider) == "json" else normalize_driver_name(settings.event_store_provider),
             settings.event_store_provider,
-            settings.event_store_path,
+            settings.event_store_path if normalize_driver_name(settings.event_store_provider) not in {"sqlite", "postgres"} else None,
+            {"database_url": settings.relational_database_url}
+            if normalize_driver_name(settings.event_store_provider) in {"sqlite", "postgres"}
+            else None,
         ),
         "transcripts": storage_driver_selection(
             "transcripts",
@@ -284,7 +322,8 @@ def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelec
             "session_leases",
             json_object_driver(settings.session_lease_store_provider),
             settings.session_lease_store_provider,
-            settings.session_lease_store_path,
+            settings.session_lease_store_path if json_object_driver(settings.session_lease_store_provider) != "redis" else None,
+            {"redis_url": settings.redis_url} if json_object_driver(settings.session_lease_store_provider) == "redis" else None,
         ),
         "agent_tasks": storage_driver_selection(
             "agent_tasks",

@@ -124,7 +124,7 @@ def redacted_options(options: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in options.items():
         lowered = key.lower()
-        if any(marker in lowered for marker in ("password", "secret", "token", "api_key", "credential")):
+        if any(marker in lowered for marker in ("password", "secret", "token", "api_key", "credential", "url")):
             result[key] = {"configured": bool(value), "redacted": True}
         else:
             result[key] = value

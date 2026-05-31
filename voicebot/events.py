@@ -48,6 +48,7 @@ EventType = Literal[
     "security_audit",
     "runtime_draining_started",
     "runtime_draining_stopped",
+    "api_access_logged",
     "session_lease_acquired",
     "session_lease_renewed",
     "session_lease_released",

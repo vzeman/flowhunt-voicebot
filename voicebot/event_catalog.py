@@ -56,6 +56,7 @@ EVENT_CATALOG: tuple[EventCatalogEntry, ...] = (
     EventCatalogEntry("latency_budget_exceeded", "telemetry", "A realtime latency metric exceeded its configured budget."),
     EventCatalogEntry("runtime_config_updated", "config", "Workspace voicebot runtime config was validated and activated."),
     EventCatalogEntry("security_audit", "security", "Security-sensitive action was recorded with a redacted payload.", False),
+    EventCatalogEntry("api_access_logged", "security", "Public or internal API request access metadata was recorded.", False),
     EventCatalogEntry("runtime_draining_started", "runtime", "Runtime started draining and should not accept new sessions."),
     EventCatalogEntry("runtime_draining_stopped", "runtime", "Runtime stopped draining and can accept new sessions again."),
     EventCatalogEntry("session_lease_acquired", "session_ownership", "Runtime worker acquired ownership for an active session."),

@@ -4,6 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 import threading
+from time import perf_counter
 from typing import Any, get_args
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -35,6 +36,7 @@ from .api_models import (
     PlaybackInterruptRequest,
     PublicVoicebotRoutePatchRequest,
     PublicVoicebotRouteRequest,
+    RetentionDeleteRequest,
     ScalingAdmissionRequest,
     ScalingBackpressureRequest,
     SecurityAuditRequest,
@@ -88,6 +90,7 @@ from .health import readiness_report
 from .internal_auth import (
     internal_scope_for_request,
     parse_internal_api_keys,
+    route_audience_for_request,
     route_requires_internal_auth,
     validate_internal_api_key,
 )
@@ -285,6 +288,18 @@ def create_app(
     prompt_config_store = prompt_configs or VoicebotPromptConfigStore()
     internal_keys = parse_internal_api_keys(runtime_settings.internal_api_keys)
     public_rate_limiter = FixedWindowPublicRateLimiter(runtime_settings.public_session_rate_limit_per_minute)
+
+    @app.middleware("http")
+    async def access_log_middleware(request: Request, call_next):
+        start = perf_counter()
+        request_id = request.headers.get("x-request-id", "").strip() or f"req-{int(start * 1000000)}"
+        response = None
+        try:
+            response = await call_next(request)
+            return response
+        finally:
+            status_code = response.status_code if response is not None else 500
+            log_api_access(request, status_code, (perf_counter() - start) * 1000, request_id)
 
     @app.middleware("http")
     async def internal_auth_middleware(request: Request, call_next):
@@ -513,6 +528,38 @@ def create_app(
         )
         return events.append(call_id or session_id or "security", "security_audit", payload)
 
+    def log_api_access(request: Request, status_code: int, latency_ms: float, request_id: str) -> None:
+        path = request.url.path
+        if path.startswith("/health/liveness"):
+            return
+        audience = route_audience_for_request(request.method, path)
+        route_data: dict[str, Any] = {}
+        if audience == "public":
+            try:
+                route = resolve_public_voicebot_route(request)
+            except HTTPException:
+                route = None
+            if route is not None:
+                route_data = route.event_data()
+        user = getattr(request.state, "dashboard_user", None)
+        payload = redact_sensitive_data(
+            {
+                "request_id": request_id,
+                "audience": audience,
+                "method": request.method,
+                "path": path,
+                "status_code": status_code,
+                "latency_ms": round(latency_ms, 3),
+                "origin": request.headers.get("origin", ""),
+                "user_agent": request.headers.get("user-agent", "")[:160],
+                "source_ip": "" if runtime_settings.pii_safe_logging_enabled else (request.client.host if request.client else ""),
+                "source_ip_recorded": not runtime_settings.pii_safe_logging_enabled,
+                "dashboard_user_id": (user or {}).get("user_id", ""),
+                **route_data,
+            }
+        )
+        events.append("access", "api_access_logged", payload)
+
     def emit_subagent_terminal_event(event_type: TaskLifecycleEventType, task: SubagentTask) -> None:
         event = events.append_scoped(
             ExecutionScope(
@@ -656,6 +703,46 @@ def create_app(
         )
         await hub.broadcast(event)
         return {"event": event_to_dict(event)}
+
+    @app.post("/workspaces/{workspace_id}/security/retention/delete")
+    async def workspace_retention_delete(workspace_id: str, request: RetentionDeleteRequest) -> dict[str, Any]:
+        require_workspace_access(workspace_id)
+        contract = security_contract_payload(runtime_settings, workspace_access_policy)
+        known_classes = {item["name"]: item for item in contract["retention"]["classes"]}
+        selected = request.classes or sorted(known_classes)
+        unknown = [name for name in selected if name not in known_classes]
+        if unknown:
+            raise HTTPException(status_code=400, detail={"unknown_retention_classes": unknown})
+        scope = {
+            "workspace_id": workspace_id,
+            "voicebot_id": request.voicebot_id,
+            "session_id": request.session_id,
+            "call_id": request.call_id,
+            "artifact_id": request.artifact_id,
+        }
+        hooks = [
+            {
+                "class": name,
+                "deletion_hook": known_classes[name]["deletion_hook"],
+                "scope": {key: value for key, value in scope.items() if value},
+                "dry_run": request.dry_run,
+            }
+            for name in selected
+        ]
+        event = append_security_audit(
+            workspace_id=workspace_id,
+            voicebot_id=request.voicebot_id,
+            session_id=request.session_id,
+            call_id=request.call_id,
+            action="retention_delete",
+            actor="dashboard_or_internal_api",
+            resource_type="retention_scope",
+            resource_id=request.artifact_id or request.session_id or request.voicebot_id or workspace_id,
+            outcome="planned" if request.dry_run else "requested",
+            metadata={"classes": selected, "scope": scope, "reason": request.reason, "dry_run": request.dry_run},
+        )
+        await hub.broadcast(event)
+        return {"workspace_id": workspace_id, "dry_run": request.dry_run, "hooks": hooks, "audit_event": event_to_dict(event)}
 
     @app.get("/pipeline/contract")
     def pipeline_contract() -> dict[str, Any]:

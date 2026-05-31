@@ -346,6 +346,28 @@ Returns retention classes and deletion hooks for events, transcripts,
 recordings, cached TTS audio, and delegated task state. Workspace access is
 checked before returning the policy.
 
+### POST `/workspaces/{workspace_id}/security/retention/delete`
+
+Plans or requests retention deletion hooks for a workspace scope. The request
+can target narrower `voicebot_id`, `session_id`, `call_id`, `artifact_id`, and
+retention `classes`. `dry_run=true` returns the hooks without deleting data;
+`dry_run=false` records the request for the configured storage drivers.
+
+Request:
+
+```json
+{
+  "voicebot_id": "voicebot-1",
+  "session_id": "session-1",
+  "classes": ["events", "transcripts", "recordings"],
+  "reason": "user_erasure_request",
+  "dry_run": true
+}
+```
+
+The endpoint emits a redacted `security_audit` event with action
+`retention_delete`.
+
 ### POST `/workspaces/{workspace_id}/security/audit`
 
 Emits a redacted `security_audit` event for a workspace-scoped sensitive action.

@@ -108,6 +108,16 @@ class SecurityAuditRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class RetentionDeleteRequest(BaseModel):
+    voicebot_id: str | None = None
+    session_id: str | None = None
+    call_id: str | None = None
+    artifact_id: str | None = None
+    classes: list[str] = Field(default_factory=list)
+    reason: str = "operator_request"
+    dry_run: bool = True
+
+
 class SubagentTaskSubmitRequest(BaseModel):
     workspace_id: str
     session_id: str

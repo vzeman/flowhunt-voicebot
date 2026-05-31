@@ -104,6 +104,37 @@ class SecurityApiTests(unittest.TestCase):
         self.assertEqual(event["data"]["metadata"]["api_key"], {"configured": True, "redacted": True})
         self.assertEqual(event["data"]["metadata"]["safe"], "value")
 
+    def test_retention_delete_endpoint_targets_workspace_scope_and_audits(self) -> None:
+        client = self.build_client(WorkspaceAccessPolicy(enabled=True, allowed_workspace_ids=("workspace-1",)))
+
+        response = client.post(
+            "/workspaces/workspace-1/security/retention/delete",
+            json={
+                "voicebot_id": "voicebot-1",
+                "session_id": "session-1",
+                "classes": ["events", "transcripts"],
+                "reason": "test_cleanup",
+                "dry_run": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual({hook["class"] for hook in payload["hooks"]}, {"events", "transcripts"})
+        self.assertEqual(payload["hooks"][0]["scope"]["workspace_id"], "workspace-1")
+        self.assertEqual(payload["audit_event"]["data"]["action"], "retention_delete")
+
+    def test_retention_delete_rejects_unknown_class(self) -> None:
+        client = self.build_client(WorkspaceAccessPolicy(enabled=True, allowed_workspace_ids=("workspace-1",)))
+
+        response = client.post(
+            "/workspaces/workspace-1/security/retention/delete",
+            json={"classes": ["missing"]},
+        )
+
+        self.assertEqual(response.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

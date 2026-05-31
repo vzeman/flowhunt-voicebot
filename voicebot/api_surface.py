@@ -69,6 +69,7 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("GET", "/realtime/audio-profile", "runtime", "internal", workspace_scoped=False, scope_source="none", description="Inspect realtime audio quality profile and validation issues."),
     ApiEndpointSpec("GET", "/security/contract", "security", "internal", workspace_scoped=False, scope_source="none", description="Inspect workspace isolation, audit, secret redaction, and retention contract."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/security/retention", "security", "internal", workspace_scoped=True, scope_source="path", description="Inspect workspace retention and deletion policy."),
+    ApiEndpointSpec("POST", "/workspaces/{workspace_id}/security/retention/delete", "security", "internal", workspace_scoped=True, scope_source="path", description="Plan or request retention deletion hooks for a workspace scope."),
     ApiEndpointSpec("POST", "/workspaces/{workspace_id}/security/audit", "security", "internal", workspace_scoped=True, scope_source="path", description="Emit a redacted workspace security audit event."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions", "session", "public", description="List sessions."),
     ApiEndpointSpec("GET", "/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}", "session", "public", description="Read session."),

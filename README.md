@@ -76,6 +76,8 @@ The internal operations dashboard is documented in
 [docs/DASHBOARD.md](docs/DASHBOARD.md).
 The embeddable public WebRTC widget is documented in
 [docs/VOICEBOT_WIDGET.md](docs/VOICEBOT_WIDGET.md).
+Production operations, ingress, and onboarding runbooks are documented in
+[docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md).
 Multimodal extension points are documented in
 [docs/MULTIMODAL.md](docs/MULTIMODAL.md).
 Workspace/voicebot-scoped provider configuration is documented in

@@ -1040,6 +1040,17 @@ class CallSession:
         if pending is None or self.recording_event.is_set() or self.playback.is_active():
             return
         self._pending_persistent_resume = None
+        if reason != "stt_no_text":
+            self.events.append(
+                self.call_id,
+                "agent_response_dropped",
+                {
+                    "reason": "interrupted_persistent_response_not_resumed",
+                    "interrupt_result": reason,
+                    "response_to_event_id": _optional_int(pending.get("response_to_event_id")),
+                },
+            )
+            return
         response = AgentResponse(
             self.call_id,
             str(pending.get("text") or ""),

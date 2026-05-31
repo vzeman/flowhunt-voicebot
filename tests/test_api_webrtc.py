@@ -494,7 +494,7 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertIn("srcdoc=", html)
         self.assertNotIn('src="/webrtc/test"', html)
         self.assertIn("/ws/events", html)
-        self.assertIn("/events?limit=160", html)
+        self.assertIn("/events?call_id=", html)
         self.assertIn('id=&quot;event-log&quot;', html)
         self.assertIn('id=&quot;subagent-log&quot;', html)
         self.assertIn('id=&quot;recording-panel&quot;', html)

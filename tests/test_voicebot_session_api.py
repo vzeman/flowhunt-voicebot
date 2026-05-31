@@ -79,6 +79,28 @@ class VoicebotSessionApiTests(unittest.TestCase):
         self.assertEqual(transcript.json()["call_id"], "webrtc-session-1")
         self.assertEqual([event["data"]["text"] for event in transcript.json()["events"]], ["hello from webrtc"])
 
+    def test_workspace_session_timeline_reads_persisted_events_after_compaction(self) -> None:
+        client, events, sessions = self.build_client()
+        sessions.save(
+            VoicebotSessionRecord(
+                "session-1",
+                "workspace-1",
+                "voicebot-1",
+                external_session_id="webrtc-session-1",
+            )
+        )
+        first = events.append("webrtc-session-1", "subagent_task_requested", {"task_id": "task-1"})
+        for index in range(30):
+            events.append("other-call", "metrics", {"name": "noise", "value": index})
+
+        timeline = client.get("/workspaces/workspace-1/voicebots/voicebot-1/sessions/session-1/timeline")
+        public_events = client.get("/events?call_id=webrtc-session-1")
+        observability = client.get("/observability/timeline?call_id=webrtc-session-1")
+
+        self.assertEqual(timeline.json()["events"][0]["id"], first.id)
+        self.assertEqual(public_events.json()["events"][0]["type"], "subagent_task_requested")
+        self.assertEqual(observability.json()["counts"]["task"], 1)
+
     def test_workspace_session_api_supports_active_filter_and_limit_validation(self) -> None:
         client, _events, sessions = self.build_client()
         sessions.save(VoicebotSessionRecord("active", "workspace-1", "voicebot-1"))

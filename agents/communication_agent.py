@@ -157,7 +157,7 @@ def run_communication_agent(
                     initial_say = None
                     answer = ""
                     tool_calls = suppress_colleague_tool_progress(tool_calls)
-                    calls_for_initial_execution = [colleague_progress_ack_tool_call(latest), *tool_calls]
+                    calls_for_initial_execution = list(tool_calls)
                 else:
                     calls_for_initial_execution = list(tool_calls)
                 if initial_say and tool_calls and not needs_spoken_followup(tool_calls):

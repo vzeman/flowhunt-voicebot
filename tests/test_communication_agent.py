@@ -227,6 +227,15 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
                 streamed_response=False,
             )
         )
+        self.assertFalse(
+            should_prepend_colleague_progress_ack(
+                task,
+                [{"name": "invoke_flowhunt_flow", "arguments": {"call_id": "call-1", "message": "Check it"}}],
+                initial_say=None,
+                delayed_ack_delivered=True,
+                streamed_response=False,
+            )
+        )
 
     def test_colleague_tool_progress_can_be_suppressed_after_delayed_ack(self) -> None:
         calls = [

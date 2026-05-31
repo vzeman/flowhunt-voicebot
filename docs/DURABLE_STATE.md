@@ -46,16 +46,32 @@ diagnostics for skipped/recovered rows, and no raw secrets in API responses.
 ## Driver Configuration
 
 Storage is selected per family by environment variables. Local Docker defaults
-use JSON, JSONL, memory, and filesystem drivers. Managed drivers are registered
-in the driver catalog so configuration and readiness can describe the production
-target, but only local drivers are implemented in this slice.
+use JSON, JSONL, memory, and filesystem drivers. Family-level aliases can select
+the intended backend class while keeping the older per-store variables working:
+
+```text
+VOICEBOT_RELATIONAL_STORE_PROVIDER=sqlite|postgres
+VOICEBOT_RELATIONAL_DATABASE_URL=/data/voicebot.sqlite3
+VOICEBOT_CACHE_STORE_PROVIDER=memory|redis
+VOICEBOT_REDIS_URL=redis://redis:6379/0
+VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER=filesystem|object_storage|s3
+VOICEBOT_OBJECT_STORAGE_BUCKET=voicebot-audio
+VOICEBOT_OBJECT_STORAGE_ENDPOINT=https://s3.example.com
+```
+
+Per-store variables such as `VOICEBOT_EVENT_STORE_PROVIDER` and
+`VOICEBOT_SESSION_LEASE_STORE_PROVIDER` remain compatibility overrides and win
+over the family-level aliases. Concrete SQLite event storage and Redis-backed
+session lease storage are implemented first; other relational and cache families
+are registered in the driver catalog so deployment configuration and readiness
+can fail explicitly until their concrete driver is added.
 
 | Family | Provider env var | Default | Path/config env var | Current drivers | Managed target |
 | --- | --- | --- | --- | --- | --- |
-| `events` | `VOICEBOT_EVENT_STORE_PROVIDER` | `json` | `VOICEBOT_EVENT_STORE_PATH` | `json`, `jsonl`, `memory` | `flowhunt_db`, `append_only_event_log` |
-| `transcripts` | `VOICEBOT_TRANSCRIPT_STORE_PROVIDER` | `jsonl` | `VOICEBOT_TRANSCRIPT_DIR` | `jsonl` | `flowhunt_db`, `object_storage` |
-| `voicebot_sessions` | `VOICEBOT_SESSION_STORE_PROVIDER` | `json` | `VOICEBOT_SESSION_STORE_PATH` | `json`, `memory` | `flowhunt_db` |
-| `session_leases` | `VOICEBOT_SESSION_LEASE_STORE_PROVIDER` | `json` | `VOICEBOT_SESSION_LEASE_STORE_PATH` | `json`, `memory` | `redis` |
+| `events` | `VOICEBOT_EVENT_STORE_PROVIDER` | `json` | `VOICEBOT_EVENT_STORE_PATH` or `VOICEBOT_RELATIONAL_DATABASE_URL` | `json`, `jsonl`, `memory`, `sqlite` | `postgres`, `flowhunt_db`, `append_only_event_log` |
+| `transcripts` | `VOICEBOT_TRANSCRIPT_STORE_PROVIDER` | `jsonl` | `VOICEBOT_TRANSCRIPT_DIR` | `jsonl` | `postgres`, `flowhunt_db`, `object_storage` |
+| `voicebot_sessions` | `VOICEBOT_SESSION_STORE_PROVIDER` | `json` | `VOICEBOT_SESSION_STORE_PATH` | `json`, `memory` | `sqlite`, `postgres`, `flowhunt_db` |
+| `session_leases` | `VOICEBOT_SESSION_LEASE_STORE_PROVIDER` | `json` | `VOICEBOT_SESSION_LEASE_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `redis` |
 | `agent_tasks` | `VOICEBOT_AGENT_TASK_STORE_PROVIDER` | `json` | `VOICEBOT_AGENT_TASK_STORE_PATH` | `json`, `memory` | `redis`, `flowhunt_db` |
 | `worker_queue` | `VOICEBOT_WORKER_QUEUE_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_QUEUE_STORE_PATH` | `json`, `memory` | `redis_streams`, `nats_jetstream`, `rabbitmq`, `flowhunt_queue` |
 | `worker_registry` | `VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_REGISTRY_STORE_PATH` | `json`, `memory` | `redis`, `flowhunt_db` |
@@ -63,7 +79,7 @@ target, but only local drivers are implemented in this slice.
 | `provider_config` | `VOICEBOT_PROVIDER_CONFIG_STORE_PROVIDER` | `json` | `VOICEBOT_PROVIDER_CONFIG_STORE_PATH` | `json`, `memory` | `flowhunt_db`, secret references |
 | `sip_trunks` | `VOICEBOT_SIP_TRUNK_STORE_PROVIDER` | `json` | `VOICEBOT_SIP_TRUNK_REGISTRY_PATH`, `VOICEBOT_SIP_TRUNK_PJSIP_INCLUDE_PATH` | `json` | `flowhunt_db`, secret references |
 | `subagent_tasks` | `VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER` | `json` | `VOICEBOT_SUBAGENT_TASK_STORE_PATH` | `json`, `memory` | `flowhunt_db`, `redis`, `flowhunt_queue` |
-| `audio_artifacts` | `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER` | `filesystem` | `VOICEBOT_TTS_CACHE_DIR`, `VOICEBOT_DEBUG_AUDIO_DIR` | `filesystem` | `object_storage`, CDN/cache |
+| `audio_artifacts` | `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER` | `filesystem` | `VOICEBOT_TTS_CACHE_DIR`, `VOICEBOT_DEBUG_AUDIO_DIR`, object-storage env vars | `filesystem` | `object_storage`, `s3`, CDN/cache |
 
 Compatibility note: existing `json` and `jsonl` aliases are preserved for local
 event storage, and object-style JSON stores continue to accept `jsonl` as an
@@ -95,6 +111,34 @@ diagnostics.
 Reusable contract tests live in `tests/storage_contract_cases.py`. New drivers
 should run the same lifecycle tests as the local memory/JSON/JSONL drivers
 before they are enabled in production configuration.
+
+## Docker Backend Profiles
+
+Default Docker Compose keeps the smallest local setup: JSON/JSONL state and
+filesystem artifacts under the `voicebot-data` volume. To start shared backing
+services for production-like development:
+
+```bash
+docker compose --profile production-like up -d postgres redis
+```
+
+For the first concrete managed-driver slice, SQLite events can be tested with:
+
+```text
+VOICEBOT_EVENT_STORE_PROVIDER=sqlite
+VOICEBOT_RELATIONAL_DATABASE_URL=/data/voicebot.sqlite3
+```
+
+Redis session leases can be tested with:
+
+```text
+VOICEBOT_SESSION_LEASE_STORE_PROVIDER=redis
+VOICEBOT_REDIS_URL=redis://redis:6379/0
+```
+
+PostgreSQL and object-storage drivers are registered as production targets, but
+their concrete table/object implementations still need follow-up driver work
+before they can be selected for running services.
 
 ## Audio Artifacts
 

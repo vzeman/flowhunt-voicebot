@@ -210,7 +210,10 @@ Response:
 
 Lists the storage driver registry and the currently selected driver per storage
 family. This endpoint is operational metadata only; it does not expose stored
-records or secrets.
+records or secrets. Family-level aliases such as
+`VOICEBOT_RELATIONAL_STORE_PROVIDER`, `VOICEBOT_CACHE_STORE_PROVIDER`, and
+`VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER` are reflected in the selected driver
+payload, and backend URLs are redacted.
 
 Response:
 

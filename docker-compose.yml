@@ -15,6 +15,13 @@ services:
       VOICEBOT_PUBLIC_SESSION_RATE_LIMIT_PER_MINUTE: ${VOICEBOT_PUBLIC_SESSION_RATE_LIMIT_PER_MINUTE:-60}
       VOICEBOT_PUBLIC_VOICEBOT_MAX_CONCURRENT_SESSIONS: ${VOICEBOT_PUBLIC_VOICEBOT_MAX_CONCURRENT_SESSIONS:-100}
       VOICEBOT_PUBLIC_SDP_MAX_BYTES: ${VOICEBOT_PUBLIC_SDP_MAX_BYTES:-131072}
+      VOICEBOT_RELATIONAL_STORE_PROVIDER: ${VOICEBOT_RELATIONAL_STORE_PROVIDER:-}
+      VOICEBOT_RELATIONAL_DATABASE_URL: ${VOICEBOT_RELATIONAL_DATABASE_URL:-/data/voicebot.sqlite3}
+      VOICEBOT_CACHE_STORE_PROVIDER: ${VOICEBOT_CACHE_STORE_PROVIDER:-}
+      VOICEBOT_REDIS_URL: ${VOICEBOT_REDIS_URL:-redis://redis:6379/0}
+      VOICEBOT_OBJECT_STORAGE_BUCKET: ${VOICEBOT_OBJECT_STORAGE_BUCKET:-}
+      VOICEBOT_OBJECT_STORAGE_ENDPOINT: ${VOICEBOT_OBJECT_STORAGE_ENDPOINT:-}
+      VOICEBOT_OBJECT_STORAGE_REGION: ${VOICEBOT_OBJECT_STORAGE_REGION:-}
       VOICEBOT_AUDIOSOCKET_HOST: 0.0.0.0
       VOICEBOT_AUDIOSOCKET_PORT: 9019
       VOICEBOT_WEBRTC_STUN_URLS: ${VOICEBOT_WEBRTC_STUN_URLS:-stun:stun.l.google.com:19302}
@@ -188,6 +195,31 @@ services:
     depends_on:
       - voicebot
 
+  postgres:
+    image: postgres:16-alpine
+    profiles:
+      - production-like
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-voicebot}
+      POSTGRES_USER: ${POSTGRES_USER:-voicebot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voicebot-local-dev}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - voicebot-postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    profiles:
+      - production-like
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - voicebot-redis:/data
+
 volumes:
   voicebot-cache:
   voicebot-data:
+  voicebot-postgres:
+  voicebot-redis:

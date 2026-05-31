@@ -45,6 +45,43 @@ class SpeechOnlyCallRecordingTests(unittest.TestCase):
             self.assertEqual(metadata["segments"][1]["playback_sample_rate"], 16000)
             self.assertGreater(metadata["segments"][1]["playback_samples"], metadata["segments"][1]["samples"])
 
+    def test_recorder_coalesces_adjacent_playback_packets_with_same_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = FilesystemArtifactStore(directory)
+            recorder = SpeechOnlyCallRecorder("call-3", store, silence_threshold=0.01)
+            started = recorder._started_at
+            packet = np.ones(160, dtype=np.float32) * 0.2
+            metadata = {"response_to_event_id": 6659, "response_kind": "colleague_result"}
+
+            recorder.append_speech("voicebot", packet, 8000, end_monotonic=started + 34.299, metadata=metadata)
+            recorder.append_speech("voicebot", packet, 8000, end_monotonic=started + 34.326, metadata=metadata)
+            recorder.append_speech("voicebot", packet, 8000, end_monotonic=started + 34.350, metadata=metadata)
+            saved = recorder.finalize()
+
+            self.assertIsNotNone(saved)
+            assert saved is not None
+            self.assertEqual(saved["segment_count"], 1)
+            self.assertEqual(saved["segments"][0]["source"], "voicebot")
+            self.assertEqual(saved["segments"][0]["samples"], 480)
+            self.assertEqual(saved["segments"][0]["duration_seconds"], 0.06)
+            self.assertEqual(saved["segments"][0]["metadata"], metadata)
+
+    def test_recorder_keeps_segments_separate_across_sources_or_large_gaps(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = FilesystemArtifactStore(directory)
+            recorder = SpeechOnlyCallRecorder("call-4", store, silence_threshold=0.01)
+            started = recorder._started_at
+            packet = np.ones(160, dtype=np.float32) * 0.2
+
+            recorder.append_speech("voicebot", packet, 8000, end_monotonic=started + 1.02, metadata={"id": 1})
+            recorder.append_speech("caller", packet, 8000, end_monotonic=started + 1.05, metadata={"id": 1})
+            recorder.append_speech("voicebot", packet, 8000, end_monotonic=started + 2.02, metadata={"id": 1})
+            saved = recorder.finalize()
+
+            self.assertIsNotNone(saved)
+            assert saved is not None
+            self.assertEqual(saved["segment_count"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

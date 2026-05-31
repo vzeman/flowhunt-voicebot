@@ -32,9 +32,10 @@ class FakeWebRTCManager:
     def __init__(self) -> None:
         self.created = []
         self.closed = []
+        self.session_snapshots = [{"session_id": "session-1", "call_id": "webrtc-session-1", "transport": "webrtc"}]
 
     def snapshots(self):
-        return [{"session_id": "session-1", "call_id": "webrtc-session-1", "transport": "webrtc"}]
+        return self.session_snapshots
 
     async def create_session(self, sdp: str, offer_type: str, metadata: dict):
         self.created.append((sdp, offer_type, metadata))
@@ -232,6 +233,148 @@ class ApiWebRTCTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(manager.created, [])
+
+    def test_public_bootstrap_returns_caller_safe_route_metadata(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        voicebots = VoicebotStore()
+        voicebots.create(VoicebotDefinition("workspace-1", "voicebot-1", display_name="Support", enabled=True))
+        channels = ChannelResolver(
+            [VoicebotChannelBinding("channel-1", "webrtc_widget", "workspace-1", "voicebot-1", "widget-1")]
+        )
+        routes = PublicVoicebotRouteStore(
+            [PublicVoicebotRoute("route-1", "workspace-1", "voicebot-1", "channel-1", "voice.example.com", "/", status="active")]
+        )
+        app = create_app(
+            EventStore(max_context_events=20),
+            CallRegistry(),
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore(directory.name),
+            None,
+            webrtc=FakeWebRTCManager(),
+            voicebots=voicebots,
+            channels=channels,
+            public_routes=routes,
+        )
+        client = TestClient(app)
+
+        response = client.get("/.well-known/flowhunt-voicebot", headers={"host": "voice.example.com"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["route_id"], "route-1")
+        self.assertEqual(payload["display_name"], "Support")
+        self.assertEqual(payload["session_endpoint"], "/webrtc/sessions")
+        self.assertNotIn("prompt_config", str(payload))
+        self.assertNotIn("api_key", str(payload).lower())
+
+    def test_public_bootstrap_rejects_unknown_route(self) -> None:
+        client, _manager = self.build_client(FakeWebRTCManager())
+
+        response = client.get("/.well-known/flowhunt-voicebot", headers={"host": "unknown.example.com"})
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_public_webrtc_session_rejects_blocked_origin(self) -> None:
+        client, manager = self.public_route_client(allowed_origins=("https://allowed.example",))
+
+        response = client.post(
+            "/webrtc/sessions",
+            headers={"host": "voice.example.com", "origin": "https://blocked.example"},
+            json={"sdp": "offer-sdp", "type": "offer"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"], "Origin is not allowed for this voicebot route")
+        self.assertEqual(manager.created, [])
+
+    def test_public_webrtc_session_rate_limits_by_route(self) -> None:
+        client, manager = self.public_route_client(settings=Settings(public_session_rate_limit_per_minute=1))
+
+        first = client.post(
+            "/webrtc/sessions",
+            headers={"host": "voice.example.com"},
+            json={"sdp": "offer-sdp", "type": "offer"},
+        )
+        second = client.post(
+            "/webrtc/sessions",
+            headers={"host": "voice.example.com"},
+            json={"sdp": "offer-sdp", "type": "offer"},
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(second.json()["detail"], "public_route_rate_limited")
+        self.assertEqual(len(manager.created), 1)
+
+    def test_public_webrtc_session_rejects_capacity_full(self) -> None:
+        manager = FakeWebRTCManager()
+        manager.session_snapshots = [
+            {
+                "session_id": "session-existing",
+                "call_id": "webrtc-existing",
+                "transport": "webrtc",
+                "metadata": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"},
+            }
+        ]
+        client, _manager = self.public_route_client(
+            manager=manager,
+            settings=Settings(public_voicebot_max_concurrent_sessions=1),
+        )
+
+        response = client.post(
+            "/webrtc/sessions",
+            headers={"host": "voice.example.com"},
+            json={"sdp": "offer-sdp", "type": "offer"},
+        )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.json()["detail"], "Voicebot session capacity is full")
+
+    def public_route_client(
+        self,
+        *,
+        allowed_origins: tuple[str, ...] = (),
+        settings: Settings | None = None,
+        manager: FakeWebRTCManager | None = None,
+    ) -> tuple[TestClient, FakeWebRTCManager]:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        voicebots = VoicebotStore()
+        voicebots.create(VoicebotDefinition("workspace-1", "voicebot-1", enabled=True))
+        channels = ChannelResolver(
+            [VoicebotChannelBinding("channel-1", "webrtc_widget", "workspace-1", "voicebot-1", "widget-1")]
+        )
+        routes = PublicVoicebotRouteStore(
+            [
+                PublicVoicebotRoute(
+                    "route-1",
+                    "workspace-1",
+                    "voicebot-1",
+                    "channel-1",
+                    "voice.example.com",
+                    "/",
+                    status="active",
+                    allowed_origins=allowed_origins,
+                )
+            ]
+        )
+        active_manager = manager or FakeWebRTCManager()
+        app = create_app(
+            EventStore(max_context_events=20),
+            CallRegistry(),
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore(directory.name),
+            None,
+            settings=settings,
+            webrtc=active_manager,
+            voicebots=voicebots,
+            channels=channels,
+            public_routes=routes,
+        )
+        return TestClient(app), active_manager
 
     def test_create_webrtc_session_rejects_non_offer_type(self) -> None:
         client, _manager = self.build_client(FakeWebRTCManager())

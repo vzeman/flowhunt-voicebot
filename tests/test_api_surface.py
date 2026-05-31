@@ -97,6 +97,7 @@ class ApiSurfaceTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         paths = set(response.json()["paths"])
+        self.assertIn("/.well-known/flowhunt-voicebot", paths)
         self.assertIn("/webrtc/sessions", paths)
         self.assertEqual(set(response.json()["paths"]["/webrtc/sessions"]), {"post"})
         self.assertIn("/health", paths)

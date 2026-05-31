@@ -67,6 +67,14 @@ WebRTC offer creation do not require this internal service key. Key values are
 redacted from `/config` and auth audit events include only key metadata such as
 `key_id`, service, scope, method, and path.
 
+Public connection limits are configured separately:
+
+```text
+VOICEBOT_PUBLIC_SESSION_RATE_LIMIT_PER_MINUTE=60
+VOICEBOT_PUBLIC_VOICEBOT_MAX_CONCURRENT_SESSIONS=100
+VOICEBOT_PUBLIC_SDP_MAX_BYTES=131072
+```
+
 ## Common Objects
 
 ### Event
@@ -467,7 +475,8 @@ Fields:
 - `tls_mode`: `managed` or `custom`; certificate provisioning is handled by the
   production ingress/certificate layer.
 - `allowed_origins`: origin allow-list for the future website widget/public
-  CORS layer.
+  connection layer. If the list is non-empty, public WebRTC offers must include
+  a matching `Origin` header.
 
 Duplicate active `host + path_prefix` routes are rejected, even across
 workspaces, because production ingress must have one unambiguous destination.
@@ -938,6 +947,39 @@ For manual local testing, open:
 http://127.0.0.1:8080/webrtc/test
 ```
 
+### GET `/.well-known/flowhunt-voicebot`
+
+Returns caller-safe bootstrap metadata for the public route resolved from
+`Host`/`X-Forwarded-Host` and the forwarded path prefix. Website widgets should
+call this endpoint before creating a WebRTC offer so they can discover the
+resolved voicebot, session endpoint, ICE servers, and public admission limits.
+
+Response:
+
+```json
+{
+  "route_id": "support-public",
+  "workspace_id": "workspace-1",
+  "voicebot_id": "support-bot",
+  "channel_id": "support-widget",
+  "display_name": "Support bot",
+  "transport": "webrtc",
+  "session_endpoint": "/webrtc/sessions",
+  "ice_servers": ["stun:stun.l.google.com:19302"],
+  "modalities": {"input": ["audio"], "output": ["audio"]},
+  "limits": {
+    "sdp_max_bytes": 131072,
+    "rate_limit_per_minute": 60,
+    "max_concurrent_sessions": 100
+  }
+}
+```
+
+Errors:
+
+- `404`: no active public route matches the forwarded host/path.
+- `403`: route, target voicebot, or target channel is disabled.
+
 ### GET `/webrtc/sessions`
 
 Lists active WebRTC sessions.
@@ -999,6 +1041,20 @@ route adds `workspace_id`, `voicebot_id`, `channel_id`, `public_route_id`,
 The route must be active, the target voicebot must be enabled, and the target
 channel must be enabled.
 
+For resolved public routes, session admission is checked before the WebRTC
+session is created:
+
+- The SDP offer must fit within `VOICEBOT_PUBLIC_SDP_MAX_BYTES`.
+- If the route has `allowed_origins`, the request `Origin` must match one of
+  them after trailing-slash normalization.
+- A voicebot cannot exceed
+  `VOICEBOT_PUBLIC_VOICEBOT_MAX_CONCURRENT_SESSIONS` active WebRTC sessions.
+- Each public route has a fixed-window session creation rate limit controlled
+  by `VOICEBOT_PUBLIC_SESSION_RATE_LIMIT_PER_MINUTE`.
+
+Every admission accept or reject writes a `session_admission_decided` event with
+the resolved route data, decision, and reason.
+
 Response:
 
 ```json
@@ -1015,6 +1071,9 @@ Response:
 Errors:
 
 - `400`: request type is not `offer`.
+- `403`: public route origin is not allowed.
+- `413`: public route SDP offer exceeds the configured maximum size.
+- `429`: public route rate or concurrent-session limit is exceeded.
 - `503`: WebRTC transport is not configured or `aiortc` is unavailable.
 
 ### DELETE `/webrtc/sessions/{session_id}`

@@ -326,6 +326,27 @@ def create_app(
         return await call_next(request)
 
     @app.middleware("http")
+    async def dashboard_user_auth_middleware(request: Request, call_next):
+        if not request.url.path.startswith("/dashboard"):
+            return await call_next(request)
+        auth = dashboard_user_auth(request)
+        if not auth["ok"]:
+            return JSONResponse({"detail": auth["reason"]}, status_code=auth["status_code"])
+        request.state.dashboard_user = auth["user"]
+        events.append(
+            "system",
+            "security_audit",
+            {
+                "action": "dashboard_request_authenticated",
+                "path": request.url.path,
+                "user_id": auth["user"]["user_id"],
+                "workspace_ids": auth["user"]["workspace_ids"],
+                "dev_login": auth["user"]["dev_login"],
+            },
+        )
+        return await call_next(request)
+
+    @app.middleware("http")
     async def public_widget_cors_middleware(request: Request, call_next):
         if request.url.path not in {"/.well-known/flowhunt-voicebot", "/webrtc/sessions", "/widget", "/widget.js"}:
             return await call_next(request)
@@ -1800,9 +1821,12 @@ def create_app(
         return HTMLResponse(DASHBOARD_PAGE)
 
     @app.get("/dashboard/state")
-    def dashboard_state(workspace_id: str | None = None) -> dict[str, Any]:
-        workspace_ids = list(voicebot_store.workspace_ids())
+    def dashboard_state(request: Request, workspace_id: str | None = None) -> dict[str, Any]:
+        dashboard_user = getattr(request.state, "dashboard_user", None)
+        workspace_ids = dashboard_visible_workspace_ids(dashboard_user)
         selected_workspace = workspace_id or (workspace_ids[0] if workspace_ids else "")
+        if selected_workspace and selected_workspace not in workspace_ids:
+            raise HTTPException(status_code=403, detail="dashboard_workspace_access_denied")
         voicebot_rows = []
         if selected_workspace:
             active_counts = active_session_counts_by_voicebot()
@@ -1820,7 +1844,8 @@ def create_app(
         return {
             "dashboard": {
                 "access": "internal",
-                "auth": "internal_api_key_now_flowhunt_sso_rbac_next",
+                "auth": "dashboard_user_login" if runtime_settings.dashboard_auth_enabled else "local_internal",
+                "user": dashboard_user,
                 "webrtc_test_page": "/webrtc/test",
             },
             "workspaces": workspace_ids,
@@ -2044,6 +2069,58 @@ def create_app(
                 key = (str(workspace_id), str(voicebot_id))
                 counts[key] = counts.get(key, 0) + 1
         return counts
+
+    def dashboard_user_auth(request: Request) -> dict[str, Any]:
+        if not runtime_settings.dashboard_auth_enabled:
+            return {
+                "ok": True,
+                "user": {
+                    "user_id": "local-dashboard",
+                    "workspace_ids": list(voicebot_store.workspace_ids()),
+                    "dev_login": False,
+                },
+            }
+        if dashboard_dev_login_allowed(request):
+            return {
+                "ok": True,
+                "user": {
+                    "user_id": "dev-dashboard-user",
+                    "workspace_ids": list(voicebot_store.workspace_ids()),
+                    "dev_login": True,
+                },
+            }
+        user_id = request.headers.get(runtime_settings.dashboard_user_id_header, "").strip()
+        if not user_id:
+            return {"ok": False, "status_code": 401, "reason": "dashboard_login_required"}
+        workspace_ids = [
+            item.strip()
+            for item in request.headers.get(runtime_settings.dashboard_workspace_ids_header, "").split(",")
+            if item.strip()
+        ]
+        return {
+            "ok": True,
+            "user": {
+                "user_id": user_id,
+                "workspace_ids": sorted(set(workspace_ids)),
+                "dev_login": False,
+            },
+        }
+
+    def dashboard_dev_login_allowed(request: Request) -> bool:
+        if not runtime_settings.dashboard_dev_login_enabled:
+            return False
+        if runtime_settings.deployment_mode not in {"local", "development", "dev", "test"}:
+            return False
+        return request.headers.get("X-FlowHunt-Dev-Login", "").lower() in {"1", "true", "yes"}
+
+    def dashboard_visible_workspace_ids(dashboard_user: dict[str, Any] | None) -> list[str]:
+        all_workspaces = list(voicebot_store.workspace_ids())
+        if not runtime_settings.dashboard_auth_enabled or not dashboard_user:
+            return all_workspaces
+        allowed = set(dashboard_user.get("workspace_ids") or [])
+        if dashboard_user.get("dev_login"):
+            return all_workspaces
+        return [workspace_id for workspace_id in all_workspaces if workspace_id in allowed]
 
     def emit_public_admission(
         route: PublicVoicebotRoute,

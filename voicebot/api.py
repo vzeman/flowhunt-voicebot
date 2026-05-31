@@ -3609,12 +3609,13 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     .time-col { width: 6.75rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
     .id-col { width: 4.25rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
     .type-col { width: 13rem; }
-    .message-cell, .summary-cell, .json-cell { overflow-wrap: anywhere; word-break: break-word; }
+    .message-cell, .summary-cell, .summary-detail-cell, .json-cell { overflow-wrap: anywhere; word-break: break-word; }
     .event-type, .client-type { display: inline-block; max-width: 100%; padding: .1rem .4rem; border: 1px solid #c9d7e8; border-radius: 999px; color: #0550ae; background: #ddf4ff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .client-type.error { color: #cf222e; background: #ffebe9; border-color: #ffcecb; }
     .client-type.state { color: #8250df; background: #fbefff; border-color: #ecd8ff; }
     .client-type.audio { color: #1a7f37; background: #dafbe1; border-color: #aceebb; }
     .summary-cell { color: var(--muted); }
+    .summary-detail-cell { padding: .55rem .75rem; color: #24292f; font-size: .8125rem; line-height: 1.5; white-space: pre-wrap; }
     .json-cell { padding: .65rem .75rem .8rem; }
     .json-view { margin: 0; color: #24292f; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .75rem; line-height: 1.55; white-space: pre-wrap; }
     .json-key { color: var(--key); font-weight: 600; }
@@ -3713,7 +3714,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     }
 
     function trimRows(tableBody, maxRows = 300) {
-      while (tableBody.rows.length > maxRows * 2) {
+      while (tableBody.rows.length > maxRows * 3) {
         tableBody.deleteRow(0);
       }
     }
@@ -3741,7 +3742,10 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       type.textContent = parsed.label;
       type.title = parsed.label;
       typeCell.appendChild(type);
-      appendCell(row, parsed.summary, "summary-cell");
+      appendCell(row, parsed.detail === null ? parsed.summary : "details below", "summary-cell");
+      if (parsed.summary && parsed.detail !== null) {
+        appendDetailTextRow(logNode, parsed.summary, 3, "summary-detail-cell");
+      }
       if (parsed.detail !== null) {
         const detailRow = logNode.insertRow();
         detailRow.className = "detail-row";
@@ -3794,7 +3798,11 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       type.textContent = event.type || "";
       type.title = event.type || "";
       typeCell.appendChild(type);
-      appendCell(row, eventSummary(event), "summary-cell");
+      const summary = eventSummary(event);
+      appendCell(row, summary === "No data" ? "No data" : "details below", "summary-cell");
+      if (summary && summary !== "No data") {
+        appendDetailTextRow(tableBody, summary, 4, "summary-detail-cell");
+      }
 
       if (event.data && Object.keys(event.data).length) {
         const detailRow = tableBody.insertRow();
@@ -3805,6 +3813,16 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         detailCell.appendChild(renderJson(event.data));
         detailRow.appendChild(detailCell);
       }
+    }
+
+    function appendDetailTextRow(tableBody, text, colSpan, className) {
+      const detailRow = tableBody.insertRow();
+      detailRow.className = "detail-row";
+      const detailCell = document.createElement("td");
+      detailCell.className = className;
+      detailCell.colSpan = colSpan;
+      detailCell.textContent = text;
+      detailRow.appendChild(detailCell);
     }
 
     function eventSummary(event) {

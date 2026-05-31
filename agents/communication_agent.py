@@ -141,9 +141,6 @@ def run_communication_agent(
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
                 tool_calls = ensure_action_acknowledgements(tool_calls)
                 initial_say = None if streamed_response else answer_as_say_call(answer, latest)
-                if delayed_ack.delivered and has_colleague_tool_call(tool_calls):
-                    initial_say = None
-                    answer = ""
                 if should_prepend_colleague_progress_ack(
                     latest,
                     tool_calls,
@@ -152,7 +149,12 @@ def run_communication_agent(
                     streamed_response=streamed_response,
                 ):
                     tool_calls = suppress_colleague_tool_progress(tool_calls)
-                    calls_for_initial_execution = [progress_ack_tool_call(latest), *tool_calls]
+                    calls_for_initial_execution = [colleague_progress_ack_tool_call(latest), *tool_calls]
+                elif delayed_ack.delivered and has_colleague_tool_call(tool_calls):
+                    initial_say = None
+                    answer = ""
+                    tool_calls = suppress_colleague_tool_progress(tool_calls)
+                    calls_for_initial_execution = [colleague_progress_ack_tool_call(latest), *tool_calls]
                 else:
                     calls_for_initial_execution = list(tool_calls)
                 if initial_say and tool_calls and not needs_spoken_followup(tool_calls):
@@ -569,12 +571,39 @@ def progress_ack_text_for_task(task: dict) -> str:
     return texts.get(language, "Give me a moment.")
 
 
+def colleague_progress_ack_text_for_task(task: dict) -> str:
+    data = task.get("data", {}) if isinstance(task.get("data"), dict) else {}
+    session_language = data.get("session_language") if isinstance(data.get("session_language"), dict) else {}
+    language = str(session_language.get("language") or "").lower()
+    texts = {
+        "sk": "Požiadal som kolegu, aby to preveril. Hneď vám poviem výsledok.",
+        "cs": "Požádal jsem kolegu, aby to prověřil. Hned vám řeknu výsledek.",
+        "de": "Ich frage einen Kollegen und gebe Ihnen gleich das Ergebnis.",
+        "es": "Le pedí ayuda a un compañero y le diré el resultado enseguida.",
+        "fr": "Je demande à un collègue de vérifier cela et je reviens vers vous.",
+        "hu": "Megkértem egy kollégát, hogy ellenőrizze, és mindjárt mondom az eredményt.",
+    }
+    return texts.get(language, "I asked a colleague to check that. I will tell you the result as soon as it is ready.")
+
+
 def progress_ack_tool_call(task: dict) -> dict:
     return {
         "name": "say",
         "arguments": {
             "call_id": task["call_id"],
             "text": progress_ack_text_for_task(task),
+            "response_to_event_id": None,
+            "response_kind": "progress_ack",
+        },
+    }
+
+
+def colleague_progress_ack_tool_call(task: dict) -> dict:
+    return {
+        "name": "say",
+        "arguments": {
+            "call_id": task["call_id"],
+            "text": colleague_progress_ack_text_for_task(task),
             "response_to_event_id": None,
             "response_kind": "progress_ack",
         },

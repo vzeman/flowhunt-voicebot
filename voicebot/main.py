@@ -29,6 +29,7 @@ from .runtime_storage import (
 )
 from .subagents import FlowHuntSubagentProvider, SubagentCoordinator
 from .webrtc import WebRTCSessionManager
+from .workspace_model import VoicebotDefinition, VoicebotStore
 
 
 def main() -> None:
@@ -44,6 +45,7 @@ def main() -> None:
     worker_queue = build_worker_queue_store(settings)
     sip_trunks = build_sip_trunk_store(settings)
     provider_configs = build_provider_config_store(settings)
+    voicebots = build_default_voicebot_store(settings)
     audio_artifacts = build_audio_artifact_store(settings)
     subagents = build_subagent_coordinator(settings, events)
     asterisk = (
@@ -94,6 +96,7 @@ def main() -> None:
         provider_configs=provider_configs,
         worker_queue=worker_queue,
         worker_registry=worker_registry,
+        voicebots=voicebots,
         voicebot_sessions=voicebot_sessions,
         session_leases=session_leases,
         audio_artifacts=audio_artifacts,
@@ -118,6 +121,21 @@ def build_subagent_coordinator(settings: Settings, events: EventStore) -> Subage
     if settings.flowhunt_project_id:
         coordinator.register(FlowHuntSubagentProvider("flowhunt_project", client, settings.flowhunt_project_id))
     return coordinator
+
+
+def build_default_voicebot_store(settings: Settings) -> VoicebotStore:
+    store = VoicebotStore()
+    if settings.default_workspace_id and settings.default_voicebot_id:
+        store.create(
+            VoicebotDefinition(
+                settings.default_workspace_id,
+                settings.default_voicebot_id,
+                display_name=settings.default_voicebot_display_name or settings.default_voicebot_id,
+                enabled=True,
+                metadata={"source": "local_default_seed"},
+            )
+        )
+    return store
 
 
 if __name__ == "__main__":

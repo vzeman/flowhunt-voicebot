@@ -4379,6 +4379,21 @@ DASHBOARD_PAGE = """<!doctype html>
     .session-layout { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(20rem,.8fr); gap:1rem; align-items:start; }
     .audio-row { display:flex; align-items:center; gap:.75rem; margin:.25rem 0 .75rem; }
     .audio-row audio { width:100%; }
+    .gantt-wrap { border:1px solid var(--border); border-radius:8px; overflow:auto; background:#fff; margin:0 0 1rem; }
+    .gantt-chart { min-width:52rem; padding:.7rem .8rem .85rem; }
+    .gantt-axis { position:relative; height:1.6rem; margin-left:8.5rem; border-bottom:1px solid var(--border); color:var(--muted); font-size:.75rem; }
+    .gantt-tick { position:absolute; top:0; transform:translateX(-50%); white-space:nowrap; }
+    .gantt-row { display:grid; grid-template-columns:8rem minmax(40rem,1fr); gap:.5rem; align-items:center; min-height:2rem; }
+    .gantt-label { color:var(--muted); font-size:.78rem; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .gantt-lane { position:relative; height:1.45rem; border-bottom:1px solid #eaeef2; background:linear-gradient(90deg,#f6f8fa 1px,transparent 1px); background-size:10% 100%; }
+    .gantt-bar { position:absolute; top:.32rem; min-width:.4rem; height:.75rem; border-radius:999px; background:#0969da; box-shadow:0 0 0 1px rgba(9,105,218,.2); }
+    .gantt-bar.marker { width:.5rem; height:.5rem; top:.45rem; border-radius:50%; }
+    .gantt-bar.speech { background:#1a7f37; }
+    .gantt-bar.stt { background:#8250df; }
+    .gantt-bar.agent { background:#0969da; }
+    .gantt-bar.tts, .gantt-bar.playback { background:#bf8700; }
+    .gantt-bar.subagent { background:#cf222e; }
+    .gantt-empty { padding:.75rem; color:var(--muted); }
     @media (max-width:980px) {
       main { grid-template-columns:1fr; }
       nav { display:flex; gap:.35rem; overflow:auto; border-right:0; border-bottom:1px solid var(--border); }
@@ -4484,6 +4499,10 @@ DASHBOARD_PAGE = """<!doctype html>
       <div class="session-layout">
         <div>
           <div class="panel">
+            <h3>Timeline</h3>
+            <div id="session-gantt" class="gantt-wrap"></div>
+          </div>
+          <div class="panel" style="margin-top:1rem;">
             <h3>Events</h3>
             <div class="table-wrap">
               <table aria-label="Session events">
@@ -4702,9 +4721,126 @@ DASHBOARD_PAGE = """<!doctype html>
         fetchJson(`${base}/timeline?limit=300`).catch((error) => ({events: [], error: String(error)})),
         fetchJson(`${base}/transcript?limit=300`).catch((error) => ({events: [], error: String(error)}))
       ]);
+      renderSessionGantt(timeline.events || []);
       renderSessionEvents(timeline.events || []);
       document.getElementById("session-transcript").textContent = JSON.stringify(transcript.events || transcript, null, 2);
       renderRecording(item.external_session_id || item.session_id);
+    }
+
+    function renderSessionGantt(events) {
+      const container = document.getElementById("session-gantt");
+      container.innerHTML = "";
+      const items = sessionGanttItems(events);
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "gantt-empty";
+        empty.textContent = "No timeline events available.";
+        container.appendChild(empty);
+        return;
+      }
+      const chart = document.createElement("div");
+      chart.className = "gantt-chart";
+      const start = Math.min(...items.map((item) => item.start));
+      const end = Math.max(...items.map((item) => item.end));
+      const span = Math.max(1, end - start);
+      chart.appendChild(renderGanttAxis(span));
+      const lanes = [...new Set(items.map((item) => item.lane))];
+      for (const lane of lanes) {
+        const row = document.createElement("div");
+        row.className = "gantt-row";
+        const label = document.createElement("div");
+        label.className = "gantt-label";
+        label.textContent = lane;
+        label.title = lane;
+        const laneNode = document.createElement("div");
+        laneNode.className = "gantt-lane";
+        for (const item of items.filter((entry) => entry.lane === lane)) {
+          const bar = document.createElement("div");
+          const duration = Math.max(0, item.end - item.start);
+          bar.className = `gantt-bar ${item.kind}${duration < 0.05 ? " marker" : ""}`;
+          bar.style.left = `${((item.start - start) / span) * 100}%`;
+          bar.style.width = `${Math.max(0.5, (duration / span) * 100)}%`;
+          bar.title = `${item.type} #${item.id} ${formatSeconds(item.start - start)}-${formatSeconds(item.end - start)}`;
+          laneNode.appendChild(bar);
+        }
+        row.appendChild(label);
+        row.appendChild(laneNode);
+        chart.appendChild(row);
+      }
+      container.appendChild(chart);
+    }
+
+    function renderGanttAxis(span) {
+      const axis = document.createElement("div");
+      axis.className = "gantt-axis";
+      const tickCount = Math.min(6, Math.max(2, Math.ceil(span / 5) + 1));
+      for (let index = 0; index < tickCount; index += 1) {
+        const tick = document.createElement("div");
+        tick.className = "gantt-tick";
+        const ratio = tickCount === 1 ? 0 : index / (tickCount - 1);
+        tick.style.left = `${ratio * 100}%`;
+        tick.textContent = formatSeconds(span * ratio);
+        axis.appendChild(tick);
+      }
+      return axis;
+    }
+
+    function sessionGanttItems(events) {
+      const parsed = events
+        .map((event) => ({event, time: Date.parse(event.timestamp || "")}))
+        .filter((item) => Number.isFinite(item.time));
+      if (!parsed.length) return [];
+      const firstMs = Math.min(...parsed.map((item) => item.time));
+      return parsed.map(({event, time}) => {
+        const start = (time - firstMs) / 1000;
+        const duration = ganttEventDuration(event);
+        return {
+          id: event.id ?? "",
+          type: event.type || "",
+          lane: ganttEventLane(event),
+          kind: ganttEventKind(event),
+          start,
+          end: start + duration,
+        };
+      });
+    }
+
+    function ganttEventDuration(event) {
+      const data = event.data || {};
+      const value = Number(data.duration_seconds ?? data.duration ?? data.elapsed ?? data.value);
+      if (Number.isFinite(value) && value > 0 && value < 3600) return value;
+      if (event.type === "agent_response_queued" || event.type === "tts_finished") {
+        const duration = Number(data.duration);
+        if (Number.isFinite(duration) && duration > 0) return duration;
+      }
+      return 0.02;
+    }
+
+    function ganttEventLane(event) {
+      const type = String(event.type || "");
+      if (type.includes("speech") || type === "user_transcript") return "Caller audio";
+      if (type.startsWith("stt_")) return "STT";
+      if (type.startsWith("agent_")) return "AI agent";
+      if (type.startsWith("tts_")) return "TTS";
+      if (type.startsWith("bot_playback")) return "Playback";
+      if (type.startsWith("subagent_") || type.startsWith("flowhunt_")) return "Subagents";
+      if (type.startsWith("call_control")) return "Call control";
+      return "System";
+    }
+
+    function ganttEventKind(event) {
+      const lane = ganttEventLane(event);
+      if (lane === "Caller audio") return "speech";
+      if (lane === "STT") return "stt";
+      if (lane === "AI agent") return "agent";
+      if (lane === "TTS") return "tts";
+      if (lane === "Playback") return "playback";
+      if (lane === "Subagents") return "subagent";
+      return "";
+    }
+
+    function formatSeconds(seconds) {
+      return `${Math.max(0, seconds).toFixed(seconds >= 10 ? 0 : 1)}s`;
     }
 
     function renderSessionEvents(events) {

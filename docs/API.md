@@ -45,6 +45,28 @@ internal service authentication.
 `GET /api/surface` also returns a route-audience inventory so tests and
 operators can detect unclassified endpoints before deployment.
 
+## Internal Service Authentication
+
+Internal and `local_dev` routes can be protected with a service API key:
+
+```text
+VOICEBOT_INTERNAL_AUTH_ENABLED=true
+VOICEBOT_INTERNAL_AUTH_HEADER=X-FlowHunt-Internal-Key
+VOICEBOT_INTERNAL_API_KEYS=admin:control-plane:secret-value:internal:*
+```
+
+`VOICEBOT_INTERNAL_API_KEYS` is comma-separated. Supported entry formats are:
+
+- `secret`
+- `key_id:secret`
+- `key_id:service:secret:scope1|scope2`
+
+When enabled, internal endpoints reject requests without a valid key. Public
+caller-safe endpoints such as `GET /health`, `GET /health/liveness`, and public
+WebRTC offer creation do not require this internal service key. Key values are
+redacted from `/config` and auth audit events include only key metadata such as
+`key_id`, service, scope, method, and path.
+
 ## Common Objects
 
 ### Event

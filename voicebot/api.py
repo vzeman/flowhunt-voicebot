@@ -104,6 +104,7 @@ from .multimodal import (
 from .observability import ConversationExpectation, build_timeline, diagnostics_summary, evaluate_conversation, evaluate_slos
 from .pipeline_contract import pipeline_contract_payload
 from .progress import ProgressCadenceMemory, normalize_progress_message
+from .public_access import FixedWindowPublicRateLimiter, origin_allowed
 from .provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities, provider_catalog
 from .provider_config import (
     ProviderChoice,
@@ -283,6 +284,7 @@ def create_app(
     runtime_config_store = runtime_configs or VoicebotRuntimeConfigStore()
     prompt_config_store = prompt_configs or VoicebotPromptConfigStore()
     internal_keys = parse_internal_api_keys(runtime_settings.internal_api_keys)
+    public_rate_limiter = FixedWindowPublicRateLimiter(runtime_settings.public_session_rate_limit_per_minute)
 
     @app.middleware("http")
     async def internal_auth_middleware(request: Request, call_next):
@@ -1773,6 +1775,39 @@ def create_app(
     def config() -> dict[str, Any]:
         return {"settings": redacted_settings(runtime_settings)}
 
+    @app.get("/.well-known/flowhunt-voicebot")
+    def public_voicebot_bootstrap(request: Request) -> dict[str, Any]:
+        route = resolve_public_voicebot_route(request)
+        if route is None:
+            events.append(
+                "system",
+                "session_admission_decided",
+                {
+                    "transport": "webrtc",
+                    "decision": "reject",
+                    "reason": "public_route_not_found",
+                    "host": request.headers.get("x-forwarded-host") or request.headers.get("host") or "",
+                },
+            )
+            raise HTTPException(status_code=404, detail="Public voicebot route not found")
+        voicebot = voicebot_store.get(route.workspace_id, route.voicebot_id)
+        return {
+            "route_id": route.route_id,
+            "workspace_id": route.workspace_id,
+            "voicebot_id": route.voicebot_id,
+            "channel_id": route.channel_id,
+            "display_name": voicebot.display_name if voicebot else "",
+            "transport": "webrtc",
+            "session_endpoint": "/webrtc/sessions",
+            "ice_servers": list(runtime_settings.webrtc_stun_urls),
+            "modalities": {"input": ["audio"], "output": ["audio"]},
+            "limits": {
+                "sdp_max_bytes": runtime_settings.public_sdp_max_bytes,
+                "rate_limit_per_minute": runtime_settings.public_session_rate_limit_per_minute,
+                "max_concurrent_sessions": runtime_settings.public_voicebot_max_concurrent_sessions,
+            },
+        }
+
     @app.get("/webrtc/sessions")
     def list_webrtc_sessions() -> dict[str, Any]:
         if webrtc is None:
@@ -1793,6 +1828,7 @@ def create_app(
             metadata = dict(request.metadata or {})
             route = resolve_public_voicebot_route(http_request)
             if route is not None:
+                enforce_public_session_admission(route, http_request, request)
                 metadata.update(route.event_data())
                 metadata["public_route_resolved"] = True
             workspace_id = non_empty_str(metadata.get("workspace_id"))
@@ -1825,6 +1861,62 @@ def create_app(
         if channel is None or not channel.enabled:
             raise HTTPException(status_code=403, detail="Public route channel is disabled")
         return route
+
+    def enforce_public_session_admission(
+        route: PublicVoicebotRoute,
+        request: Request,
+        offer: WebRTCOfferRequest,
+    ) -> None:
+        if len(offer.sdp.encode("utf-8")) > runtime_settings.public_sdp_max_bytes:
+            emit_public_admission(route, "reject", "sdp_too_large")
+            raise HTTPException(status_code=413, detail="SDP offer is too large")
+        if not origin_allowed(request.headers.get("origin"), route.allowed_origins):
+            emit_public_admission(route, "reject", "origin_not_allowed")
+            raise HTTPException(status_code=403, detail="Origin is not allowed for this voicebot route")
+        active_count = active_public_voicebot_session_count(route)
+        if active_count >= runtime_settings.public_voicebot_max_concurrent_sessions:
+            emit_public_admission(route, "reject", "voicebot_session_capacity_full", {"active_sessions": active_count})
+            raise HTTPException(status_code=429, detail="Voicebot session capacity is full")
+        decision = public_rate_limiter.check_and_increment(route.route_id)
+        if not decision.allowed:
+            emit_public_admission(route, "reject", decision.reason, decision.to_dict())
+            raise HTTPException(
+                status_code=429,
+                detail=decision.reason,
+                headers={"Retry-After": str(decision.retry_after_seconds or 60)},
+            )
+        emit_public_admission(route, "accept", "accepted", {"active_sessions": active_count})
+
+    def active_public_voicebot_session_count(route: PublicVoicebotRoute) -> int:
+        if webrtc is None:
+            return 0
+        count = 0
+        for snapshot in webrtc.snapshots():
+            metadata = snapshot.get("metadata") if isinstance(snapshot.get("metadata"), dict) else {}
+            route_data = snapshot.get("route") if isinstance(snapshot.get("route"), dict) else {}
+            workspace_id = metadata.get("workspace_id") or route_data.get("workspace_id")
+            voicebot_id = metadata.get("voicebot_id") or route_data.get("voicebot_id")
+            if workspace_id == route.workspace_id and voicebot_id == route.voicebot_id:
+                count += 1
+        return count
+
+    def emit_public_admission(
+        route: PublicVoicebotRoute,
+        decision: str,
+        reason: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        events.append(
+            "system",
+            "session_admission_decided",
+            {
+                "transport": "webrtc",
+                "decision": decision,
+                "reason": reason,
+                **route.event_data(),
+                **(extra or {}),
+            },
+        )
 
     @app.delete("/webrtc/sessions/{session_id}")
     async def delete_webrtc_session(session_id: str) -> dict[str, Any]:

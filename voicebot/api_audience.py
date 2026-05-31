@@ -19,6 +19,7 @@ class RouteAudience:
 
 
 PUBLIC_ROUTE_KEYS = {
+    ("GET", "/.well-known/flowhunt-voicebot"),
     ("GET", "/health"),
     ("GET", "/health/liveness"),
     ("GET", "/openapi/public.json"),

@@ -661,13 +661,11 @@ def fast_tool_calls(task: dict) -> list[dict]:
     call_id = task["call_id"]
 
     if data.get("reason") == "call_connected":
-        if data.get("use_agent_prompt"):
-            return []
         return [{
             "name": "say",
             "arguments": {
                 "call_id": call_id,
-                "text": "Hello, this is the FlowHunt voicebot. How can I help you?",
+                "text": str(data.get("text") or "Hello, how can I help you?"),
                 "response_to_event_id": event_id,
             },
         }]

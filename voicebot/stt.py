@@ -186,6 +186,11 @@ class OpenAISTTProvider(STTProvider):
         normalized_prompt = _normalize_for_similarity(self._prompt)
         if not normalized_text or not normalized_prompt:
             return False
+        if len(normalized_text) >= 12 and (
+            normalized_prompt.startswith(normalized_text)
+            or normalized_text.startswith(normalized_prompt[: min(len(normalized_prompt), len(normalized_text))])
+        ):
+            return True
         if difflib.SequenceMatcher(None, normalized_text, normalized_prompt).ratio() >= 0.70:
             return True
 

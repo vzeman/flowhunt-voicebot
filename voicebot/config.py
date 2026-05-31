@@ -176,7 +176,7 @@ class Settings:
     greet_on_connect: bool = env_bool("VOICEBOT_GREET_ON_CONNECT", True)
     connect_greeting_prompt: str = os.getenv(
         "VOICEBOT_CONNECT_GREETING_PROMPT",
-        "The call has connected. Greet the caller and ask how you can help.",
+        "Hello, how can I help you?",
     )
 
     ami_host: str = os.getenv("VOICEBOT_AMI_HOST", "asterisk")

@@ -1143,17 +1143,17 @@ def create_app(
         session = voicebot_session_store.get(session_id, workspace_id=workspace_id)
         if session is None or session.voicebot_id != voicebot_id:
             raise HTTPException(status_code=404, detail="Session not found")
+        call_id = session.external_session_id or session.session_id
         timeline = events.list_events(
             after=after,
             limit=validated_limit(limit),
-            workspace_id=workspace_id,
-            voicebot_id=voicebot_id,
-            session_id=session_id,
+            call_id=call_id,
         )
         return {
             "workspace_id": workspace_id,
             "voicebot_id": voicebot_id,
             "session_id": session_id,
+            "call_id": call_id,
             "events": [event_to_dict(event) for event in timeline],
         }
 
@@ -1169,12 +1169,13 @@ def create_app(
         session = voicebot_session_store.get(session_id, workspace_id=workspace_id)
         if session is None or session.voicebot_id != voicebot_id:
             raise HTTPException(status_code=404, detail="Session not found")
-        transcript = transcripts.read(session_id, after=after, limit=validated_limit(limit))
+        call_id = session.external_session_id or session.session_id
+        transcript = transcripts.read(call_id, after=after, limit=validated_limit(limit))
         audit_event = append_security_audit(
             workspace_id=workspace_id,
             voicebot_id=voicebot_id,
             session_id=session_id,
-            call_id=session_id,
+            call_id=call_id,
             action="transcript_read",
             actor="api",
             resource_type="transcript",
@@ -1187,6 +1188,7 @@ def create_app(
             "workspace_id": workspace_id,
             "voicebot_id": voicebot_id,
             "session_id": session_id,
+            "call_id": call_id,
             "events": transcript,
         }
 

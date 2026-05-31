@@ -3595,7 +3595,9 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     button { font: inherit; margin-right: .5rem; padding: .45rem .75rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; }
     button:not(:disabled):hover { border-color: var(--accent); }
     button:disabled { color: #8c959f; cursor: not-allowed; background: #f6f8fa; }
-    audio { display: block; margin: 1rem 0; width: 100%; max-width: 48rem; }
+    .call-controls { display: flex; align-items: center; gap: .75rem; margin: 1rem 0; max-width: 60rem; }
+    .button-group { display: flex; align-items: center; gap: .5rem; flex: 0 0 auto; }
+    audio { display: block; width: 100%; min-width: 16rem; margin: 0; flex: 1 1 auto; }
     .logs { display: grid; grid-template-columns: minmax(18rem, .8fr) repeat(2, minmax(0, 1.1fr)); gap: 1rem; margin-top: 1rem; }
     .log-panel h2 { font-size: 1rem; margin: 0 0 .5rem; }
     .table-wrap { border: 1px solid var(--border); border-radius: 8px; height: 30rem; overflow: auto; background: #fff; }
@@ -3608,7 +3610,10 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     .id-col { width: 4.25rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
     .type-col { width: 13rem; }
     .message-cell, .summary-cell, .json-cell { overflow-wrap: anywhere; word-break: break-word; }
-    .event-type { display: inline-block; max-width: 100%; padding: .1rem .4rem; border: 1px solid #c9d7e8; border-radius: 999px; color: #0550ae; background: #ddf4ff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .event-type, .client-type { display: inline-block; max-width: 100%; padding: .1rem .4rem; border: 1px solid #c9d7e8; border-radius: 999px; color: #0550ae; background: #ddf4ff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .client-type.error { color: #cf222e; background: #ffebe9; border-color: #ffcecb; }
+    .client-type.state { color: #8250df; background: #fbefff; border-color: #ecd8ff; }
+    .client-type.audio { color: #1a7f37; background: #dafbe1; border-color: #aceebb; }
     .summary-cell { color: var(--muted); }
     .json-cell { padding: .65rem .75rem .8rem; }
     .json-view { margin: 0; color: #24292f; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .75rem; line-height: 1.55; white-space: pre-wrap; }
@@ -3617,22 +3622,26 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     .json-string { color: #0a3069; }
     .json-null { color: #6e7781; font-weight: 700; }
     .empty-cell { color: #8c959f; font-family: inherit; }
-    @media (max-width: 800px) { .logs { grid-template-columns: 1fr; } }
+    @media (max-width: 800px) { .logs { grid-template-columns: 1fr; } .call-controls { align-items: stretch; flex-direction: column; } .button-group { width: 100%; } .button-group button { flex: 1; } audio { min-width: 0; } }
   </style>
 </head>
 <body>
   <h1>FlowHunt Voicebot WebRTC Test</h1>
   <p>Click Start, allow microphone access, then speak. The bot audio is played by the browser.</p>
-  <button id="start">Start call</button>
-  <button id="stop" disabled>Stop call</button>
-  <audio id="remote" autoplay playsinline controls></audio>
+  <div class="call-controls">
+    <div class="button-group">
+      <button id="start">Start call</button>
+      <button id="stop" disabled>Stop call</button>
+    </div>
+    <audio id="remote" autoplay playsinline controls></audio>
+  </div>
   <div class="logs">
     <section class="log-panel">
       <h2>Client Log</h2>
       <div class="table-wrap">
         <table aria-label="Client log">
           <thead>
-            <tr><th class="time-col">Time</th><th>Message</th></tr>
+            <tr><th class="time-col">Time</th><th class="type-col">Type</th><th>Summary</th></tr>
           </thead>
           <tbody id="log"></tbody>
         </table>
@@ -3716,12 +3725,53 @@ WEBRTC_TEST_PAGE = """<!doctype html>
 
     function log(message) {
       const now = new Date();
-      const row = logNode.insertRow();
-      row.className = "summary-row";
-      appendCell(row, formatTime(now), "time-col", fullTimestamp(now));
-      appendCell(row, message, "message-cell");
+      appendClientLogRows(now, message);
       trimRows(logNode);
       scrollTableToBottom(logNode);
+    }
+
+    function appendClientLogRows(timestamp, message) {
+      const parsed = parseClientLogMessage(message);
+      const row = logNode.insertRow();
+      row.className = "summary-row";
+      appendCell(row, formatTime(timestamp), "time-col", fullTimestamp(timestamp));
+      const typeCell = appendCell(row, "", "type-col");
+      const type = document.createElement("span");
+      type.className = `client-type ${parsed.kind}`;
+      type.textContent = parsed.label;
+      type.title = parsed.label;
+      typeCell.appendChild(type);
+      appendCell(row, parsed.summary, "summary-cell");
+      if (parsed.detail !== null) {
+        const detailRow = logNode.insertRow();
+        detailRow.className = "detail-row";
+        const detailCell = document.createElement("td");
+        detailCell.className = "json-cell";
+        detailCell.colSpan = 3;
+        detailCell.appendChild(renderJson(parsed.detail));
+        detailRow.appendChild(detailCell);
+      }
+    }
+
+    function parseClientLogMessage(message) {
+      if (message.startsWith("local audio settings=")) {
+        const raw = message.slice("local audio settings=".length);
+        try {
+          return {kind: "audio", label: "audio", summary: "Local microphone settings", detail: JSON.parse(raw)};
+        } catch {
+          return {kind: "audio", label: "audio", summary: message, detail: null};
+        }
+      }
+      if (message.startsWith("connectionState=")) {
+        return {kind: "state", label: "state", summary: message.slice("connectionState=".length), detail: null};
+      }
+      if (message.startsWith("error:") || message.includes("failed")) {
+        return {kind: "error", label: "error", summary: message, detail: null};
+      }
+      if (message.startsWith("received remote")) {
+        return {kind: "audio", label: "media", summary: message, detail: null};
+      }
+      return {kind: "", label: "client", summary: message, detail: null};
     }
 
     function logVoicebotEvent(event) {

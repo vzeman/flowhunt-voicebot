@@ -4364,7 +4364,10 @@ DASHBOARD_PAGE = """<!doctype html>
     .toolbar { display:flex; align-items:end; gap:.75rem; margin:0 0 .85rem; flex-wrap:wrap; }
     .toolbar label { display:block; min-width:14rem; }
     .toolbar .grow { flex:1 1 18rem; }
+    .table-filter { margin:0 0 .55rem; }
+    .table-filter input { max-width:24rem; }
     .table-wrap { border:1px solid var(--border); border-radius:8px; overflow:auto; background:#fff; max-height:34rem; }
+    .table-wrap.compact { max-height:24rem; }
     .split { display:grid; grid-template-columns:minmax(18rem,24rem) minmax(0,1fr); gap:1rem; align-items:start; }
     .panel { border:1px solid var(--border); border-radius:8px; padding:.85rem; background:var(--panel); }
     .tabs { display:flex; gap:.35rem; margin:.75rem 0; border-bottom:1px solid var(--border); }
@@ -4376,7 +4379,26 @@ DASHBOARD_PAGE = """<!doctype html>
     .form-grid label.full { grid-column:1 / -1; }
     .badge { display:inline-block; padding:.1rem .45rem; border-radius:999px; background:#dafbe1; color:#1a7f37; font-weight:700; font-size:.75rem; }
     .badge.off { background:#ffebe9; color:var(--danger); }
-    .session-layout { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(20rem,.8fr); gap:1rem; align-items:start; }
+    .session-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin:.25rem 0 1rem; flex-wrap:wrap; }
+    .session-title-block h2 { margin:0; }
+    .session-summary { display:flex; flex-wrap:wrap; gap:.45rem; }
+    .session-chip { display:inline-flex; align-items:center; gap:.25rem; padding:.18rem .5rem; border:1px solid var(--border); border-radius:999px; background:#f6f8fa; color:var(--muted); font-size:.78rem; font-weight:700; }
+    .session-chip strong { color:var(--text); font-weight:700; }
+    .session-layout { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(22rem,.75fr); gap:1rem; align-items:start; }
+    .session-stack { display:grid; gap:1rem; }
+    .panel-title { display:flex; align-items:baseline; justify-content:space-between; gap:.75rem; margin:0 0 .65rem; }
+    .panel-title h3 { margin:0; }
+    .event-table th, .event-table td, .transcript-table th, .transcript-table td { padding:.48rem .6rem; }
+    .event-row { background:#fff; }
+    .event-row:hover { background:#f6f8fa; }
+    .event-detail-row td { padding:0 .6rem .65rem; background:#fbfcfd; }
+    .event-json { max-height:14rem; border-color:#eaeef2; background:#f6f8fa; color:#24292f; }
+    .event-type-pill { display:inline-block; max-width:100%; padding:.12rem .45rem; border:1px solid #c9d7e8; border-radius:999px; background:#ddf4ff; color:#0550ae; font-size:.75rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .event-summary { color:#57606a; font-size:.8rem; line-height:1.35; }
+    .transcript-speaker { display:inline-block; padding:.12rem .45rem; border-radius:999px; font-size:.75rem; font-weight:700; }
+    .transcript-speaker.caller { color:#1a7f37; background:#dafbe1; }
+    .transcript-speaker.voicebot { color:#8250df; background:#fbefff; }
+    .transcript-text { line-height:1.4; }
     .audio-row { display:flex; align-items:center; gap:.75rem; margin:.25rem 0 .75rem; }
     .audio-row audio { width:100%; }
     .gantt-wrap { border:1px solid var(--border); border-radius:8px; overflow:auto; background:#fff; margin:0 0 1rem; }
@@ -4428,6 +4450,7 @@ DASHBOARD_PAGE = """<!doctype html>
       <div class="split">
         <div class="panel">
           <h2>Workspaces</h2>
+          <div class="table-filter"><input data-table-filter="workspace-rows" placeholder="Filter workspaces"></div>
           <div class="table-wrap">
             <table aria-label="Workspaces">
               <thead><tr><th>workspace_id</th><th>name</th></tr></thead>
@@ -4439,6 +4462,7 @@ DASHBOARD_PAGE = """<!doctype html>
           <h2 id="workspace-title">Workspace detail</h2>
           <div class="muted" id="workspace-hint">Select a workspace to see its voicebots.</div>
           <h3>Voicebots</h3>
+          <div class="table-filter"><input data-table-filter="voicebot-rows" placeholder="Filter voicebots"></div>
           <div class="table-wrap">
             <table aria-label="Voicebots">
               <thead><tr><th>voicebot_id</th><th>name</th><th>enabled</th><th>sessions</th></tr></thead>
@@ -4481,6 +4505,7 @@ DASHBOARD_PAGE = """<!doctype html>
 
     <section id="view-active">
       <h2>Active Sessions</h2>
+      <div class="table-filter"><input data-table-filter="active-session-rows" placeholder="Filter active sessions"></div>
       <div class="table-wrap">
         <table aria-label="Active sessions">
           <thead><tr><th>workspace_id</th><th>voicebot_id</th><th>session_id</th><th>status</th><th>datetime started</th><th>length</th></tr></thead>
@@ -4491,6 +4516,7 @@ DASHBOARD_PAGE = """<!doctype html>
 
     <section id="view-history">
       <h2>Sessions History</h2>
+      <div class="table-filter"><input data-table-filter="history-session-rows" placeholder="Filter session history"></div>
       <div class="table-wrap">
         <table aria-label="Sessions history">
           <thead><tr><th>workspace_id</th><th>voicebot_id</th><th>session_id</th><th>status</th><th>datetime started</th><th>length</th></tr></thead>
@@ -4500,20 +4526,26 @@ DASHBOARD_PAGE = """<!doctype html>
     </section>
 
     <section id="view-session">
-      <button type="button" data-view-back>Back</button>
-      <h2 id="session-title">Session</h2>
+      <div class="session-header">
+        <div class="session-title-block">
+          <button type="button" data-view-back>Back</button>
+          <h2 id="session-title">Session</h2>
+        </div>
+        <div id="session-summary" class="session-summary"></div>
+      </div>
       <div class="session-layout">
-        <div>
+        <div class="session-stack">
           <div class="panel">
-            <h3>Timeline</h3>
+            <div class="panel-title"><h3>Timeline</h3><span class="muted">Click a bar to inspect details</span></div>
             <div id="session-gantt" class="gantt-wrap"></div>
             <div id="session-gantt-detail" class="gantt-detail muted">Click a timeline element to inspect the event details.</div>
           </div>
-          <div class="panel" style="margin-top:1rem;">
-            <h3>Events</h3>
+          <div class="panel">
+            <div class="panel-title"><h3>Events</h3><span class="muted" id="session-event-count"></span></div>
+            <div class="table-filter"><input data-table-filter="session-event-rows" placeholder="Filter events"></div>
             <div class="table-wrap">
-              <table aria-label="Session events">
-                <thead><tr><th style="width:5rem;">ID</th><th style="width:9rem;">Time</th><th style="width:13rem;">Type</th><th>Data</th></tr></thead>
+              <table aria-label="Session events" class="event-table">
+                <thead><tr><th style="width:7rem;">Time</th><th style="width:5rem;">ID</th><th style="width:13rem;">Type</th><th>Summary</th></tr></thead>
                 <tbody id="session-event-rows"></tbody>
               </table>
             </div>
@@ -4521,12 +4553,18 @@ DASHBOARD_PAGE = """<!doctype html>
         </div>
         <div>
           <div class="panel">
-            <h3>Recording</h3>
+            <div class="panel-title"><h3>Recording</h3></div>
             <div id="session-recording" class="muted">No recording loaded.</div>
           </div>
           <div class="panel" style="margin-top:1rem;">
-            <h3>Transcript</h3>
-            <pre id="session-transcript">[]</pre>
+            <div class="panel-title"><h3>Transcript</h3><span class="muted" id="session-transcript-count"></span></div>
+            <div class="table-filter"><input data-table-filter="session-transcript-rows" placeholder="Filter transcript"></div>
+            <div class="table-wrap compact">
+              <table aria-label="Session transcript" class="transcript-table">
+                <thead><tr><th style="width:7rem;">Time</th><th style="width:6rem;">Speaker</th><th>Text</th></tr></thead>
+                <tbody id="session-transcript-rows"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -4555,6 +4593,9 @@ DASHBOARD_PAGE = """<!doctype html>
     document.querySelector("[data-view-back]").addEventListener("click", () => showView(previousView));
     document.querySelectorAll("[data-detail-tab]").forEach((button) => {
       button.addEventListener("click", () => showDetailTab(button.dataset.detailTab));
+    });
+    document.querySelectorAll("[data-table-filter]").forEach((input) => {
+      input.addEventListener("input", () => applyTableFilter(input.dataset.tableFilter));
     });
     document.getElementById("save-voicebot").addEventListener("click", saveVoicebot);
     document.getElementById("save-prompts").addEventListener("click", savePrompts);
@@ -4593,6 +4634,7 @@ DASHBOARD_PAGE = """<!doctype html>
       renderSessions("active-session-rows", state.active_sessions || []);
       renderSessions("history-session-rows", state.session_history || []);
       renderTestSelectors();
+      applyAllTableFilters();
     }
 
     function renderWorkspaces() {
@@ -4611,6 +4653,7 @@ DASHBOARD_PAGE = """<!doctype html>
       }
       document.getElementById("workspace-title").textContent = selectedWorkspaceId ? `Workspace ${selectedWorkspaceId}` : "Workspace detail";
       document.getElementById("workspace-hint").textContent = selectedWorkspaceId ? "Open a voicebot to edit settings and prompts." : "Select a workspace to see its voicebots.";
+      applyTableFilter("workspace-rows");
     }
 
     function renderVoicebots() {
@@ -4625,6 +4668,7 @@ DASHBOARD_PAGE = """<!doctype html>
         row.insertCell().textContent = bot.active_sessions || 0;
         row.onclick = () => openVoicebot(bot);
       }
+      applyTableFilter("voicebot-rows");
     }
 
     async function openVoicebot(bot) {
@@ -4717,12 +4761,14 @@ DASHBOARD_PAGE = """<!doctype html>
         row.insertCell().textContent = sessionLength(item);
         row.onclick = () => openSession(item, targetId === "active-session-rows" ? "active" : "history");
       }
+      applyTableFilter(targetId);
     }
 
     async function openSession(item, fromView) {
       previousView = fromView;
       showView("session");
       document.getElementById("session-title").textContent = `Session ${item.session_id}`;
+      renderSessionSummary(item);
       const base = `/workspaces/${encodeURIComponent(item.workspace_id)}/voicebots/${encodeURIComponent(item.voicebot_id)}/sessions/${encodeURIComponent(item.session_id)}`;
       const [timeline, transcript] = await Promise.all([
         fetchJson(`${base}/timeline?limit=300`).catch((error) => ({events: [], error: String(error)})),
@@ -4730,8 +4776,26 @@ DASHBOARD_PAGE = """<!doctype html>
       ]);
       renderSessionGantt(timeline.events || []);
       renderSessionEvents(timeline.events || []);
-      document.getElementById("session-transcript").textContent = JSON.stringify(transcript.events || transcript, null, 2);
+      renderSessionTranscript(transcript.events || []);
       renderRecording(item.external_session_id || item.session_id);
+    }
+
+    function renderSessionSummary(item) {
+      const container = document.getElementById("session-summary");
+      container.innerHTML = "";
+      const values = [
+        ["workspace", item.workspace_id || ""],
+        ["voicebot", item.voicebot_id || ""],
+        ["status", item.status || ""],
+        ["length", sessionLength(item) || ""],
+      ];
+      for (const [label, value] of values) {
+        if (!value) continue;
+        const chip = document.createElement("span");
+        chip.className = "session-chip";
+        chip.innerHTML = `${escapeHtml(label)} <strong>${escapeHtml(value)}</strong>`;
+        container.appendChild(chip);
+      }
     }
 
     function renderSessionGantt(events) {
@@ -4890,14 +4954,95 @@ DASHBOARD_PAGE = """<!doctype html>
     function renderSessionEvents(events) {
       const tbody = document.getElementById("session-event-rows");
       tbody.innerHTML = "";
+      document.getElementById("session-event-count").textContent = `${events.length} events`;
       for (const event of events) {
         const row = tbody.insertRow();
+        row.className = "event-row";
+        row.insertCell().textContent = formatTimeOnly(event.timestamp);
         row.insertCell().textContent = event.id ?? "";
-        row.insertCell().textContent = formatDate(event.timestamp);
-        row.insertCell().textContent = event.type || "";
-        const data = row.insertCell();
-        data.appendChild(renderJsonBlock(event.data || {}));
+        const typeCell = row.insertCell();
+        const type = document.createElement("span");
+        type.className = "event-type-pill";
+        type.textContent = event.type || "";
+        type.title = event.type || "";
+        typeCell.appendChild(type);
+        const summary = row.insertCell();
+        summary.className = "event-summary";
+        summary.textContent = eventSummary(event);
+        const detailRow = tbody.insertRow();
+        detailRow.className = "event-detail-row";
+        const detailCell = detailRow.insertCell();
+        detailCell.colSpan = 4;
+        const json = renderJsonBlock(event.data || {});
+        json.classList.add("event-json");
+        detailCell.appendChild(json);
       }
+      applyTableFilter("session-event-rows");
+    }
+
+    function renderSessionTranscript(events) {
+      const tbody = document.getElementById("session-transcript-rows");
+      tbody.innerHTML = "";
+      const rows = events.filter((event) => {
+        const kind = String(event.data?.response_kind || "");
+        return (event.type === "user_transcript" && event.data?.text)
+          || (event.type === "agent_response_received" && event.data?.text && !["progress_ack", "stream_chunk"].includes(kind));
+      });
+      document.getElementById("session-transcript-count").textContent = `${rows.length} rows`;
+      for (const event of rows) {
+        const row = tbody.insertRow();
+        row.insertCell().textContent = formatTimeOnly(event.timestamp);
+        const speakerCell = row.insertCell();
+        const speaker = document.createElement("span");
+        const isCaller = event.type === "user_transcript";
+        speaker.className = `transcript-speaker ${isCaller ? "caller" : "voicebot"}`;
+        speaker.textContent = isCaller ? "Caller" : "Voicebot";
+        speakerCell.appendChild(speaker);
+        const textCell = row.insertCell();
+        textCell.className = "transcript-text";
+        textCell.textContent = event.data?.text || "";
+      }
+      applyTableFilter("session-transcript-rows");
+    }
+
+    function applyAllTableFilters() {
+      document.querySelectorAll("[data-table-filter]").forEach((input) => applyTableFilter(input.dataset.tableFilter));
+    }
+
+    function applyTableFilter(tbodyId) {
+      const input = document.querySelector(`[data-table-filter="${tbodyId}"]`);
+      const tbody = document.getElementById(tbodyId);
+      if (!input || !tbody) return;
+      const query = normalizeFilterText(input.value);
+      if (tbodyId === "session-event-rows") {
+        for (let index = 0; index < tbody.rows.length; index += 2) {
+          const summaryRow = tbody.rows[index];
+          const detailRow = tbody.rows[index + 1];
+          const match = !query || normalizeFilterText(`${summaryRow?.textContent || ""} ${detailRow?.textContent || ""}`).includes(query);
+          if (summaryRow) summaryRow.hidden = !match;
+          if (detailRow) detailRow.hidden = !match;
+        }
+        return;
+      }
+      for (const row of tbody.rows) {
+        row.hidden = Boolean(query) && !normalizeFilterText(row.textContent || "").includes(query);
+      }
+    }
+
+    function normalizeFilterText(value) {
+      return String(value || "").toLowerCase().replace(/\\s+/g, " ").trim();
+    }
+
+    function eventSummary(event) {
+      const data = event.data || {};
+      if (data.text) return String(data.text);
+      if (data.name) return `${data.name}${data.value !== undefined ? `: ${data.value}` : ""}`;
+      if (data.action) return String(data.action);
+      if (data.status) return String(data.status);
+      if (data.reason) return String(data.reason);
+      if (data.message) return String(data.message);
+      const keys = Object.keys(data);
+      return keys.length ? keys.slice(0, 4).join(", ") : "";
     }
 
     async function renderRecording(callId) {
@@ -4980,6 +5125,13 @@ DASHBOARD_PAGE = """<!doctype html>
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return String(value);
       return date.toLocaleString();
+    }
+
+    function formatTimeOnly(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
     }
 
     function sessionLength(item) {
@@ -5205,6 +5357,8 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     .recording-panel audio { min-width: 14rem; }
     .logs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; width: 100%; }
     .log-panel h2 { font-size: 1rem; margin: 0 0 .5rem; }
+    .table-filter { margin: 0 0 .5rem; }
+    .table-filter input { width: 100%; padding: .45rem .55rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; }
     .table-wrap { border: 1px solid var(--border); border-radius: 8px; height: 30rem; overflow: auto; background: #fff; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .8125rem; }
     thead th { position: sticky; top: 0; z-index: 1; background: var(--header); color: var(--muted); font-weight: 600; text-align: left; border-bottom: 1px solid var(--border); }
@@ -5250,6 +5404,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
   <div class="logs">
     <section class="log-panel">
       <h2>Client Log</h2>
+      <div class="table-filter"><input data-table-filter="log" placeholder="Filter client log"></div>
       <div class="table-wrap">
         <table aria-label="Client log">
           <thead>
@@ -5261,6 +5416,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     </section>
     <section class="log-panel">
       <h2>Voicebot Events</h2>
+      <div class="table-filter"><input data-table-filter="event-log" placeholder="Filter voicebot events"></div>
       <div class="table-wrap">
         <table aria-label="Voicebot events">
           <thead>
@@ -5272,6 +5428,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     </section>
     <section class="log-panel">
       <h2>Call Transcript</h2>
+      <div class="table-filter"><input data-table-filter="transcript-log" placeholder="Filter transcript"></div>
       <div class="table-wrap">
         <table aria-label="Call transcript">
           <thead>
@@ -5283,6 +5440,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     </section>
     <section class="log-panel">
       <h2>Subagent Communication</h2>
+      <div class="table-filter"><input data-table-filter="subagent-log" placeholder="Filter subagent communication"></div>
       <div class="table-wrap">
         <table aria-label="Subagent communication">
           <thead>
@@ -5310,6 +5468,10 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     let eventSocket = null;
     let seenEventIds = new Set();
     let testTarget = {client: "browser-test"};
+
+    document.querySelectorAll("[data-table-filter]").forEach((input) => {
+      input.addEventListener("input", () => applyTableFilter(input.dataset.tableFilter));
+    });
 
     window.addEventListener("message", (message) => {
       const data = message.data || {};
@@ -5361,10 +5523,39 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       if (wrapper) wrapper.scrollTop = wrapper.scrollHeight;
     }
 
+    function applyTableFilter(tbodyId) {
+      const input = document.querySelector(`[data-table-filter="${tbodyId}"]`);
+      const tbody = document.getElementById(tbodyId);
+      if (!input || !tbody) return;
+      const query = normalizeFilterText(input.value);
+      for (let index = 0; index < tbody.rows.length; index += 1) {
+        const row = tbody.rows[index];
+        if (!row.classList.contains("summary-row")) {
+          row.hidden = Boolean(query) && !normalizeFilterText(row.textContent || "").includes(query);
+          continue;
+        }
+        const details = [];
+        let next = row.nextElementSibling;
+        while (next && next.classList.contains("detail-row")) {
+          details.push(next);
+          next = next.nextElementSibling;
+        }
+        const combined = normalizeFilterText([row, ...details].map((item) => item.textContent || "").join(" "));
+        const match = !query || combined.includes(query);
+        row.hidden = !match;
+        for (const detail of details) detail.hidden = !match;
+      }
+    }
+
+    function normalizeFilterText(value) {
+      return String(value || "").toLowerCase().replace(/\\s+/g, " ").trim();
+    }
+
     function log(message) {
       if (shouldSuppressClientLogMessage(message)) return;
       const now = new Date();
       appendClientLogRows(now, message);
+      applyTableFilter("log");
       trimRows(logNode);
       scrollTableToBottom(logNode);
     }
@@ -5450,6 +5641,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       if (isSubagentEvent(event)) logSubagentEvent(event);
       if (isTranscriptEvent(event)) logTranscriptEvent(event);
       appendEventRows(eventLogNode, event);
+      applyTableFilter("event-log");
       trimRows(eventLogNode);
       scrollTableToBottom(eventLogNode);
     }
@@ -5467,6 +5659,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       const speaker = event.type === "user_transcript" ? "Caller" : "Voicebot";
       const kind = event.type === "user_transcript" ? "caller" : "voicebot";
       appendTranscriptRows(transcriptLogNode, event.timestamp, speaker, kind, event.data?.text || "");
+      applyTableFilter("transcript-log");
       trimRows(transcriptLogNode);
       scrollTableToBottom(transcriptLogNode);
     }
@@ -5587,6 +5780,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
 
     function logSubagentEvent(event) {
       appendEventRows(subagentLogNode, event);
+      applyTableFilter("subagent-log");
       trimRows(subagentLogNode);
       scrollTableToBottom(subagentLogNode);
     }

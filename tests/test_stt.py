@@ -41,6 +41,15 @@ class OpenAISTTProviderTests(unittest.TestCase):
             )
         )
 
+    def test_prompt_prefix_echo_is_rejected(self) -> None:
+        provider = OpenAISTTProvider.__new__(OpenAISTTProvider)
+        provider._prompt = (
+            "The caller may speak Slovak, Czech, or English. Common words and product names "
+            "include LiveAgent and FlowHunt."
+        )
+
+        self.assertTrue(provider._looks_like_prompt_echo("The caller may speak"))
+
     def test_real_request_with_prompt_term_is_not_prompt_echo(self) -> None:
         provider = OpenAISTTProvider.__new__(OpenAISTTProvider)
         provider._prompt = "FlowHunt LiveAgent SIP trunk Asterisk WebRTC OpenAI Anthropic Viktor"

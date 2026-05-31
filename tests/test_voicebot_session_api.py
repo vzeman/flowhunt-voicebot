@@ -59,6 +59,26 @@ class VoicebotSessionApiTests(unittest.TestCase):
         self.assertEqual([event["data"]["text"] for event in transcript.json()["events"]], ["hello"])
         self.assertEqual(hidden.status_code, 404)
 
+    def test_workspace_session_detail_uses_external_call_id_for_webrtc(self) -> None:
+        client, events, sessions = self.build_client()
+        sessions.save(
+            VoicebotSessionRecord(
+                "session-1",
+                "workspace-1",
+                "voicebot-1",
+                external_session_id="webrtc-session-1",
+            )
+        )
+        events.append("webrtc-session-1", "user_transcript", {"text": "hello from webrtc"})
+
+        timeline = client.get("/workspaces/workspace-1/voicebots/voicebot-1/sessions/session-1/timeline")
+        transcript = client.get("/workspaces/workspace-1/voicebots/voicebot-1/sessions/session-1/transcript")
+
+        self.assertEqual(timeline.json()["call_id"], "webrtc-session-1")
+        self.assertEqual([event["data"]["text"] for event in timeline.json()["events"]], ["hello from webrtc"])
+        self.assertEqual(transcript.json()["call_id"], "webrtc-session-1")
+        self.assertEqual([event["data"]["text"] for event in transcript.json()["events"]], ["hello from webrtc"])
+
     def test_workspace_session_api_supports_active_filter_and_limit_validation(self) -> None:
         client, _events, sessions = self.build_client()
         sessions.save(VoicebotSessionRecord("active", "workspace-1", "voicebot-1"))

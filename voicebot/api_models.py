@@ -218,7 +218,7 @@ class VoicebotProviderConfigRequest(BaseModel):
 
 
 class VoicebotPromptConfigRequest(BaseModel):
-    greeting: str = "The call has connected. Greet the caller and ask how you can help."
+    greeting: str = "Hello, how can I help you?"
     system_prompt: str = ""
     stt_prompt: str = ""
     language: str = "en"

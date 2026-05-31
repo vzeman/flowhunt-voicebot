@@ -134,14 +134,17 @@ class AgentCoordinationTests(unittest.TestCase):
         self.assertIn("Detect the caller's language", prompt)
         self.assertIn("switch with them", prompt)
 
-    def test_call_connected_with_custom_prompt_uses_model_turn(self) -> None:
+    def test_call_connected_uses_deterministic_greeting(self) -> None:
         task = {
             "id": 10,
             "call_id": "call-1",
-            "data": {"reason": "call_connected", "text": "Pozdrav volajuceho po slovensky.", "use_agent_prompt": True},
+            "data": {"reason": "call_connected", "text": "Dobrý deň, ako vám pomôžem?", "use_agent_prompt": True},
         }
 
-        self.assertEqual(fast_tool_calls(task), [])
+        calls = fast_tool_calls(task)
+
+        self.assertEqual(calls[0]["name"], "say")
+        self.assertEqual(calls[0]["arguments"]["text"], "Dobrý deň, ako vám pomôžem?")
 
     def test_flowhunt_invocation_does_not_need_immediate_followup(self) -> None:
         self.assertFalse(needs_spoken_followup([{"name": "invoke_flowhunt_flow", "arguments": {}}]))

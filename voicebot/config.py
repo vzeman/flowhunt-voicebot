@@ -146,6 +146,14 @@ class Settings:
     dashboard_dev_login_enabled: bool = env_bool("VOICEBOT_DASHBOARD_DEV_LOGIN_ENABLED", False)
     dashboard_user_id_header: str = os.getenv("VOICEBOT_DASHBOARD_USER_ID_HEADER", "X-FlowHunt-User-Id")
     dashboard_workspace_ids_header: str = os.getenv("VOICEBOT_DASHBOARD_WORKSPACE_IDS_HEADER", "X-FlowHunt-Workspace-Ids")
+    default_workspace_id: str = (
+        os.getenv("VOICEBOT_DEFAULT_WORKSPACE_ID")
+        or os.getenv("FLOWHUNT_WORKSPACE_ID")
+        or os.getenv("VOICEBOT_FLOWHUNT_WORKSPACE_ID")
+        or ""
+    ).strip()
+    default_voicebot_id: str = os.getenv("VOICEBOT_DEFAULT_VOICEBOT_ID", "default").strip()
+    default_voicebot_display_name: str = os.getenv("VOICEBOT_DEFAULT_VOICEBOT_DISPLAY_NAME", "Default Voicebot").strip()
     public_session_rate_limit_per_minute: int = env_int("VOICEBOT_PUBLIC_SESSION_RATE_LIMIT_PER_MINUTE", 60)
     public_voicebot_max_concurrent_sessions: int = env_int("VOICEBOT_PUBLIC_VOICEBOT_MAX_CONCURRENT_SESSIONS", 100)
     public_sdp_max_bytes: int = env_int("VOICEBOT_PUBLIC_SDP_MAX_BYTES", 131072)

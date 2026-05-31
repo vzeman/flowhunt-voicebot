@@ -38,6 +38,19 @@ VOICEBOT_DASHBOARD_DEV_LOGIN_ENABLED=true
 The bypass works only in local/development/test deployment modes and only when
 the request includes `X-FlowHunt-Dev-Login: true`.
 
+For local Docker testing, the service seeds one default voicebot when
+`VOICEBOT_DEFAULT_WORKSPACE_ID` is set. If it is empty, the runtime falls back
+to `FLOWHUNT_WORKSPACE_ID`. The default voicebot id and name are controlled by:
+
+```text
+VOICEBOT_DEFAULT_VOICEBOT_ID=default
+VOICEBOT_DEFAULT_VOICEBOT_DISPLAY_NAME=Default Voicebot
+```
+
+This local seed gives the dashboard a workspace and voicebot target for the
+embedded WebRTC test console. Production should create voicebots through the
+workspace admin APIs or FlowHunt control plane instead of relying on this seed.
+
 ## Current Capabilities
 
 - Main menu with `Workspaces`, `Active Sessions`, `Sessions History`, and

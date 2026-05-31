@@ -98,8 +98,12 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         paths = set(response.json()["paths"])
         self.assertIn("/.well-known/flowhunt-voicebot", paths)
+        self.assertIn("/widget.js", paths)
+        self.assertIn("/widget", paths)
         self.assertIn("/webrtc/sessions", paths)
+        self.assertIn("/webrtc/sessions/{session_id}", paths)
         self.assertEqual(set(response.json()["paths"]["/webrtc/sessions"]), {"post"})
+        self.assertEqual(set(response.json()["paths"]["/webrtc/sessions/{session_id}"]), {"delete"})
         self.assertIn("/health", paths)
         self.assertNotIn("/agent/tasks", paths)
         self.assertNotIn("/webrtc/test", paths)
@@ -115,6 +119,7 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("/config", paths)
         self.assertNotIn("post", response.json()["paths"]["/webrtc/sessions"])
         self.assertIn("get", response.json()["paths"]["/webrtc/sessions"])
+        self.assertNotIn("/widget.js", paths)
 
     def test_runtime_endpoint_declares_payload_workspace_scope(self) -> None:
         grouped = api_surface_by_area()

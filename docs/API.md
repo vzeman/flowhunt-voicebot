@@ -971,6 +971,22 @@ Response:
   "display_name": "Support bot",
   "transport": "webrtc",
   "session_endpoint": "/webrtc/sessions",
+  "widget_script": "/widget.js",
+  "widget_page": "/widget",
+  "widget": {
+    "enabled": true,
+    "display_name": "Support bot",
+    "launcher_label": "Talk to support",
+    "welcome_label": "Voice call",
+    "locale": "en",
+    "theme": {
+      "primary_color": "#0969da",
+      "placement": "bottom-right"
+    },
+    "show_captions": false,
+    "visitor_metadata_max_bytes": 2048,
+    "recording_visible_to_visitor": false
+  },
   "ice_servers": ["stun:stun.l.google.com:19302"],
   "modalities": {"input": ["audio"], "output": ["audio"]},
   "limits": {
@@ -1038,6 +1054,9 @@ Fields:
 - `sdp`: required SDP offer.
 - `type`: must be `offer`.
 - `metadata`: optional object copied into call lifecycle events and snapshots.
+  On public routes this is treated as untrusted visitor metadata, limited to
+  2048 bytes, stripped of reserved routing keys, and stored under
+  `visitor_metadata`.
 
 When a production ingress forwards a public custom URL to this endpoint, the
 runtime can resolve the voicebot from `Host`/`X-Forwarded-Host` and
@@ -1078,13 +1097,16 @@ Errors:
 
 - `400`: request type is not `offer`.
 - `403`: public route origin is not allowed.
-- `413`: public route SDP offer exceeds the configured maximum size.
+- `413`: public route SDP offer exceeds the configured maximum size, or public
+  visitor metadata exceeds the configured maximum.
 - `429`: public route rate or concurrent-session limit is exceeded.
 - `503`: WebRTC transport is not configured or `aiortc` is unavailable.
 
 ### DELETE `/webrtc/sessions/{session_id}`
 
 Closes a WebRTC session and removes its active call from the registry.
+This endpoint is caller-safe so an embedded widget can end its own browser
+session without receiving an internal API key.
 
 Response:
 
@@ -1108,6 +1130,30 @@ remote bot audio track in an `<audio>` element.
 
 After the call ends, the page checks `/calls/{call_id}/recording` and shows a
 call-recording `<audio>` element when a speech-only recording is available.
+
+### GET `/widget.js`
+
+Returns the public embeddable browser widget JavaScript. It calls only public
+runtime endpoints: `/.well-known/flowhunt-voicebot`, `POST /webrtc/sessions`,
+and `DELETE /webrtc/sessions/{session_id}`. It does not call internal prompts,
+provider configuration, task queues, event logs, diagnostics, or dashboard
+APIs.
+
+Example installation:
+
+```html
+<script src="https://voice.example.com/widget.js" async></script>
+```
+
+Optional attributes:
+
+- `data-inline="true"` renders inline instead of a floating bottom-right button.
+- `data-visitor-metadata='{"plan":"trial"}'` sends bounded caller metadata with
+  the WebRTC session.
+
+### GET `/widget`
+
+Returns a minimal full-page/direct-link wrapper around `widget.js`.
 
 ## Call Recordings
 

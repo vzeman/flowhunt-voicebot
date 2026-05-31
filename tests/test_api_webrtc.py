@@ -266,6 +266,8 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertEqual(payload["route_id"], "route-1")
         self.assertEqual(payload["display_name"], "Support")
         self.assertEqual(payload["session_endpoint"], "/webrtc/sessions")
+        self.assertEqual(payload["widget_script"], "/widget.js")
+        self.assertEqual(payload["widget"]["launcher_label"], "Support")
         self.assertNotIn("prompt_config", str(payload))
         self.assertNotIn("api_key", str(payload).lower())
 
@@ -288,6 +290,30 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["detail"], "Origin is not allowed for this voicebot route")
         self.assertEqual(manager.created, [])
+
+    def test_public_widget_cors_preflight_uses_route_origin_allowlist(self) -> None:
+        client, _manager = self.public_route_client(allowed_origins=("https://allowed.example",))
+
+        allowed = client.options(
+            "/webrtc/sessions",
+            headers={
+                "host": "voice.example.com",
+                "origin": "https://allowed.example",
+                "access-control-request-method": "POST",
+            },
+        )
+        blocked = client.options(
+            "/webrtc/sessions",
+            headers={
+                "host": "voice.example.com",
+                "origin": "https://blocked.example",
+                "access-control-request-method": "POST",
+            },
+        )
+
+        self.assertEqual(allowed.status_code, 204)
+        self.assertEqual(allowed.headers["access-control-allow-origin"], "https://allowed.example")
+        self.assertEqual(blocked.status_code, 403)
 
     def test_public_webrtc_session_rate_limits_by_route(self) -> None:
         client, manager = self.public_route_client(settings=Settings(public_session_rate_limit_per_minute=1))
@@ -331,6 +357,55 @@ class ApiWebRTCTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.json()["detail"], "Voicebot session capacity is full")
+
+    def test_public_webrtc_session_scopes_visitor_metadata(self) -> None:
+        client, manager = self.public_route_client()
+
+        response = client.post(
+            "/webrtc/sessions",
+            headers={"host": "voice.example.com"},
+            json={
+                "sdp": "offer-sdp",
+                "type": "offer",
+                "metadata": {
+                    "workspace_id": "attacker-workspace",
+                    "name": "Visitor",
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        metadata = manager.created[0][2]
+        self.assertEqual(metadata["workspace_id"], "workspace-1")
+        self.assertEqual(metadata["visitor_metadata"], {"name": "Visitor"})
+
+    def test_public_webrtc_session_rejects_oversized_visitor_metadata(self) -> None:
+        client, manager = self.public_route_client()
+
+        response = client.post(
+            "/webrtc/sessions",
+            headers={"host": "voice.example.com"},
+            json={"sdp": "offer-sdp", "type": "offer", "metadata": {"notes": "x" * 3000}},
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.json()["detail"], "Visitor metadata is too large")
+        self.assertEqual(manager.created, [])
+
+    def test_public_widget_assets_are_caller_safe(self) -> None:
+        client, _manager = self.build_client(FakeWebRTCManager())
+
+        script = client.get("/widget.js")
+        page = client.get("/widget")
+
+        self.assertEqual(script.status_code, 200)
+        self.assertEqual(script.headers["content-type"].split(";")[0], "application/javascript")
+        self.assertIn("/.well-known/flowhunt-voicebot", script.text)
+        self.assertIn("/webrtc/sessions", script.text)
+        self.assertNotIn("/agent/tasks", script.text)
+        self.assertNotIn("/events", script.text)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('src="/widget.js"', page.text)
 
     def public_route_client(
         self,

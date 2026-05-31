@@ -324,6 +324,26 @@ def create_app(
             },
         )
         return await call_next(request)
+
+    @app.middleware("http")
+    async def public_widget_cors_middleware(request: Request, call_next):
+        if request.url.path not in {"/.well-known/flowhunt-voicebot", "/webrtc/sessions", "/widget", "/widget.js"}:
+            return await call_next(request)
+        origin = request.headers.get("origin")
+        route = None
+        if origin:
+            try:
+                route = resolve_public_voicebot_route(request)
+            except HTTPException:
+                route = None
+        if request.method == "OPTIONS":
+            if route is not None and origin_allowed(origin, route.allowed_origins):
+                return public_cors_response(origin)
+            return Response(status_code=403)
+        response = await call_next(request)
+        if route is not None and origin_allowed(origin, route.allowed_origins):
+            apply_public_cors_headers(response, origin)
+        return response
     workspace_access_policy = workspace_policy or workspace_access_policy_from_settings(runtime_settings)
     delegated_progress_memory = ProgressCadenceMemory(runtime_settings.flowhunt_progress_update_seconds)
     subagent_terminal_events: list[VoicebotEvent] = []
@@ -1791,6 +1811,7 @@ def create_app(
             )
             raise HTTPException(status_code=404, detail="Public voicebot route not found")
         voicebot = voicebot_store.get(route.workspace_id, route.voicebot_id)
+        widget_config = caller_safe_widget_config(route, voicebot.display_name if voicebot else "")
         return {
             "route_id": route.route_id,
             "workspace_id": route.workspace_id,
@@ -1799,6 +1820,9 @@ def create_app(
             "display_name": voicebot.display_name if voicebot else "",
             "transport": "webrtc",
             "session_endpoint": "/webrtc/sessions",
+            "widget_script": "/widget.js",
+            "widget_page": "/widget",
+            "widget": widget_config,
             "ice_servers": list(runtime_settings.webrtc_stun_urls),
             "modalities": {"input": ["audio"], "output": ["audio"]},
             "limits": {
@@ -1807,6 +1831,18 @@ def create_app(
                 "max_concurrent_sessions": runtime_settings.public_voicebot_max_concurrent_sessions,
             },
         }
+
+    @app.get("/widget.js")
+    def public_widget_script() -> Response:
+        return Response(
+            content=VOICEBOT_WIDGET_JS,
+            media_type="application/javascript; charset=utf-8",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+
+    @app.get("/widget")
+    def public_widget_page() -> HTMLResponse:
+        return HTMLResponse(WIDGET_PAGE)
 
     @app.get("/webrtc/sessions")
     def list_webrtc_sessions() -> dict[str, Any]:
@@ -1828,6 +1864,8 @@ def create_app(
             metadata = dict(request.metadata or {})
             route = resolve_public_voicebot_route(http_request)
             if route is not None:
+                visitor_metadata = sanitized_public_visitor_metadata(metadata)
+                metadata = {"visitor_metadata": visitor_metadata} if visitor_metadata else {}
                 enforce_public_session_admission(route, http_request, request)
                 metadata.update(route.event_data())
                 metadata["public_route_resolved"] = True
@@ -1861,6 +1899,64 @@ def create_app(
         if channel is None or not channel.enabled:
             raise HTTPException(status_code=403, detail="Public route channel is disabled")
         return route
+
+    def caller_safe_widget_config(route: PublicVoicebotRoute, display_name: str) -> dict[str, Any]:
+        metadata = route.metadata if isinstance(route.metadata, dict) else {}
+        theme = metadata.get("theme") if isinstance(metadata.get("theme"), dict) else {}
+        primary_color = str(theme.get("primary_color") or metadata.get("primary_color") or "#0969da")[:32]
+        placement = str(theme.get("placement") or metadata.get("placement") or "bottom-right")[:32]
+        launcher_label = str(metadata.get("launcher_label") or display_name or "Start voice call")[:80]
+        return {
+            "enabled": route.status == "active",
+            "display_name": display_name,
+            "launcher_label": launcher_label,
+            "welcome_label": str(metadata.get("welcome_label") or "Voice call")[:80],
+            "locale": str(metadata.get("locale") or "")[:32],
+            "theme": {
+                "primary_color": primary_color,
+                "placement": placement,
+            },
+            "show_captions": bool(metadata.get("show_captions", False)),
+            "visitor_metadata_max_bytes": 2048,
+            "recording_visible_to_visitor": bool(metadata.get("recording_visible_to_visitor", False)),
+        }
+
+    def sanitized_public_visitor_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+        reserved = {
+            "workspace_id",
+            "voicebot_id",
+            "channel_id",
+            "public_route_id",
+            "public_route_host",
+            "public_route_path_prefix",
+        }
+        visitor = {str(key)[:64]: value for key, value in metadata.items() if key not in reserved}
+        encoded = json_safe_size(visitor)
+        if encoded > 2048:
+            raise HTTPException(status_code=413, detail="Visitor metadata is too large")
+        return visitor
+
+    def json_safe_size(payload: dict[str, Any]) -> int:
+        import json
+
+        try:
+            return len(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Visitor metadata must be JSON serializable")
+
+    def public_cors_response(origin: str | None) -> Response:
+        response = Response(status_code=204)
+        apply_public_cors_headers(response, origin)
+        response.headers["Access-Control-Allow-Methods"] = "GET,POST,DELETE,OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "content-type"
+        response.headers["Access-Control-Max-Age"] = "600"
+        return response
+
+    def apply_public_cors_headers(response: Response, origin: str | None) -> None:
+        if not origin:
+            return
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
 
     def enforce_public_session_admission(
         route: PublicVoicebotRoute,
@@ -3912,6 +4008,173 @@ def validated_transfer_target(value: Any) -> str:
     if any(ord(char) < 32 or ord(char) == 127 for char in target):
         raise HTTPException(status_code=400, detail="transfer target must not contain control characters")
     return target
+
+
+VOICEBOT_WIDGET_JS = r"""(() => {
+  const currentScript = document.currentScript;
+  const routeBase = new URL((currentScript && currentScript.src) || "/widget.js", window.location.href);
+  const baseUrl = routeBase.origin;
+  const routePath = currentScript && currentScript.dataset.voicebotRoute ? currentScript.dataset.voicebotRoute : "";
+  const inline = currentScript && currentScript.dataset.inline === "true";
+  const metadata = safeJson(currentScript && currentScript.dataset.visitorMetadata);
+  let pc = null;
+  let localStream = null;
+  let sessionId = null;
+  let started = false;
+
+  const root = document.createElement("div");
+  root.className = inline ? "fh-voicebot fh-voicebot-inline" : "fh-voicebot";
+  root.innerHTML = `
+    <button class="fh-voicebot-button" type="button" aria-live="polite">
+      <span class="fh-voicebot-dot" aria-hidden="true"></span>
+      <span class="fh-voicebot-label">Voice call</span>
+    </button>
+    <div class="fh-voicebot-panel" role="status" aria-live="polite">
+      <div class="fh-voicebot-title">Voice call</div>
+      <div class="fh-voicebot-status">Ready</div>
+      <audio class="fh-voicebot-audio" autoplay playsinline></audio>
+      <button class="fh-voicebot-end" type="button" disabled>End call</button>
+    </div>`;
+  const style = document.createElement("style");
+  style.textContent = `
+    .fh-voicebot{position:fixed;right:18px;bottom:18px;z-index:2147483000;font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#24292f}
+    .fh-voicebot-inline{position:static;display:inline-block}
+    .fh-voicebot-button,.fh-voicebot-end{font:inherit;border:0;border-radius:999px;padding:12px 16px;cursor:pointer;background:var(--fh-primary,#0969da);color:#fff;box-shadow:0 8px 24px rgba(31,35,40,.18)}
+    .fh-voicebot-button:disabled,.fh-voicebot-end:disabled{opacity:.55;cursor:not-allowed}
+    .fh-voicebot-button{display:flex;align-items:center;gap:9px;font-weight:700}
+    .fh-voicebot-dot{width:10px;height:10px;border-radius:50%;background:#fff;opacity:.9}
+    .fh-voicebot-panel{display:none;width:min(320px,calc(100vw - 32px));margin-bottom:10px;padding:14px;border:1px solid #d8dee4;border-radius:8px;background:#fff;box-shadow:0 12px 36px rgba(31,35,40,.18)}
+    .fh-voicebot.fh-open .fh-voicebot-panel{display:block}
+    .fh-voicebot-title{font-weight:700;margin-bottom:4px}
+    .fh-voicebot-status{font-size:14px;color:#57606a;margin-bottom:10px}
+    .fh-voicebot-audio{width:100%;height:34px;margin-bottom:10px}
+    .fh-voicebot-end{padding:9px 13px;border-radius:6px;box-shadow:none}
+    @media (max-width:520px){.fh-voicebot{left:12px;right:12px;bottom:12px}.fh-voicebot-panel{width:auto}.fh-voicebot-button{width:100%;justify-content:center}}`;
+  document.head.appendChild(style);
+  (currentScript && currentScript.parentElement ? currentScript.parentElement : document.body).appendChild(root);
+
+  const button = root.querySelector(".fh-voicebot-button");
+  const label = root.querySelector(".fh-voicebot-label");
+  const panel = root.querySelector(".fh-voicebot-panel");
+  const title = root.querySelector(".fh-voicebot-title");
+  const status = root.querySelector(".fh-voicebot-status");
+  const endButton = root.querySelector(".fh-voicebot-end");
+  const audio = root.querySelector(".fh-voicebot-audio");
+
+  bootstrap();
+  button.addEventListener("click", () => started ? stopCall("ended") : startCall());
+  endButton.addEventListener("click", () => stopCall("ended"));
+
+  async function bootstrap() {
+    try {
+      const payload = await fetchJson(new URL(`${routePath}/.well-known/flowhunt-voicebot`, baseUrl));
+      const widget = payload.widget || {};
+      label.textContent = widget.launcher_label || payload.display_name || "Voice call";
+      title.textContent = widget.welcome_label || payload.display_name || "Voice call";
+      if (widget.theme && widget.theme.primary_color) root.style.setProperty("--fh-primary", widget.theme.primary_color);
+      if (widget.theme && widget.theme.placement === "bottom-left") { root.style.left = "18px"; root.style.right = "auto"; }
+      if (widget.enabled === false) disable("Unavailable");
+      root.dataset.sessionEndpoint = payload.session_endpoint || "/webrtc/sessions";
+      root.dataset.iceServers = JSON.stringify(payload.ice_servers || []);
+      emitMetric("widget_loaded");
+    } catch (error) {
+      disable("Voicebot unavailable");
+      emitMetric("widget_bootstrap_failed", {message: String(error && error.message || error)});
+    }
+  }
+
+  async function startCall() {
+    root.classList.add("fh-open");
+    button.disabled = true;
+    setStatus("Requesting microphone");
+    emitMetric("start_attempt");
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}, video: false});
+    } catch (error) {
+      button.disabled = false;
+      setStatus("Microphone permission denied");
+      emitMetric("permission_denied");
+      return;
+    }
+    try {
+      pc = new RTCPeerConnection({iceServers: JSON.parse(root.dataset.iceServers || "[]").map(url => typeof url === "string" ? {urls: url} : url)});
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      pc.ontrack = event => { audio.srcObject = event.streams[0]; };
+      pc.onconnectionstatechange = () => {
+        setStatus(pc.connectionState);
+        if (["failed", "closed", "disconnected"].includes(pc.connectionState)) emitMetric(`connection_${pc.connectionState}`);
+      };
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await waitForIceGathering(pc);
+      const response = await fetchJson(new URL(root.dataset.sessionEndpoint || "/webrtc/sessions", baseUrl), {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({sdp: pc.localDescription.sdp, type: pc.localDescription.type, metadata})
+      });
+      sessionId = response.session_id;
+      await pc.setRemoteDescription(response.answer);
+      started = true;
+      endButton.disabled = false;
+      button.disabled = false;
+      label.textContent = "End call";
+      setStatus("Connected");
+      emitMetric("session_created", {session_id: sessionId});
+    } catch (error) {
+      setStatus("Connection failed");
+      emitMetric("connection_failed", {message: String(error && error.message || error)});
+      stopCall("failed");
+    }
+  }
+
+  async function stopCall(reason) {
+    if (sessionId) {
+      fetch(new URL(`/webrtc/sessions/${encodeURIComponent(sessionId)}`, baseUrl), {method: "DELETE"}).catch(() => {});
+    }
+    if (pc) pc.close();
+    if (localStream) localStream.getTracks().forEach(track => track.stop());
+    pc = null; localStream = null; sessionId = null; started = false;
+    endButton.disabled = true; button.disabled = false; label.textContent = "Voice call";
+    setStatus(reason === "failed" ? "Failed" : "Ended");
+    emitMetric(reason === "failed" ? "failed" : "ended");
+  }
+
+  function setStatus(text) { status.textContent = text; }
+  function disable(text) { button.disabled = true; setStatus(text); }
+  function emitMetric(type, data = {}) { window.dispatchEvent(new CustomEvent("flowhunt-voicebot-widget", {detail: {type, data}})); }
+  function safeJson(text) { try { return text ? JSON.parse(text) : {}; } catch (_) { return {}; } }
+  async function fetchJson(url, options) {
+    const response = await fetch(url, options);
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    return response.json();
+  }
+  function waitForIceGathering(peer) {
+    if (peer.iceGatheringState === "complete") return Promise.resolve();
+    return new Promise(resolve => {
+      const done = () => {
+        if (peer.iceGatheringState === "complete") {
+          peer.removeEventListener("icegatheringstatechange", done);
+          resolve();
+        }
+      };
+      peer.addEventListener("icegatheringstatechange", done);
+      setTimeout(resolve, 2500);
+    });
+  }
+})();"""
+
+
+WIDGET_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlowHunt Voicebot</title>
+</head>
+<body>
+  <script src="/widget.js" data-inline="true" async></script>
+</body>
+</html>"""
 
 
 WEBRTC_TEST_PAGE = """<!doctype html>

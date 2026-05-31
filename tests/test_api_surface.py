@@ -85,6 +85,35 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(response.json()["integrity_issues"], [])
         self.assertEqual(response.json()["summary"]["by_visibility"]["prototype"], 1)
         self.assertIn("admin", response.json()["areas"])
+        self.assertEqual(response.json()["route_audiences"][0]["audience"] in {"public", "internal", "local_dev"}, True)
+
+    def test_all_http_routes_have_audience_metadata(self) -> None:
+        app = self.build_client().app
+
+        self.assertEqual(getattr(app.state, "route_audience_issues", []), [])
+
+    def test_public_openapi_excludes_internal_and_local_routes(self) -> None:
+        response = self.build_client().get("/openapi/public.json")
+
+        self.assertEqual(response.status_code, 200)
+        paths = set(response.json()["paths"])
+        self.assertIn("/webrtc/sessions", paths)
+        self.assertEqual(set(response.json()["paths"]["/webrtc/sessions"]), {"post"})
+        self.assertIn("/health", paths)
+        self.assertNotIn("/agent/tasks", paths)
+        self.assertNotIn("/webrtc/test", paths)
+        self.assertNotIn("/config", paths)
+
+    def test_internal_openapi_excludes_public_session_creation_but_keeps_local_dev_tools(self) -> None:
+        response = self.build_client().get("/openapi/internal.json")
+
+        self.assertEqual(response.status_code, 200)
+        paths = set(response.json()["paths"])
+        self.assertIn("/agent/tasks", paths)
+        self.assertIn("/webrtc/test", paths)
+        self.assertIn("/config", paths)
+        self.assertNotIn("post", response.json()["paths"]["/webrtc/sessions"])
+        self.assertIn("get", response.json()["paths"]["/webrtc/sessions"])
 
     def test_runtime_endpoint_declares_payload_workspace_scope(self) -> None:
         grouped = api_surface_by_area()

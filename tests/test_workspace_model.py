@@ -7,6 +7,8 @@ import unittest
 from voicebot.workspace_model import (
     ChannelResolver,
     JsonVoicebotSessionStore,
+    PublicVoicebotRoute,
+    PublicVoicebotRouteStore,
     VoicebotChannelBinding,
     VoicebotSessionRecord,
     VoicebotSessionStore,
@@ -193,6 +195,91 @@ class WorkspaceModelTests(unittest.TestCase):
     def test_cross_workspace_operation_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "cross-workspace"):
             require_same_workspace(WorkspaceScope("workspace-1", "voicebot-1"), "workspace-2")
+
+    def test_public_voicebot_route_store_resolves_host_and_longest_path_prefix(self) -> None:
+        routes = PublicVoicebotRouteStore(
+            [
+                PublicVoicebotRoute(
+                    "route-root",
+                    "workspace-1",
+                    "voicebot-root",
+                    "channel-root",
+                    "Voice.Example.com:443",
+                    "/",
+                    status="active",
+                ),
+                PublicVoicebotRoute(
+                    "route-sales",
+                    "workspace-1",
+                    "voicebot-sales",
+                    "channel-sales",
+                    "voice.example.com",
+                    "/voicebot/sales/",
+                    status="active",
+                ),
+            ]
+        )
+
+        resolved = routes.resolve("https://VOICE.example.com", "/voicebot/sales/webrtc/sessions")
+
+        self.assertEqual(resolved.route_id if resolved else None, "route-sales")
+        self.assertEqual(resolved.host if resolved else None, "voice.example.com")
+        self.assertEqual(resolved.path_prefix if resolved else None, "/voicebot/sales")
+
+    def test_public_voicebot_route_store_rejects_duplicate_active_host_path(self) -> None:
+        routes = PublicVoicebotRouteStore()
+        routes.save(
+            PublicVoicebotRoute(
+                "route-1",
+                "workspace-1",
+                "voicebot-1",
+                "channel-1",
+                "voice.example.com",
+                "/support",
+                status="active",
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            routes.save(
+                PublicVoicebotRoute(
+                    "route-2",
+                    "workspace-2",
+                    "voicebot-2",
+                    "channel-2",
+                    "voice.example.com",
+                    "/support/",
+                    status="active",
+                )
+            )
+
+    def test_public_voicebot_route_store_allows_disabled_duplicate_host_path(self) -> None:
+        routes = PublicVoicebotRouteStore()
+        routes.save(
+            PublicVoicebotRoute(
+                "route-1",
+                "workspace-1",
+                "voicebot-1",
+                "channel-1",
+                "voice.example.com",
+                "/support",
+                status="active",
+            )
+        )
+
+        saved = routes.save(
+            PublicVoicebotRoute(
+                "route-2",
+                "workspace-2",
+                "voicebot-2",
+                "channel-2",
+                "voice.example.com",
+                "/support",
+                status="disabled",
+            )
+        )
+
+        self.assertEqual(saved.route_id, "route-2")
 
     def test_session_record_carries_workspace_voicebot_and_session_scope(self) -> None:
         session = VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1", channel_id="channel-1")

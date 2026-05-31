@@ -409,6 +409,57 @@ are immutable in this prototype; create a replacement channel to change
 
 Deletes one channel binding and removes it from runtime resolution.
 
+### GET `/workspaces/{workspace_id}/voicebots/{voicebot_id}/public-routes`
+
+Lists public host/path routes assigned to a voicebot. A public route maps an
+incoming public URL to a workspace voicebot channel without requiring one port
+per voicebot.
+
+### POST `/workspaces/{workspace_id}/voicebots/{voicebot_id}/public-routes`
+
+Creates a public route for an existing channel.
+
+Request:
+
+```json
+{
+  "route_id": "support-public",
+  "channel_id": "support-widget",
+  "host": "voice.example.com",
+  "path_prefix": "/support",
+  "status": "active",
+  "tls_mode": "managed",
+  "allowed_origins": ["https://www.example.com"],
+  "metadata": {"environment": "production"}
+}
+```
+
+Fields:
+
+- `route_id`: workspace-unique route identifier.
+- `channel_id`: existing voicebot channel receiving public sessions.
+- `host`: public host or custom domain. Port and URL scheme are normalized away.
+- `path_prefix`: optional path prefix. The resolver uses longest-prefix match.
+- `status`: `pending`, `active`, or `disabled`. Only active routes resolve
+  public sessions.
+- `tls_mode`: `managed` or `custom`; certificate provisioning is handled by the
+  production ingress/certificate layer.
+- `allowed_origins`: origin allow-list for the future website widget/public
+  CORS layer.
+
+Duplicate active `host + path_prefix` routes are rejected, even across
+workspaces, because production ingress must have one unambiguous destination.
+
+### PATCH `/workspaces/{workspace_id}/voicebots/{voicebot_id}/public-routes/{route_id}`
+
+Updates mutable public route fields. Workspace and voicebot ownership are
+immutable. If `channel_id` is changed, the replacement channel must already
+belong to the same workspace voicebot.
+
+### DELETE `/workspaces/{workspace_id}/voicebots/{voicebot_id}/public-routes/{route_id}`
+
+Deletes one public route.
+
 ### POST `/workspaces/{workspace_id}/voicebots/{voicebot_id}/validate`
 
 Checks whether a voicebot is ready to run. The response includes `ok`,
@@ -917,6 +968,14 @@ Fields:
 - `sdp`: required SDP offer.
 - `type`: must be `offer`.
 - `metadata`: optional object copied into call lifecycle events and snapshots.
+
+When a production ingress forwards a public custom URL to this endpoint, the
+runtime can resolve the voicebot from `Host`/`X-Forwarded-Host` and
+`X-Forwarded-Prefix`, `X-Original-URI`, or `X-Forwarded-URI`. A resolved public
+route adds `workspace_id`, `voicebot_id`, `channel_id`, `public_route_id`,
+`public_route_host`, and `public_route_path_prefix` to the session metadata.
+The route must be active, the target voicebot must be enabled, and the target
+channel must be enabled.
 
 Response:
 

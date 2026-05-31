@@ -62,6 +62,42 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(missing.status_code, 401)
         self.assertEqual(allowed.status_code, 200)
 
+    def test_dashboard_user_auth_filters_workspaces(self) -> None:
+        client = self.client(Settings(dashboard_auth_enabled=True))
+
+        missing = client.get("/dashboard/state")
+        allowed = client.get(
+            "/dashboard/state?workspace_id=workspace-1",
+            headers={"X-FlowHunt-User-Id": "user-1", "X-FlowHunt-Workspace-Ids": "workspace-1"},
+        )
+        denied = client.get(
+            "/dashboard/state?workspace_id=workspace-1",
+            headers={"X-FlowHunt-User-Id": "user-1", "X-FlowHunt-Workspace-Ids": "other-workspace"},
+        )
+        service_key_only = client.get("/dashboard/state", headers={"X-FlowHunt-Internal-Key": "secret"})
+
+        self.assertEqual(missing.status_code, 401)
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed.json()["dashboard"]["user"]["user_id"], "user-1")
+        self.assertEqual(allowed.json()["workspaces"], ["workspace-1"])
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(service_key_only.status_code, 401)
+
+    def test_dashboard_dev_login_bypass_is_explicit_and_local_only(self) -> None:
+        client = self.client(Settings(dashboard_auth_enabled=True, dashboard_dev_login_enabled=True, deployment_mode="local"))
+        production_client = self.client(
+            Settings(dashboard_auth_enabled=True, dashboard_dev_login_enabled=True, deployment_mode="production")
+        )
+
+        allowed = client.get("/dashboard/state", headers={"X-FlowHunt-Dev-Login": "true"})
+        denied_without_header = client.get("/dashboard/state")
+        denied_production = production_client.get("/dashboard/state", headers={"X-FlowHunt-Dev-Login": "true"})
+
+        self.assertEqual(allowed.status_code, 200)
+        self.assertTrue(allowed.json()["dashboard"]["user"]["dev_login"])
+        self.assertEqual(denied_without_header.status_code, 401)
+        self.assertEqual(denied_production.status_code, 401)
+
     def client(self, settings: Settings | None = None) -> TestClient:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

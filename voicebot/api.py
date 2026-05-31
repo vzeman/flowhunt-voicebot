@@ -1144,10 +1144,12 @@ def create_app(
         if session is None or session.voicebot_id != voicebot_id:
             raise HTTPException(status_code=404, detail="Session not found")
         call_id = session.external_session_id or session.session_id
-        timeline = events.list_events(
+        timeline = durable_call_events(
+            events,
+            transcripts,
+            call_id,
             after=after,
             limit=validated_limit(limit),
-            call_id=call_id,
         )
         return {
             "workspace_id": workspace_id,
@@ -2457,7 +2459,12 @@ def create_app(
 
     @app.get("/events")
     def list_events(after: int = 0, call_id: str | None = None, limit: int = 200) -> dict[str, Any]:
-        result = [event_to_dict(event) for event in events.list_events(after=after, call_id=call_id, limit=validated_limit(limit))]
+        checked_limit = validated_limit(limit)
+        if call_id:
+            source_events = durable_call_events(events, transcripts, call_id, after=after, limit=checked_limit)
+        else:
+            source_events = events.list_events(after=after, limit=checked_limit)
+        result = [event_to_dict(event) for event in source_events]
         return {"events": result}
 
     @app.get("/events/catalog")
@@ -2477,6 +2484,10 @@ def create_app(
         session_id: str | None = None,
         limit: int = 1000,
     ) -> dict[str, Any]:
+        if call_id:
+            return build_timeline(
+                durable_call_events(events, transcripts, call_id, after=after, limit=validated_limit(limit))
+            )
         return build_timeline(
             events.list_events(
                 after=after,
@@ -4206,6 +4217,38 @@ def validated_limit(limit: int, *, maximum: int = 1000) -> int:
     return limit
 
 
+def durable_call_events(
+    events: EventStore,
+    transcripts: TranscriptStore,
+    call_id: str,
+    *,
+    after: int = 0,
+    limit: int = 200,
+) -> list[VoicebotEvent]:
+    merged: dict[int, VoicebotEvent] = {}
+    for event in transcripts.read(call_id, after=after, limit=None):
+        restored = transcript_event_to_voicebot_event(event)
+        if restored is not None:
+            merged[restored.id] = restored
+    for event in events.list_events(after=after, call_id=call_id, limit=limit):
+        merged[event.id] = event
+    return sorted(merged.values(), key=lambda event: event.id)[:limit]
+
+
+def transcript_event_to_voicebot_event(event: dict[str, Any]) -> VoicebotEvent | None:
+    try:
+        event_id = int(event["id"])
+        call_id = str(event["call_id"]).strip()
+        event_type = str(event["type"]).strip()
+        timestamp = str(event["timestamp"]).strip()
+    except (KeyError, TypeError, ValueError):
+        return None
+    if event_id < 1 or not call_id or not event_type or not timestamp:
+        return None
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    return VoicebotEvent(event_id, call_id, event_type, timestamp, data)
+
+
 def validated_worker_role(value: str) -> WorkerRole:
     if value not in get_args(WorkerRole):
         raise ValueError(f"unsupported worker role: {value}")
@@ -5309,11 +5352,11 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     async function backfillVoicebotEvents() {
       if (!callId) return;
       try {
-        const response = await fetch("/events?limit=160");
+        const response = await fetch(`/events?call_id=${encodeURIComponent(callId)}&limit=300`);
         if (!response.ok) throw new Error(await response.text());
         const payload = await response.json();
         for (const event of payload.events || []) {
-          if (event.call_id === callId) logVoicebotEvent(event);
+          logVoicebotEvent(event);
         }
       } catch (error) {
         log(`event backfill failed: ${error}`);

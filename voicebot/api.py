@@ -3590,12 +3590,27 @@ WEBRTC_TEST_PAGE = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FlowHunt Voicebot WebRTC Test</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 1200px; line-height: 1.45; }
-    button { font: inherit; margin-right: .5rem; padding: .45rem .75rem; }
+    :root { color-scheme: light; --border: #d8dee4; --muted: #57606a; --header: #f6f8fa; --row: #ffffff; --row-alt: #fbfcfd; --accent: #0969da; }
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 1320px; line-height: 1.45; color: #24292f; background: #fff; }
+    button { font: inherit; margin-right: .5rem; padding: .45rem .75rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; }
+    button:not(:disabled):hover { border-color: var(--accent); }
+    button:disabled { color: #8c959f; cursor: not-allowed; background: #f6f8fa; }
     audio { display: block; margin: 1rem 0; width: 100%; max-width: 48rem; }
     .logs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
-    .log-panel h2 { font-size: 1rem; margin: 0 0 .35rem; }
-    pre { background: #111; color: #eee; padding: 1rem; overflow: auto; height: 28rem; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .log-panel h2 { font-size: 1rem; margin: 0 0 .5rem; }
+    .table-wrap { border: 1px solid var(--border); border-radius: 8px; height: 30rem; overflow: auto; background: #fff; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .8125rem; }
+    thead th { position: sticky; top: 0; z-index: 1; background: var(--header); color: var(--muted); font-weight: 600; text-align: left; border-bottom: 1px solid var(--border); }
+    th, td { padding: .45rem .55rem; vertical-align: top; border-bottom: 1px solid #eaeef2; }
+    tbody tr:nth-child(even) { background: var(--row-alt); }
+    tbody tr:nth-child(odd) { background: var(--row); }
+    .time-col { width: 6.75rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .id-col { width: 4.25rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .type-col { width: 12rem; }
+    .message-cell, .data-cell { overflow-wrap: anywhere; word-break: break-word; }
+    .event-type { display: inline-block; max-width: 100%; padding: .1rem .4rem; border: 1px solid #c9d7e8; border-radius: 999px; color: #0550ae; background: #ddf4ff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .data-cell { color: #24292f; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .75rem; }
+    .empty-cell { color: #8c959f; font-family: inherit; }
     @media (max-width: 800px) { .logs { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -3608,11 +3623,25 @@ WEBRTC_TEST_PAGE = """<!doctype html>
   <div class="logs">
     <section class="log-panel">
       <h2>Client Log</h2>
-      <pre id="log"></pre>
+      <div class="table-wrap">
+        <table aria-label="Client log">
+          <thead>
+            <tr><th class="time-col">Time</th><th>Message</th></tr>
+          </thead>
+          <tbody id="log"></tbody>
+        </table>
+      </div>
     </section>
     <section class="log-panel">
       <h2>Voicebot Events</h2>
-      <pre id="event-log"></pre>
+      <div class="table-wrap">
+        <table aria-label="Voicebot events">
+          <thead>
+            <tr><th class="time-col">Time</th><th class="id-col">ID</th><th class="type-col">Type</th><th>Data</th></tr>
+          </thead>
+          <tbody id="event-log"></tbody>
+        </table>
+      </div>
     </section>
   </div>
   <script>
@@ -3628,17 +3657,70 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     let eventSocket = null;
     let seenEventIds = new Set();
 
+    function formatTime(timestamp) {
+      const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+      if (Number.isNaN(date.getTime())) return "";
+      const time = new Intl.DateTimeFormat(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        fractionalSecondDigits: 3,
+        hour12: false
+      }).format(date);
+      return time.replace(/^24:/, "00:");
+    }
+
+    function fullTimestamp(timestamp) {
+      const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+      if (Number.isNaN(date.getTime())) return String(timestamp || "");
+      return date.toISOString();
+    }
+
+    function appendCell(row, text, className = "", title = "") {
+      const cell = document.createElement("td");
+      if (className) cell.className = className;
+      cell.textContent = text;
+      if (title) cell.title = title;
+      row.appendChild(cell);
+      return cell;
+    }
+
+    function trimRows(tableBody, maxRows = 300) {
+      while (tableBody.rows.length > maxRows) {
+        tableBody.deleteRow(0);
+      }
+    }
+
+    function scrollTableToBottom(tableBody) {
+      const wrapper = tableBody.closest(".table-wrap");
+      if (wrapper) wrapper.scrollTop = wrapper.scrollHeight;
+    }
+
     function log(message) {
-      logNode.textContent += `${new Date().toISOString()} ${message}\\n`;
-      logNode.scrollTop = logNode.scrollHeight;
+      const now = new Date();
+      const row = logNode.insertRow();
+      appendCell(row, formatTime(now), "time-col", fullTimestamp(now));
+      appendCell(row, message, "message-cell");
+      trimRows(logNode);
+      scrollTableToBottom(logNode);
     }
 
     function logVoicebotEvent(event) {
       if (seenEventIds.has(event.id)) return;
       seenEventIds.add(event.id);
-      const data = event.data && Object.keys(event.data).length ? ` ${JSON.stringify(event.data)}` : "";
-      eventLogNode.textContent += `${event.timestamp || ""} #${event.id} ${event.type}${data}\\n`;
-      eventLogNode.scrollTop = eventLogNode.scrollHeight;
+      const row = eventLogNode.insertRow();
+      appendCell(row, formatTime(event.timestamp), "time-col", fullTimestamp(event.timestamp));
+      appendCell(row, event.id ?? "", "id-col");
+      const typeCell = appendCell(row, "", "type-col");
+      const type = document.createElement("span");
+      type.className = "event-type";
+      type.textContent = event.type || "";
+      type.title = event.type || "";
+      typeCell.appendChild(type);
+      const hasData = event.data && Object.keys(event.data).length;
+      appendCell(row, hasData ? JSON.stringify(event.data) : "No data", hasData ? "data-cell" : "data-cell empty-cell");
+      trimRows(eventLogNode);
+      scrollTableToBottom(eventLogNode);
     }
 
     async function backfillVoicebotEvents() {
@@ -3651,7 +3733,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
           if (event.call_id === callId) logVoicebotEvent(event);
         }
       } catch (error) {
-        eventLogNode.textContent += `${new Date().toISOString()} event backfill failed: ${error}\\n`;
+        log(`event backfill failed: ${error}`);
       }
     }
 
@@ -3724,7 +3806,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         sessionId = payload.session_id;
         callId = payload.call_id;
         seenEventIds = new Set();
-        eventLogNode.textContent = "";
+        eventLogNode.innerHTML = "";
         connectEventSocket();
         await backfillVoicebotEvents();
         await pc.setRemoteDescription(payload.answer);

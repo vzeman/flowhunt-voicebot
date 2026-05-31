@@ -42,6 +42,10 @@ The runtime is split into replaceable parts:
 - **TTS and playback pipeline**: agent text responses are synthesized by the
   configured TTS provider and played back into the SIP call. Playback is
   interruptible whenever the caller starts speaking.
+- **Speech-only call recording**: completed calls can publish a playable WAV
+  recording that concatenates caller and voicebot speech segments while omitting
+  silence. Segment metadata keeps the original call offsets for audit and
+  diagnostics.
 - **Asterisk control tools**: the agent can ask the runtime to hang up,
   transfer the call, send DTMF, stop playback, or read call transcripts through
   HTTP tool endpoints.
@@ -97,6 +101,7 @@ flowchart LR
         STT[STT provider adapter<br/>Whisper / OpenAI / compatible]
         Events[Event stream and agent task queue]
         Store[(Transcript JSONL store)]
+        Recording[(Speech-only recording artifact)]
         TTS[TTS provider adapter<br/>Supertonic / OpenAI / compatible]
         Playback[Interruptible playback]
         Tools[Call-control tool API]
@@ -106,6 +111,7 @@ flowchart LR
         WebRTC --> Session
         VAD -->|speech turn| STT
         STT -->|user_transcript| Events
+        Session -->|caller and bot voice segments| Recording
         Events --> Store
         Events --> API
         API --> Tools
@@ -171,15 +177,18 @@ flowchart LR
    caller.
 9. **Tool actions**: agent tool calls emit `call_control_requested`, execute the
    requested Asterisk action through AMI, then emit `call_control_completed`.
-10. **Call end**: when the call disconnects, voicebot emits `call_ended`, closes
-    the session, and leaves the full transcript available through the transcript
-    API.
+10. **Call end**: when the call disconnects, voicebot saves a speech-only call
+    recording when voice was captured, emits `call_recording_saved`, emits
+    `call_ended`, closes the session, and leaves the full transcript available
+    through the transcript API.
 
 For browser calls, the WebRTC flow starts with `POST /webrtc/sessions` instead
 of a SIP INVITE. The browser sends an SDP offer, voicebot creates a WebRTC peer
 connection, receives microphone audio directly, and sends synthesized bot audio
 back as a remote audio track. After media reaches the call session, WebRTC uses
 the same VAD, STT, event, agent, TTS, playback, and transcript path as SIP.
+The local `/webrtc/test` page also checks for a speech-only recording after the
+call ends and shows a playback control when the recording artifact exists.
 
 ## Event-Driven Agent Contract
 

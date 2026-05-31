@@ -7,7 +7,7 @@ import threading
 from typing import Any, get_args
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
 from .agent_tasks import AgentTaskTracker
 from .api_surface import (
@@ -59,6 +59,7 @@ from .api_models import (
     WebRTCOfferRequest,
 )
 from .asterisk_control import AsteriskAMI, ControlResult
+from .call_recording import recording_artifact_id
 from .calls import AgentResponse, CallRegistry
 from .config import Settings, redacted_settings
 from .deployment_topology import deployment_topology_payload, role_readiness_payload
@@ -222,6 +223,7 @@ def create_app(
     workspace_policy: WorkspaceAccessPolicy | None = None,
     runtime_configs: VoicebotRuntimeConfigStore | None = None,
     prompt_configs: VoicebotPromptConfigStore | None = None,
+    audio_artifacts=None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -1650,6 +1652,35 @@ def create_app(
     @app.get("/webrtc/test")
     def webrtc_test_page() -> HTMLResponse:
         return HTMLResponse(WEBRTC_TEST_PAGE)
+
+    @app.get("/calls/{call_id}/recording")
+    def get_call_recording_metadata(call_id: str) -> dict[str, Any]:
+        record = call_recording_record(call_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"Call recording not found: {call_id}")
+        return {"artifact_id": record.artifact_id, "metadata": record.metadata}
+
+    @app.get("/calls/{call_id}/recording.wav")
+    def get_call_recording_audio(call_id: str) -> Response:
+        if audio_artifacts is None:
+            raise HTTPException(status_code=503, detail="Audio artifact storage is not configured")
+        data = audio_artifacts.get(recording_artifact_id(call_id))
+        if data is None:
+            raise HTTPException(status_code=404, detail=f"Call recording not found: {call_id}")
+        return Response(
+            content=data,
+            media_type="audio/wav",
+            headers={"Content-Disposition": f'inline; filename="{recording_artifact_id(call_id)}"'},
+        )
+
+    def call_recording_record(call_id: str):
+        if audio_artifacts is None:
+            raise HTTPException(status_code=503, detail="Audio artifact storage is not configured")
+        artifact_id = recording_artifact_id(call_id)
+        for record in audio_artifacts.list():
+            if record.artifact_id == artifact_id:
+                return record
+        return None
 
     @app.get("/sip-trunks")
     def list_sip_trunks() -> dict[str, Any]:
@@ -3598,6 +3629,10 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     .call-controls { display: flex; align-items: center; gap: .75rem; margin: 1rem 0; width: 100%; }
     .button-group { display: flex; align-items: center; gap: .5rem; flex: 0 0 auto; }
     audio { display: block; width: 100%; min-width: 16rem; margin: 0; flex: 1 1 auto; }
+    .recording-panel { display: none; align-items: center; gap: .75rem; margin: .75rem 0 1rem; padding: .75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--detail); }
+    .recording-panel.visible { display: flex; }
+    .recording-panel h2 { flex: 0 0 auto; margin: 0; font-size: .875rem; color: var(--muted); }
+    .recording-panel audio { min-width: 14rem; }
     .logs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; width: 100%; }
     .log-panel h2 { font-size: 1rem; margin: 0 0 .5rem; }
     .table-wrap { border: 1px solid var(--border); border-radius: 8px; height: 30rem; overflow: auto; background: #fff; }
@@ -3635,6 +3670,10 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       <button id="stop" disabled>Stop call</button>
     </div>
     <audio id="remote" autoplay playsinline controls></audio>
+  </div>
+  <div id="recording-panel" class="recording-panel">
+    <h2>Call recording</h2>
+    <audio id="recording" controls></audio>
   </div>
   <div class="logs">
     <section class="log-panel">
@@ -3675,6 +3714,8 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     const startButton = document.getElementById("start");
     const stopButton = document.getElementById("stop");
     const remoteAudio = document.getElementById("remote");
+    const recordingPanel = document.getElementById("recording-panel");
+    const recordingAudio = document.getElementById("recording");
     const logNode = document.getElementById("log");
     const eventLogNode = document.getElementById("event-log");
     const subagentLogNode = document.getElementById("subagent-log");
@@ -3942,8 +3983,15 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       stopButton.disabled = false;
     }
 
+    function resetRecordingPlayback() {
+      recordingPanel.classList.remove("visible");
+      recordingAudio.removeAttribute("src");
+      recordingAudio.load();
+    }
+
     startButton.onclick = async () => {
       startButton.disabled = true;
+      resetRecordingPlayback();
       try {
         pc = new RTCPeerConnection({iceServers: [{urls: "stun:stun.l.google.com:19302"}]});
         pc.onconnectionstatechange = () => {
@@ -4041,6 +4089,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     }
 
     function closeLocalPeer(reason = "") {
+      const finishedCallId = callId;
       setIdleButtons();
       sessionId = null;
       callId = null;
@@ -4060,6 +4109,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         eventSocket = null;
       }
       if (reason) log(reason);
+      if (finishedCallId) loadCallRecording(finishedCallId);
     }
 
     async function stopCall() {
@@ -4073,6 +4123,20 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       }
       closeLocalPeer();
       log("stopped");
+    }
+
+    async function loadCallRecording(finishedCallId) {
+      try {
+        const response = await fetch(`/calls/${encodeURIComponent(finishedCallId)}/recording`);
+        if (response.status === 404) return;
+        if (!response.ok) throw new Error(await response.text());
+        const payload = await response.json();
+        recordingAudio.src = `/calls/${encodeURIComponent(finishedCallId)}/recording.wav`;
+        recordingPanel.classList.add("visible");
+        log(`call recording=${JSON.stringify(payload.metadata)}`);
+      } catch (error) {
+        log(`recording load failed: ${error}`);
+      }
     }
   </script>
 </body>

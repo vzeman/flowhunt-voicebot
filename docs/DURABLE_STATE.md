@@ -100,14 +100,24 @@ before they are enabled in production configuration.
 
 `FilesystemArtifactStore` is the first concrete audio artifact driver. It stores
 binary artifacts under a configured root and writes sidecar metadata files with
-the `.metadata.json` suffix. The TTS cache now writes through this artifact
-interface, so the generated audio cache follows the same `put/get/delete/list`
-contract that an object-storage driver must implement later.
+the `.metadata.json` suffix. The TTS cache and speech-only call recordings write
+through this artifact interface, so generated audio and recording playback files
+follow the same `put/get/delete/list` contract that an object-storage driver
+must implement later.
 
 The current local TTS cache still uses:
 
 - `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER=filesystem`
 - `VOICEBOT_TTS_CACHE_DIR=/data/tts-cache`
+
+Speech-only call recording is controlled by:
+
+- `VOICEBOT_CALL_RECORDING_ENABLED=true`
+- `VOICEBOT_CALL_RECORDING_SILENCE_THRESHOLD=0.003`
+
+The current filesystem driver stores call recordings in the same local audio
+artifact root. Recording metadata contains the compact playback duration and the
+original call offsets for each captured caller or voicebot speech segment.
 
 The managed production target remains object storage plus a DB metadata index.
 Production object-storage drivers must keep artifact metadata workspace-scoped

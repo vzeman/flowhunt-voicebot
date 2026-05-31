@@ -71,6 +71,8 @@ class Settings:
     agent_min_transcript_tokens: int = env_int("VOICEBOT_AGENT_MIN_TRANSCRIPT_TOKENS", 2)
     debug_audio_capture: bool = env_bool("VOICEBOT_DEBUG_AUDIO_CAPTURE", False)
     debug_audio_dir: str = os.getenv("VOICEBOT_DEBUG_AUDIO_DIR", "/data/debug-audio")
+    call_recording_enabled: bool = env_bool("VOICEBOT_CALL_RECORDING_ENABLED", True)
+    call_recording_silence_threshold: float = env_float("VOICEBOT_CALL_RECORDING_SILENCE_THRESHOLD", 0.003)
 
     tts_provider: str = os.getenv("VOICEBOT_TTS_PROVIDER", "supertonic")
     tts_api_key: str = os.getenv("VOICEBOT_TTS_API_KEY", "")

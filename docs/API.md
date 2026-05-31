@@ -933,6 +933,64 @@ Returns a minimal browser test page. It uses `getUserMedia`, creates an
 `RTCPeerConnection`, posts the SDP offer to `/webrtc/sessions`, and plays the
 remote bot audio track in an `<audio>` element.
 
+After the call ends, the page checks `/calls/{call_id}/recording` and shows a
+call-recording `<audio>` element when a speech-only recording is available.
+
+## Call Recordings
+
+Speech-only recordings are created at call end when
+`VOICEBOT_CALL_RECORDING_ENABLED=true`. The recording WAV concatenates captured
+caller and voicebot speech segments and omits silence. Metadata keeps the
+original call offsets for each segment so the compact playback can still be
+mapped back to the realtime conversation.
+
+### GET `/calls/{call_id}/recording`
+
+Returns metadata for the saved speech-only recording.
+
+Response:
+
+```json
+{
+  "artifact_id": "webrtc-session-1.speech.wav",
+  "metadata": {
+    "call_id": "webrtc-session-1",
+    "kind": "speech_only_call_recording",
+    "sample_rate": 16000,
+    "segment_count": 2,
+    "duration_seconds": 3.42,
+    "original_voice_span_seconds": 8.91,
+    "silence_removed": true,
+    "segments": [
+      {
+        "source": "caller",
+        "start_seconds": 1.22,
+        "end_seconds": 2.14,
+        "duration_seconds": 0.92,
+        "playback_start_seconds": 0.0,
+        "sample_rate": 16000,
+        "samples": 14720,
+        "metadata": {"turn_id": 1}
+      }
+    ]
+  }
+}
+```
+
+Errors:
+
+- `404`: recording not found for this call.
+- `503`: audio artifact storage is not configured.
+
+### GET `/calls/{call_id}/recording.wav`
+
+Returns the speech-only recording as `audio/wav`.
+
+Errors:
+
+- `404`: recording not found for this call.
+- `503`: audio artifact storage is not configured.
+
 ## Dynamic SIP Trunks
 
 The voicebot service can manage many SIP trunks dynamically. It persists trunk

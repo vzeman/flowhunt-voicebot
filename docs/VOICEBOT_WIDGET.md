@@ -1,8 +1,8 @@
 # Embeddable Voicebot Widget
 
 The public widget lets a website visitor start a WebRTC voice session with a
-configured voicebot. It is intentionally separate from `/webrtc/test`, which
-remains a local/internal diagnostic page until dashboard work moves it.
+configured voicebot. It is intentionally separate from the internal dashboard
+WebRTC inference console.
 
 ## Install
 

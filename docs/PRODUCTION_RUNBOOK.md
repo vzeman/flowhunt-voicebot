@@ -10,8 +10,8 @@ widget, auth, storage, and Kubernetes topology contracts.
 | --- | --- | --- | --- |
 | Public caller API | `GET /.well-known/flowhunt-voicebot`, `GET /widget.js`, `GET /widget`, `POST /webrtc/sessions`, `DELETE /webrtc/sessions/{session_id}`, `GET /openapi/public.json`, health liveness | Internet public ingress | Anonymous, protected by route resolution, origin allow-list, rate limits, and admission checks |
 | Internal API | `/workspaces/...`, `/dashboard/state`, `/events`, `/calls`, `/subagent`, `/scaling`, `/observability`, `/storage`, `/security`, `/config`, `/openapi/internal.json` | Private cluster/VPN/service mesh | Internal API key or future workload identity |
-| Dashboard | `GET /dashboard`, `/webrtc/test` behind private dashboard ingress | Private dashboard ingress | Dashboard user login/SSO/RBAC; local dev bypass only when explicitly enabled |
-| Local dev only | `/webrtc/test` when using local Docker | Local machine/private dashboard only | Internal/local dashboard access |
+| Dashboard | `GET /dashboard` with embedded WebRTC inference console | Private dashboard ingress | Dashboard user login/SSO/RBAC; local dev bypass only when explicitly enabled |
+| Local dev only | None currently | Local machine/private dashboard only | Internal/local dashboard access |
 
 Generate or export OpenAPI specs:
 
@@ -120,7 +120,7 @@ Operators can currently inspect:
 - channel and public route counts
 - active WebRTC sessions
 - recent workspace events
-- WebRTC inference console via `/webrtc/test`
+- Embedded WebRTC inference console
 
 Management APIs already exist for voicebots, channels, public routes, prompts,
 providers, runtime config, SIP trunks, and retention hooks. The dashboard must

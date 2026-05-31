@@ -193,8 +193,9 @@ of a SIP INVITE. The browser sends an SDP offer, voicebot creates a WebRTC peer
 connection, receives microphone audio directly, and sends synthesized bot audio
 back as a remote audio track. After media reaches the call session, WebRTC uses
 the same VAD, STT, event, agent, TTS, playback, and transcript path as SIP.
-The local `/webrtc/test` page also checks for a speech-only recording after the
-call ends and shows a playback control when the recording artifact exists.
+The internal dashboard embeds the WebRTC inference console and checks for a
+speech-only recording after the call ends, showing playback when the recording
+artifact exists.
 
 ## Event-Driven Agent Contract
 
@@ -324,14 +325,14 @@ Start the stack:
 docker compose up -d --build voicebot openai-agent
 ```
 
-Open the built-in browser test page:
+Open the internal dashboard and use the embedded WebRTC inference console:
 
 ```text
-http://127.0.0.1:8080/webrtc/test
+http://127.0.0.1:8080/dashboard
 ```
 
 Click **Start call**, allow microphone access, and speak. Browser echo
-cancellation is enabled by the test page, and synthesized bot audio plays
+cancellation is enabled by the console, and synthesized bot audio plays
 through the page's audio element.
 
 Useful debug endpoints:

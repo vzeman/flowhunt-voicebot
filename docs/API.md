@@ -29,7 +29,9 @@ but every HTTP route is now classified by audience:
 - `internal`: FlowHunt backend, worker, agent, dashboard, diagnostics,
   call-control, storage, transcript, event, and admin endpoints. These must not
   be exposed to public ingress.
-- `local_dev`: local developer tooling such as the browser WebRTC test page.
+- `local_dev`: reserved for local developer tooling. There are currently no
+  standalone local-dev routes; the WebRTC inference console is embedded in the
+  internal dashboard.
 
 Generated OpenAPI specs are split by audience:
 
@@ -984,10 +986,11 @@ microphone audio to voicebot over WebRTC, and voicebot returns synthesized bot
 audio as a remote audio track. After audio reaches the runtime, WebRTC calls use
 the same VAD, STT, event, agent, TTS, playback, and transcript path as SIP calls.
 
-For manual local testing, open:
+For manual local testing, open the internal dashboard and use its embedded
+WebRTC inference console:
 
 ```text
-http://127.0.0.1:8080/webrtc/test
+http://127.0.0.1:8080/dashboard
 ```
 
 ### GET `/.well-known/flowhunt-voicebot`
@@ -1158,15 +1161,6 @@ Errors:
 
 - `404`: WebRTC session not found.
 - `503`: WebRTC transport is not configured.
-
-### GET `/webrtc/test`
-
-Returns a minimal browser test page. It uses `getUserMedia`, creates an
-`RTCPeerConnection`, posts the SDP offer to `/webrtc/sessions`, and plays the
-remote bot audio track in an `<audio>` element.
-
-After the call ends, the page checks `/calls/{call_id}/recording` and shows a
-call-recording `<audio>` element when a speech-only recording is available.
 
 ### GET `/widget.js`
 

@@ -123,7 +123,6 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("POST", "/calls/{call_id}/multimodal/parts", "multimodal", "internal", workspace_scoped=True, scope_source="payload", description="Attach normalized multimodal content to a call."),
     ApiEndpointSpec("POST", "/runtime/webrtc/sessions", "runtime", "public", scope_source="payload", description="Create WebRTC runtime session."),
     ApiEndpointSpec("POST", "/runtime/sip-trunks/{trunk_id}/register", "runtime", "internal", scope_source="route_binding", description="Register SIP trunk runtime binding."),
-    ApiEndpointSpec("GET", "/webrtc/test", "testing", "prototype", workspace_scoped=False, scope_source="none", description="Local browser test app."),
     ApiEndpointSpec("GET", "/agent/tasks", "internal", "internal", workspace_scoped=False, scope_source="none", description="Worker task lease API."),
 )
 

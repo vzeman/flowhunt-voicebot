@@ -1,7 +1,8 @@
 # WebRTC Media Plane Scale Contract
 
-The local WebRTC path remains available at `/webrtc/test` and uses the voicebot
-API process to terminate browser offer/answer signaling with `aiortc`.
+The local WebRTC inference console is embedded in the internal dashboard at
+`/dashboard`. There is no standalone `/webrtc/test` route. The console uses the
+voicebot API process to terminate browser offer/answer signaling with `aiortc`.
 
 ## Kubernetes Target
 

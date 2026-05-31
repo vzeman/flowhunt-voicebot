@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
+import html
 import threading
 from time import perf_counter
 from typing import Any, get_args
@@ -1905,7 +1906,7 @@ def create_app(
 
     @app.get("/dashboard")
     def dashboard() -> HTMLResponse:
-        return HTMLResponse(DASHBOARD_PAGE)
+        return HTMLResponse(DASHBOARD_PAGE.replace("__WEBRTC_CONSOLE_SRCDOC__", html.escape(WEBRTC_TEST_PAGE, quote=True)))
 
     @app.get("/dashboard/state")
     def dashboard_state(request: Request, workspace_id: str | None = None) -> dict[str, Any]:
@@ -1933,7 +1934,7 @@ def create_app(
                 "access": "internal",
                 "auth": "dashboard_user_login" if runtime_settings.dashboard_auth_enabled else "local_internal",
                 "user": dashboard_user,
-                "webrtc_test_page": "/webrtc/test",
+                "webrtc_console": "embedded",
             },
             "workspaces": workspace_ids,
             "selected_workspace_id": selected_workspace,
@@ -2235,10 +2236,6 @@ def create_app(
         if not closed:
             raise HTTPException(status_code=404, detail=f"WebRTC session not found: {session_id}")
         return {"closed": True, "session_id": session_id}
-
-    @app.get("/webrtc/test")
-    def webrtc_test_page() -> HTMLResponse:
-        return HTMLResponse(WEBRTC_TEST_PAGE)
 
     @app.get("/calls/{call_id}/recording")
     def get_call_recording_metadata(call_id: str) -> dict[str, Any]:
@@ -4277,7 +4274,7 @@ DASHBOARD_PAGE = """<!doctype html>
         </div>
         <div>
           <h2>WebRTC Inference Console</h2>
-          <iframe src="/webrtc/test" title="WebRTC test console"></iframe>
+          <iframe srcdoc="__WEBRTC_CONSOLE_SRCDOC__" title="WebRTC test console"></iframe>
         </div>
       </div>
       <h2>Recent Events</h2>

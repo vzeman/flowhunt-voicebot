@@ -44,7 +44,8 @@ the request includes `X-FlowHunt-Dev-Login: true`.
 - Voicebot cards with enabled state, channel count, public route count, and
   active WebRTC session count.
 - Active WebRTC session table.
-- Embedded WebRTC inference console using the existing `/webrtc/test` tool.
+- Embedded WebRTC inference console. There is no standalone `/webrtc/test`
+  route.
 - Recent workspace event JSON for debugging.
 
 ## Management Model
@@ -72,5 +73,5 @@ dashboard user id for every authenticated dashboard request.
 
 The dashboard must be routed only through the private dashboard ingress
 described in `docs/DEPLOYMENT_TOPOLOGY.md`. Public voicebot ingress must never
-expose `/dashboard`, `/dashboard/state`, `/webrtc/test`, internal OpenAPI,
-events, transcripts, diagnostics, task queues, or call-control APIs.
+expose `/dashboard`, `/dashboard/state`, internal OpenAPI, events,
+transcripts, diagnostics, task queues, or call-control APIs.

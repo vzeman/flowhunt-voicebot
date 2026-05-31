@@ -79,7 +79,7 @@ def webrtc_media_plane_payload() -> dict[str, Any]:
         },
         "quality_metrics": ["ice_state", "connection_state", "packet_loss", "jitter", "rtt", "audio_level", "disconnect_reason"],
         "decisions": [decision.to_dict() for decision in WEBRTC_MEDIA_PLANE_DECISIONS],
-        "local_development": {"browser_test_page": "/webrtc/test", "supported": True},
+        "local_development": {"browser_test_page": None, "dashboard_console": "/dashboard", "supported": True},
         "production_requirements": [
             "workspace-scoped WebRTC channel bindings",
             "sticky signaling route for active session owner",

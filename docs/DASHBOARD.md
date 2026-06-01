@@ -53,15 +53,15 @@ workspace admin APIs or FlowHunt control plane instead of relying on this seed.
 
 ## Current Capabilities
 
-- Main menu with `Workspaces`, `Active Sessions`, `Sessions History`, and
-  `Voicebot Test`.
+- Main menu with `Workspaces`, `Sessions History`, and `Voicebot Test`.
 - Workspace table showing `workspace_id` and display name. Opening a workspace
   shows its voicebots.
-- Voicebot detail view with editable basic settings and prompts, including the
-  greeting, filler message, system prompt, STT prompt, and language, plus
-  read-only provider and runtime configuration JSON.
-- Active session table showing workspace, voicebot, session id, status, start
-  time, and elapsed length.
+- Voicebot detail view with editable basic settings, prompt fields, provider
+  choices, model names, TTS voice, fallback providers, secret references,
+  provider config JSON, and runtime JSON sections for realtime audio, quotas,
+  subagents, and enabled state. Provider and runtime JSON previews remain
+  visible for diagnostics.
+- Running sessions are shown in `Sessions History` with a status filter.
 - Finished session history table with the same operational columns.
 - Session detail view with event timeline, transcript, and call recording
   playback when a recording artifact exists.

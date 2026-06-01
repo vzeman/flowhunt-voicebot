@@ -206,6 +206,7 @@ class SecretReferenceRequest(BaseModel):
 class ProviderChoiceRequest(BaseModel):
     provider: str
     model: str | None = None
+    voice: str | None = None
     secret_ref: SecretReferenceRequest | None = None
     fallback_provider: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)

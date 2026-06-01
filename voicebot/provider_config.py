@@ -29,6 +29,7 @@ class ProviderChoice:
     family: ProviderFamily
     provider: str
     model: str | None = None
+    voice: str | None = None
     secret_ref: SecretReference | None = None
     fallback_provider: str | None = None
     config: dict = field(default_factory=dict)
@@ -40,6 +41,8 @@ class ProviderChoice:
             raise ValueError("provider is required")
         if self.model is not None and not self.model.strip():
             raise ValueError("model must not be blank")
+        if self.voice is not None and not self.voice.strip():
+            raise ValueError("voice must not be blank")
         if self.fallback_provider is not None and not self.fallback_provider.strip():
             raise ValueError("fallback_provider must not be blank")
 
@@ -82,6 +85,7 @@ class ProviderSelectionPlan:
     providers: dict[ProviderFamily, str]
     fallbacks: dict[ProviderFamily, str]
     models: dict[ProviderFamily, str]
+    voices: dict[ProviderFamily, str]
 
 
 class ProviderConfigStore:
@@ -173,6 +177,7 @@ def provider_choice_to_dict(choice: ProviderChoice) -> dict:
         "family": choice.family,
         "provider": choice.provider,
         "model": choice.model,
+        "voice": choice.voice,
         "secret_ref": secret_reference_to_dict(choice.secret_ref) if choice.secret_ref else None,
         "fallback_provider": choice.fallback_provider,
         "config": choice.config,
@@ -201,6 +206,7 @@ def provider_choice_from_dict(data: dict, expected_family: ProviderFamily) -> Pr
         family=family,  # type: ignore[arg-type]
         provider=str(data["provider"]),
         model=str(data["model"]) if data.get("model") is not None else None,
+        voice=str(data["voice"]) if data.get("voice") is not None else None,
         secret_ref=secret_reference_from_dict(data["secret_ref"]) if data.get("secret_ref") else None,
         fallback_provider=str(data["fallback_provider"]) if data.get("fallback_provider") is not None else None,
         config=dict(data.get("config") or {}),
@@ -224,6 +230,7 @@ def selection_plan_to_dict(plan: ProviderSelectionPlan) -> dict:
         "providers": plan.providers,
         "fallbacks": plan.fallbacks,
         "models": plan.models,
+        "voices": plan.voices,
     }
 
 
@@ -265,6 +272,7 @@ def provider_selection_plan(config: VoicebotProviderConfig) -> ProviderSelection
     providers: dict[ProviderFamily, str] = {}
     fallbacks: dict[ProviderFamily, str] = {}
     models: dict[ProviderFamily, str] = {}
+    voices: dict[ProviderFamily, str] = {}
     for family in ("stt", "tts", "agent"):
         choice = config.choice(family)
         providers[family] = choice.normalized_provider()
@@ -273,10 +281,13 @@ def provider_selection_plan(config: VoicebotProviderConfig) -> ProviderSelection
             fallbacks[family] = fallback
         if choice.model:
             models[family] = choice.model
+        if choice.voice:
+            voices[family] = choice.voice
     return ProviderSelectionPlan(
         workspace_id=config.workspace_id,
         voicebot_id=config.voicebot_id,
         providers=providers,
         fallbacks=fallbacks,
         models=models,
+        voices=voices,
     )

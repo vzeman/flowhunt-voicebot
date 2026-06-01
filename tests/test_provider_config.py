@@ -36,7 +36,7 @@ class ProviderConfigTests(unittest.TestCase):
             workspace_id="workspace-1",
             voicebot_id="voicebot-1",
             stt=ProviderChoice("stt", "openai", model="gpt-4o-transcribe", secret_ref=secret, fallback_provider="whisper"),
-            tts=ProviderChoice("tts", "openai", model="gpt-4o-mini-tts", secret_ref=secret, fallback_provider="supertonic"),
+            tts=ProviderChoice("tts", "openai", model="gpt-4o-mini-tts", voice="alloy", secret_ref=secret, fallback_provider="supertonic"),
             agent=ProviderChoice("agent", "openai-responses", model="gpt-4.1", secret_ref=secret),
         )
 
@@ -156,6 +156,7 @@ class ProviderConfigTests(unittest.TestCase):
         self.assertEqual(plan.providers["stt"], "openai")
         self.assertEqual(plan.fallbacks["stt"], "whisper")
         self.assertEqual(plan.models["agent"], "gpt-4.1")
+        self.assertEqual(plan.voices["tts"], "alloy")
 
     def test_secret_reference_requires_workspace_scope(self) -> None:
         with self.assertRaisesRegex(ValueError, "name"):
@@ -170,6 +171,8 @@ class ProviderConfigTests(unittest.TestCase):
             ProviderChoice("stt", "")
         with self.assertRaisesRegex(ValueError, "model"):
             ProviderChoice("stt", "openai", model=" ")
+        with self.assertRaisesRegex(ValueError, "voice"):
+            ProviderChoice("tts", "openai", voice=" ")
         with self.assertRaisesRegex(ValueError, "fallback_provider"):
             ProviderChoice("stt", "openai", fallback_provider=" ")
 
@@ -213,6 +216,7 @@ class ProviderConfigTests(unittest.TestCase):
                 "tts": {
                     "provider": "openai",
                     "model": "gpt-4o-mini-tts",
+                    "voice": "alloy",
                     "secret_ref": {"name": "openai-main"},
                     "fallback_provider": "supertonic",
                 },
@@ -231,6 +235,7 @@ class ProviderConfigTests(unittest.TestCase):
         read_response = client.get("/workspaces/workspace-1/voicebots/voicebot-1/providers")
         self.assertEqual(read_response.status_code, 200)
         self.assertEqual(read_response.json()["config"]["stt"]["secret_ref"]["workspace_id"], "workspace-1")
+        self.assertEqual(read_response.json()["config"]["tts"]["voice"], "alloy")
 
     def test_provider_config_api_returns_validation_errors_without_saving(self) -> None:
         client = self.build_client()

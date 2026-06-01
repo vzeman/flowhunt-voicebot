@@ -1871,6 +1871,7 @@ def create_app(
             family,  # type: ignore[arg-type]
             request.provider,
             model=request.model,
+            voice=request.voice,
             secret_ref=secret_ref,
             fallback_provider=request.fallback_provider,
             config=request.config,
@@ -4385,6 +4386,10 @@ DASHBOARD_PAGE = """<!doctype html>
     .tab-panel.active { display:block; }
     .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.7rem; }
     .form-grid label.full { grid-column:1 / -1; }
+    .provider-editor-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.75rem; }
+    fieldset { border:1px solid var(--border); border-radius:8px; padding:.75rem; min-width:0; }
+    fieldset label { display:block; margin:.45rem 0; }
+    fieldset label.full textarea { min-height:6rem; }
     .badge { display:inline-block; padding:.1rem .45rem; border-radius:999px; background:#dafbe1; color:#1a7f37; font-weight:700; font-size:.75rem; }
     .badge.off { background:#ffebe9; color:var(--danger); }
     .session-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin:.25rem 0 1rem; flex-wrap:wrap; }
@@ -4472,7 +4477,7 @@ DASHBOARD_PAGE = """<!doctype html>
       main { grid-template-columns:1fr; }
       nav { display:flex; gap:.35rem; overflow:auto; border-right:0; border-bottom:1px solid var(--border); }
       nav button { width:auto; white-space:nowrap; margin:0; }
-      .split, .session-layout, .form-grid { grid-template-columns:1fr; }
+      .split, .session-layout, .form-grid, .provider-editor-grid { grid-template-columns:1fr; }
     }
   </style>
 </head>
@@ -4543,8 +4548,53 @@ DASHBOARD_PAGE = """<!doctype html>
               </div>
               <div class="toolbar"><button id="save-prompts" type="button">Save prompts</button><span class="muted" id="save-prompts-status"></span></div>
             </div>
-            <div id="detail-providers" class="tab-panel"><pre id="provider-json">{}</pre></div>
-            <div id="detail-runtime" class="tab-panel"><pre id="runtime-json">{}</pre></div>
+            <div id="detail-providers" class="tab-panel">
+              <div class="provider-editor-grid">
+                <fieldset>
+                  <legend>STT</legend>
+                  <label>provider<input id="provider-stt-provider" list="stt-provider-options"></label>
+                  <label>model<input id="provider-stt-model" list="stt-model-options"></label>
+                  <label>fallback_provider<input id="provider-stt-fallback" list="stt-provider-options"></label>
+                  <label>secret_name<input id="provider-stt-secret"></label>
+                  <label class="full">config_json<textarea id="provider-stt-config"></textarea></label>
+                </fieldset>
+                <fieldset>
+                  <legend>TTS</legend>
+                  <label>provider<input id="provider-tts-provider" list="tts-provider-options"></label>
+                  <label>model<input id="provider-tts-model" list="tts-model-options"></label>
+                  <label>voice<input id="provider-tts-voice"></label>
+                  <label>fallback_provider<input id="provider-tts-fallback" list="tts-provider-options"></label>
+                  <label>secret_name<input id="provider-tts-secret"></label>
+                  <label class="full">config_json<textarea id="provider-tts-config"></textarea></label>
+                </fieldset>
+                <fieldset>
+                  <legend>Agent</legend>
+                  <label>provider<input id="provider-agent-provider" list="agent-provider-options"></label>
+                  <label>model<input id="provider-agent-model" list="agent-model-options"></label>
+                  <label>fallback_provider<input id="provider-agent-fallback" list="agent-provider-options"></label>
+                  <label>secret_name<input id="provider-agent-secret"></label>
+                  <label class="full">config_json<textarea id="provider-agent-config"></textarea></label>
+                </fieldset>
+              </div>
+              <datalist id="stt-provider-options"></datalist>
+              <datalist id="tts-provider-options"></datalist>
+              <datalist id="agent-provider-options"></datalist>
+              <datalist id="stt-model-options"></datalist>
+              <datalist id="tts-model-options"></datalist>
+              <datalist id="agent-model-options"></datalist>
+              <div class="toolbar"><button id="save-providers" type="button">Save providers</button><span class="muted" id="save-providers-status"></span></div>
+              <pre id="provider-json">{}</pre>
+            </div>
+            <div id="detail-runtime" class="tab-panel">
+              <div class="form-grid">
+                <label>enabled<select id="runtime-enabled"><option value="true">true</option><option value="false">false</option></select></label>
+                <label class="full">realtime_json<textarea id="runtime-realtime"></textarea></label>
+                <label class="full">quotas_json<textarea id="runtime-quotas"></textarea></label>
+                <label class="full">subagents_json<textarea id="runtime-subagents"></textarea></label>
+              </div>
+              <div class="toolbar"><button id="save-runtime" type="button">Save runtime</button><span class="muted" id="save-runtime-status"></span></div>
+              <pre id="runtime-json">{}</pre>
+            </div>
           </div>
         </div>
       </div>
@@ -4635,6 +4685,8 @@ DASHBOARD_PAGE = """<!doctype html>
     let selectedVoicebotId = "";
     let previousView = "history";
     let currentRuntimeConfig = null;
+    let currentProviderConfig = null;
+    let providerCatalog = null;
     let currentSessionRoute = null;
     const views = ["workspaces", "history", "session", "test"];
     let pendingRoute = dashboardRouteFromLocation();
@@ -4665,6 +4717,8 @@ DASHBOARD_PAGE = """<!doctype html>
     document.getElementById("history-status-filter").addEventListener("change", () => applyTableFilter("history-session-rows"));
     document.getElementById("save-voicebot").addEventListener("click", saveVoicebot);
     document.getElementById("save-prompts").addEventListener("click", savePrompts);
+    document.getElementById("save-providers").addEventListener("click", saveProviders);
+    document.getElementById("save-runtime").addEventListener("click", saveRuntimeConfig);
     document.getElementById("test-workspace").addEventListener("change", () => {
       selectedWorkspaceId = document.getElementById("test-workspace").value;
       renderTestVoicebots();
@@ -4693,6 +4747,7 @@ DASHBOARD_PAGE = """<!doctype html>
     async function load(showErrors = true) {
       const qs = selectedWorkspaceId ? `?workspace_id=${encodeURIComponent(selectedWorkspaceId)}` : "";
       try {
+        if (!providerCatalog) providerCatalog = await fetchJson("/providers");
         const response = await fetch(`/dashboard/state${qs}`);
         if (!response.ok) throw new Error(await response.text());
         state = await response.json();
@@ -4763,7 +4818,8 @@ DASHBOARD_PAGE = """<!doctype html>
       document.getElementById("detail-display-name").value = bot.display_name || "";
       document.getElementById("detail-enabled").value = String(Boolean(bot.enabled));
       document.getElementById("detail-metadata").value = JSON.stringify(bot.metadata || {}, null, 2);
-      await Promise.all([loadPrompts(), loadProviderConfig(), loadRuntimeConfig()]);
+      await loadRuntimeConfig();
+      await Promise.all([loadPrompts(), loadProviderConfig()]);
     }
 
     async function loadPrompts() {
@@ -4781,6 +4837,8 @@ DASHBOARD_PAGE = """<!doctype html>
     async function loadProviderConfig() {
       const target = `/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/providers`;
       const payload = await fetchJson(target).catch((error) => ({error: String(error)}));
+      currentProviderConfig = payload.config || currentRuntimeConfig?.providers || null;
+      renderProviderEditor(currentProviderConfig || {});
       document.getElementById("provider-json").textContent = JSON.stringify(payload, null, 2);
     }
 
@@ -4788,12 +4846,61 @@ DASHBOARD_PAGE = """<!doctype html>
       const target = `/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/runtime-config`;
       const payload = await fetchJson(target).catch((error) => ({error: String(error)}));
       currentRuntimeConfig = payload.config || null;
+      renderRuntimeEditor(currentRuntimeConfig || {});
       document.getElementById("prompt-subagent-prompts").value = JSON.stringify(
         currentRuntimeConfig?.subagents?.prompts || {},
         null,
         2
       );
       document.getElementById("runtime-json").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    function renderProviderEditor(config) {
+      renderProviderDatalists();
+      for (const family of ["stt", "tts", "agent"]) {
+        const choice = config[family] || {};
+        setValue(`provider-${family}-provider`, choice.provider || defaultProviderForFamily(family));
+        setValue(`provider-${family}-model`, choice.model || "");
+        if (family === "tts") setValue("provider-tts-voice", choice.voice || "");
+        setValue(`provider-${family}-fallback`, choice.fallback_provider || "");
+        setValue(`provider-${family}-secret`, choice.secret_ref?.name || "");
+        setValue(`provider-${family}-config`, JSON.stringify(choice.config || {}, null, 2));
+      }
+    }
+
+    function renderProviderDatalists() {
+      if (!providerCatalog) return;
+      for (const family of ["stt", "tts", "agent"]) {
+        const catalog = providerCatalog[family] || {};
+        const providers = catalog.supported || [];
+        const providerList = document.getElementById(`${family}-provider-options`);
+        providerList.innerHTML = providers.map((provider) => `<option value="${escapeHtml(provider)}"></option>`).join("");
+        const modelSet = new Set();
+        for (const descriptor of Object.values(catalog.capabilities || {})) {
+          for (const model of descriptor.models || []) modelSet.add(model);
+        }
+        const modelList = document.getElementById(`${family}-model-options`);
+        modelList.innerHTML = Array.from(modelSet).sort().map((model) => `<option value="${escapeHtml(model)}"></option>`).join("");
+      }
+    }
+
+    function renderRuntimeEditor(config) {
+      setValue("runtime-enabled", String(config.enabled !== false));
+      setValue("runtime-realtime", JSON.stringify(config.realtime || {}, null, 2));
+      setValue("runtime-quotas", JSON.stringify(config.quotas || {}, null, 2));
+      setValue("runtime-subagents", JSON.stringify(config.subagents || {}, null, 2));
+      if (config.subagents?.prompts) setValue("prompt-subagent-prompts", JSON.stringify(config.subagents.prompts, null, 2));
+    }
+
+    function defaultProviderForFamily(family) {
+      if (family === "stt") return "whisper";
+      if (family === "tts") return "supertonic";
+      return "openai-responses";
+    }
+
+    function setValue(id, value) {
+      const element = document.getElementById(id);
+      if (element) element.value = value;
     }
 
     async function saveVoicebot() {
@@ -4861,9 +4968,128 @@ DASHBOARD_PAGE = """<!doctype html>
           body: JSON.stringify(runtimePayload)
         });
         currentRuntimeConfig = runtimeResponse.config || currentRuntimeConfig;
+        renderRuntimeEditor(currentRuntimeConfig || {});
         document.getElementById("runtime-json").textContent = JSON.stringify(runtimeResponse, null, 2);
       }
       status.textContent = "Saved";
+    }
+
+    async function saveProviders() {
+      const status = document.getElementById("save-providers-status");
+      status.textContent = "Saving...";
+      let providers;
+      try {
+        providers = buildProviderPayloadFromEditor();
+      } catch (error) {
+        status.textContent = String(error.message || error);
+        return;
+      }
+      const response = await fetchJson(`/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/providers`, {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(providers),
+      });
+      currentProviderConfig = response.config || currentProviderConfig;
+      document.getElementById("provider-json").textContent = JSON.stringify(response, null, 2);
+      if (response.ok === false) {
+        status.textContent = `Validation failed: ${(response.validation || []).map((item) => item.message).join("; ")}`;
+        return;
+      }
+      if (currentRuntimeConfig) {
+        const runtimeSaved = await saveRuntimeConfig({providers, statusElement: status, quiet: true});
+        if (!runtimeSaved) return;
+      }
+      status.textContent = "Saved";
+    }
+
+    async function saveRuntimeConfig(options = {}) {
+      const status = options.statusElement || document.getElementById("save-runtime-status");
+      if (!options.quiet) status.textContent = "Saving...";
+      let providers;
+      let realtime;
+      let quotas;
+      let subagents;
+      try {
+        providers = options.providers || buildProviderPayloadFromEditor();
+        realtime = parseJsonField("runtime-realtime", "realtime_json");
+        quotas = parseJsonField("runtime-quotas", "quotas_json");
+        subagents = parseJsonField("runtime-subagents", "subagents_json");
+      } catch (error) {
+        status.textContent = String(error.message || error);
+        return false;
+      }
+      const payload = {
+        providers,
+        prompts: currentPromptPayload(),
+        realtime,
+        quotas,
+        subagents,
+        enabled: document.getElementById("runtime-enabled").value === "true",
+      };
+      const response = await fetchJson(`/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/runtime-config`, {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      currentRuntimeConfig = response.config || currentRuntimeConfig;
+      if (currentRuntimeConfig) {
+        currentProviderConfig = currentRuntimeConfig.providers || currentProviderConfig;
+        renderRuntimeEditor(currentRuntimeConfig);
+        renderProviderEditor(currentProviderConfig || {});
+      }
+      document.getElementById("runtime-json").textContent = JSON.stringify(response, null, 2);
+      if (response.ok === false) {
+        status.textContent = `Validation failed: ${(response.validation || []).map((item) => item.message).join("; ")}`;
+        return false;
+      }
+      if (!options.quiet) status.textContent = "Saved";
+      return true;
+    }
+
+    function buildProviderPayloadFromEditor() {
+      return {
+        stt: providerChoiceFromEditor("stt"),
+        tts: providerChoiceFromEditor("tts"),
+        agent: providerChoiceFromEditor("agent"),
+      };
+    }
+
+    function providerChoiceFromEditor(family) {
+      const provider = document.getElementById(`provider-${family}-provider`).value.trim();
+      const model = document.getElementById(`provider-${family}-model`).value.trim();
+      const fallback = document.getElementById(`provider-${family}-fallback`).value.trim();
+      const secret = document.getElementById(`provider-${family}-secret`).value.trim();
+      const choice = {
+        provider,
+        model: model || null,
+        secret_ref: secret ? {name: secret} : null,
+        fallback_provider: fallback || null,
+        config: parseJsonField(`provider-${family}-config`, `${family}_config_json`),
+      };
+      if (family === "tts") {
+        const voice = document.getElementById("provider-tts-voice").value.trim();
+        choice.voice = voice || null;
+      }
+      return choice;
+    }
+
+    function currentPromptPayload() {
+      return {
+        language: document.getElementById("prompt-language").value,
+        greeting: document.getElementById("prompt-greeting").value,
+        filler_message: document.getElementById("prompt-filler").value,
+        colleague_progress_message: document.getElementById("prompt-colleague-progress").value,
+        system_prompt: document.getElementById("prompt-system").value,
+        stt_prompt: document.getElementById("prompt-stt").value,
+      };
+    }
+
+    function parseJsonField(id, label) {
+      try {
+        return JSON.parse(document.getElementById(id).value || "{}");
+      } catch (error) {
+        throw new Error(`Invalid ${label}`);
+      }
     }
 
     function renderSessions(targetId, items) {

@@ -25,8 +25,8 @@ secrets are validation errors before enabling a voicebot/channel.
 ## Validation
 
 Provider config value objects reject blank workspace, voicebot, provider,
-secret, model, and fallback fields before validation reaches runtime provider
-descriptors.
+secret, model, voice, and fallback fields before validation reaches runtime
+provider descriptors.
 
 `validate_provider_config()` checks:
 
@@ -82,12 +82,14 @@ HTTP TTS calls.
 ## Runtime Plan
 
 `provider_selection_plan()` converts product config into normalized provider,
-fallback, and model selections that runtime workers can use per session.
+fallback, model, and voice selections that runtime workers can use per session.
 
 ## Runtime API
 
 `PUT /workspaces/{workspace_id}/voicebots/{voicebot_id}/providers` validates and
 saves STT, TTS, and communication-agent provider choices for a voicebot.
+Provider choices include provider id, model, optional voice, fallback provider,
+secret reference, and provider-specific config JSON.
 
 `GET /workspaces/{workspace_id}/voicebots/{voicebot_id}/providers` returns the
 saved config plus the normalized runtime selection plan.

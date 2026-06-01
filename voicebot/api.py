@@ -403,7 +403,6 @@ def create_app(
                 return runtime_config.prompts
         return VoicebotPromptConfig(
             greeting=runtime_settings.connect_greeting_prompt,
-            filler_message="",
             system_prompt="",
             stt_prompt=runtime_settings.stt_prompt,
             language=runtime_settings.language or "auto",
@@ -1323,6 +1322,7 @@ def create_app(
                 prompts=VoicebotPromptConfig(
                     greeting=request.prompts.greeting,
                     filler_message=request.prompts.filler_message,
+                    colleague_progress_message=request.prompts.colleague_progress_message,
                     system_prompt=request.prompts.system_prompt,
                     stt_prompt=request.prompts.stt_prompt,
                     language=request.prompts.language,
@@ -1404,6 +1404,7 @@ def create_app(
                 VoicebotPromptConfig(
                     greeting=request.greeting,
                     filler_message=request.filler_message,
+                    colleague_progress_message=request.colleague_progress_message,
                     system_prompt=request.system_prompt,
                     stt_prompt=request.stt_prompt,
                     language=request.language,
@@ -4500,8 +4501,10 @@ DASHBOARD_PAGE = """<!doctype html>
                 <label>language<input id="prompt-language"></label>
                 <label class="full">greeting<textarea id="prompt-greeting"></textarea></label>
                 <label class="full">filler_message<textarea id="prompt-filler"></textarea></label>
+                <label class="full">colleague_progress_message<textarea id="prompt-colleague-progress"></textarea></label>
                 <label class="full">system_prompt<textarea id="prompt-system"></textarea></label>
                 <label class="full">stt_prompt<textarea id="prompt-stt"></textarea></label>
+                <label class="full">subagent_prompts_json<textarea id="prompt-subagent-prompts"></textarea></label>
               </div>
               <div class="toolbar"><button id="save-prompts" type="button">Save prompts</button><span class="muted" id="save-prompts-status"></span></div>
             </div>
@@ -4598,6 +4601,7 @@ DASHBOARD_PAGE = """<!doctype html>
     let selectedWorkspaceId = "";
     let selectedVoicebotId = "";
     let previousView = "active";
+    let currentRuntimeConfig = null;
     const views = ["workspaces", "active", "history", "session", "test"];
     let pendingRoute = dashboardRouteFromLocation();
     let suppressRouteUpdate = false;
@@ -4732,6 +4736,7 @@ DASHBOARD_PAGE = """<!doctype html>
       document.getElementById("prompt-language").value = prompts.language || "";
       document.getElementById("prompt-greeting").value = prompts.greeting || "";
       document.getElementById("prompt-filler").value = prompts.filler_message || "";
+      document.getElementById("prompt-colleague-progress").value = prompts.colleague_progress_message || "";
       document.getElementById("prompt-system").value = prompts.system_prompt || "";
       document.getElementById("prompt-stt").value = prompts.stt_prompt || "";
     }
@@ -4745,6 +4750,12 @@ DASHBOARD_PAGE = """<!doctype html>
     async function loadRuntimeConfig() {
       const target = `/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/runtime-config`;
       const payload = await fetchJson(target).catch((error) => ({error: String(error)}));
+      currentRuntimeConfig = payload.config || null;
+      document.getElementById("prompt-subagent-prompts").value = JSON.stringify(
+        currentRuntimeConfig?.subagents?.prompts || {},
+        null,
+        2
+      );
       document.getElementById("runtime-json").textContent = JSON.stringify(payload, null, 2);
     }
 
@@ -4779,6 +4790,7 @@ DASHBOARD_PAGE = """<!doctype html>
         language: document.getElementById("prompt-language").value,
         greeting: document.getElementById("prompt-greeting").value,
         filler_message: document.getElementById("prompt-filler").value,
+        colleague_progress_message: document.getElementById("prompt-colleague-progress").value,
         system_prompt: document.getElementById("prompt-system").value,
         stt_prompt: document.getElementById("prompt-stt").value
       };
@@ -4787,6 +4799,33 @@ DASHBOARD_PAGE = """<!doctype html>
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify(payload)
       });
+      if (currentRuntimeConfig) {
+        let subagentPrompts = {};
+        try {
+          subagentPrompts = JSON.parse(document.getElementById("prompt-subagent-prompts").value || "{}");
+        } catch (error) {
+          status.textContent = "Main prompts saved; invalid subagent_prompts_json";
+          return;
+        }
+        const runtimePayload = {
+          providers: currentRuntimeConfig.providers,
+          prompts: {...(currentRuntimeConfig.prompts || {}), ...payload},
+          realtime: currentRuntimeConfig.realtime || {},
+          quotas: currentRuntimeConfig.quotas || {},
+          subagents: {
+            ...(currentRuntimeConfig.subagents || {}),
+            prompts: subagentPrompts,
+          },
+          enabled: currentRuntimeConfig.enabled !== false,
+        };
+        const runtimeResponse = await fetchJson(`/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/runtime-config`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(runtimePayload)
+        });
+        currentRuntimeConfig = runtimeResponse.config || currentRuntimeConfig;
+        document.getElementById("runtime-json").textContent = JSON.stringify(runtimeResponse, null, 2);
+      }
       status.textContent = "Saved";
     }
 

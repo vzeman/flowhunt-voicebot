@@ -219,7 +219,10 @@ class VoicebotProviderConfigRequest(BaseModel):
 
 class VoicebotPromptConfigRequest(BaseModel):
     greeting: str = "Hello, how can I help you?"
-    filler_message: str = ""
+    filler_message: str = "Give me a moment."
+    colleague_progress_message: str = (
+        "I asked a colleague to check that. I will tell you the result as soon as it is ready."
+    )
     system_prompt: str = ""
     stt_prompt: str = ""
     language: str = "en"
@@ -228,6 +231,7 @@ class VoicebotPromptConfigRequest(BaseModel):
 class VoicebotPromptConfigPatchRequest(BaseModel):
     greeting: str | None = None
     filler_message: str | None = None
+    colleague_progress_message: str | None = None
     system_prompt: str | None = None
     stt_prompt: str | None = None
     language: str | None = None

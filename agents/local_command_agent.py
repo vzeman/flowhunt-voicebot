@@ -75,6 +75,7 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
     custom_system_prompt = str(prompt_config.get("system_prompt") or "").strip()
     greeting_prompt = str(prompt_config.get("greeting") or "").strip()
     filler_message = str(prompt_config.get("filler_message") or "").strip()
+    colleague_progress_message = str(prompt_config.get("colleague_progress_message") or "").strip()
     output_format = {
         "say": "text to speak, if any",
         "tool_calls": [
@@ -106,6 +107,7 @@ Configured voicebot prompts:
 - Default response language: {language}
 - Greeting prompt: {greeting_prompt or "(default)"}
 - Filler message: {filler_message or "(default)"}
+- Colleague progress message: {colleague_progress_message or "(default)"}
 - Additional system instructions: {custom_system_prompt or "(none)"}
 """ if prompt_config else ""
 

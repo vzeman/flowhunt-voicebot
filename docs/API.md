@@ -567,6 +567,7 @@ Response:
   "prompts": {
     "greeting": "Pozdrav volajuceho po slovensky.",
     "filler_message": "Chvíľku strpenia.",
+    "colleague_progress_message": "Pýtam sa kolegu a hneď vám poviem výsledok.",
     "system_prompt": "Use concise Slovak.",
     "stt_prompt": "LiveAgent FlowHunt",
     "language": "sk"
@@ -582,11 +583,17 @@ send every field when replacing the config.
 ### PATCH `/workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts`
 
 Updates only the supplied prompt fields. Supported fields are `greeting`,
-`filler_message`, `system_prompt`, `stt_prompt`, and `language`.
+`filler_message`, `colleague_progress_message`, `system_prompt`, `stt_prompt`,
+and `language`.
 
 `filler_message` is the short progress phrase spoken while the communication
-agent is still preparing an answer or invoking a subagent. Leave it empty to use
-the built-in localized default.
+agent is still preparing an answer. `colleague_progress_message` is the phrase
+spoken when the communication agent has delegated work to a colleague/subagent.
+Both defaults are returned by the prompt API and can be edited per voicebot in
+the dashboard. The dashboard voicebot detail also exposes
+`subagent_prompts_json`, which edits runtime `subagents.prompts` hooks such as
+`before_call_prompt`, `after_call_prompt`, and `result_prompt` for configured
+subagent providers.
 
 Use `language: "auto"` for multilingual voicebots. In that mode the default STT
 adapter does not force a language hint, and the communication agent is

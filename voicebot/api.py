@@ -5549,7 +5549,19 @@ VOICEBOT_WIDGET_JS = r"""(() => {
     setStatus("Requesting microphone");
     emitMetric("start_attempt");
     try {
-      localStream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}, video: false});
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: {ideal: 1},
+          sampleRate: {ideal: 48000},
+          sampleSize: {ideal: 16},
+          echoCancellation: {ideal: true},
+          noiseSuppression: {ideal: true},
+          autoGainControl: {ideal: true},
+          latency: {ideal: 0.01},
+          suppressLocalAudioPlayback: {ideal: true},
+        },
+        video: false
+      });
     } catch (error) {
       button.disabled = false;
       setStatus("Microphone permission denied");
@@ -6182,10 +6194,11 @@ WEBRTC_TEST_PAGE = """<!doctype html>
             channelCount: {ideal: 1},
             sampleRate: {ideal: 48000},
             sampleSize: {ideal: 16},
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            latency: {ideal: 0.02}
+            echoCancellation: {ideal: true},
+            noiseSuppression: {ideal: true},
+            autoGainControl: {ideal: true},
+            latency: {ideal: 0.01},
+            suppressLocalAudioPlayback: {ideal: true}
           }
         });
         for (const track of localStream.getAudioTracks()) {

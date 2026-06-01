@@ -41,6 +41,24 @@ descriptors.
 
 Validation should run when saving provider config and before enabling a channel.
 
+## STT Runtime Providers
+
+Process-local provider selection uses `VOICEBOT_STT_PROVIDER` when no route or
+voicebot override is present. Supported runtime adapters are:
+
+- `whisper`: local open-source Whisper, configured by `VOICEBOT_WHISPER_MODEL`.
+- `openai` and `openai-compatible`: OpenAI transcription protocol, configured
+  by `VOICEBOT_STT_API_KEY`, `VOICEBOT_STT_BASE_URL`, and
+  `VOICEBOT_STT_MODEL`.
+- `deepgram`: native prerecorded `/v1/listen` adapter, configured by
+  `VOICEBOT_STT_API_KEY` or `DEEPGRAM_API_KEY`; default model `nova-3`.
+- `assemblyai`: native upload plus transcript polling adapter, configured by
+  `VOICEBOT_STT_API_KEY` or `ASSEMBLYAI_API_KEY`; default model `universal`.
+
+The native Deepgram and AssemblyAI adapters can improve recognition quality or
+let a deployment choose a specialized speech provider, but they are still
+batch-turn adapters. True streaming STT requires a separate pipeline adapter.
+
 ## Runtime Plan
 
 `provider_selection_plan()` converts product config into normalized provider,

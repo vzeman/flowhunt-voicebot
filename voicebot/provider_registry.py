@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from .providers import (
+    STT_HTTP_BATCH_PROVIDERS,
     STT_OPENAI_COMPATIBLE_PROVIDERS,
     SUPPORTED_STT_PROVIDERS,
     SUPPORTED_TTS_PROVIDERS,
@@ -144,6 +145,8 @@ def default_provider_registry() -> ProviderRegistry:
     registry.register_stt("whisper", _build_whisper_stt)
     for provider in STT_OPENAI_COMPATIBLE_PROVIDERS:
         registry.register_stt(provider, _build_openai_stt)
+    for provider in STT_HTTP_BATCH_PROVIDERS:
+        registry.register_stt(provider, _build_http_batch_stt)
     registry.register_tts("supertonic", _build_supertonic_tts)
     for provider in TTS_OPENAI_COMPATIBLE_PROVIDERS:
         registry.register_tts(provider, _build_openai_tts)
@@ -160,6 +163,12 @@ def _build_openai_stt(settings: Settings):
     from .stt import OpenAISTTProvider
 
     return OpenAISTTProvider(settings)
+
+
+def _build_http_batch_stt(settings: Settings):
+    from .stt import HttpBatchSTTProvider
+
+    return HttpBatchSTTProvider(settings)
 
 
 def _build_supertonic_tts(settings: Settings):
@@ -223,6 +232,8 @@ def _default_stt_descriptor(provider: str) -> ProviderDescriptor:
             ),
             models=("tiny", "base", "small", "medium", "large", "turbo"),
         )
+    if provider in STT_HTTP_BATCH_PROVIDERS:
+        return _native_batch_stt_descriptor(provider)
     return ProviderDescriptor(
         provider=provider,
         family="stt",
@@ -235,6 +246,36 @@ def _default_stt_descriptor(provider: str) -> ProviderDescriptor:
             interruption_support=True,
             usage_metadata=("duration", "language", "segments"),
         ),
+    )
+
+
+def _native_batch_stt_descriptor(provider: str) -> ProviderDescriptor:
+    if provider == "deepgram":
+        models = ("nova-3", "nova-2", "base")
+        config = {"api_key_env": "DEEPGRAM_API_KEY", "default_base_url": "https://api.deepgram.com"}
+        usage_metadata = ("duration", "language", "confidence", "request_id")
+    elif provider == "assemblyai":
+        models = ("universal", "nano")
+        config = {"api_key_env": "ASSEMBLYAI_API_KEY", "default_base_url": "https://api.assemblyai.com"}
+        usage_metadata = ("duration", "language", "request_id", "status")
+    else:
+        models = ()
+        config = {}
+        usage_metadata = ("duration", "language")
+    return ProviderDescriptor(
+        provider=provider,
+        family="stt",
+        adapter="native",
+        capabilities=ProviderCapabilities(
+            modalities=frozenset({"stt"}),
+            languages=(),
+            required_credentials=("api_key",),
+            latency_profile="interactive",
+            interruption_support=True,
+            usage_metadata=usage_metadata,
+        ),
+        models=models,
+        config=config,
     )
 
 

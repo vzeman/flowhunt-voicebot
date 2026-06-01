@@ -490,11 +490,15 @@ create duplicate tasks.
 
 Provider names:
 
-- STT: `whisper` for local open-source Whisper, `openai` or
+- STT: `whisper` for local open-source Whisper; `openai` or
   `openai-compatible` for OpenAI or a compatible transcription endpoint via
-  `VOICEBOT_STT_BASE_URL`. Aliases `groq`, `mistral`, `nvidia`, and `xai` use
-  the same transcription adapter with provider-specific API key env vars and
-  default base URLs.
+  `VOICEBOT_STT_BASE_URL`; and native batch adapters for `deepgram` and
+  `assemblyai`. Aliases `groq`, `mistral`, `nvidia`, and `xai` use the same
+  OpenAI-compatible transcription adapter with provider-specific API key env
+  vars and default base URLs. For native adapters set either
+  `VOICEBOT_STT_API_KEY` or the provider key env var, `DEEPGRAM_API_KEY` or
+  `ASSEMBLYAI_API_KEY`; `VOICEBOT_STT_MODEL` defaults to `nova-3` for Deepgram
+  and `universal` for AssemblyAI.
 - TTS: `supertonic` for local Supertonic, `openai` or `openai-compatible` for
   OpenAI or a compatible speech endpoint via `VOICEBOT_TTS_BASE_URL`. Aliases
   `groq`, `mistral`, `nvidia`, and `xai` use the same speech adapter with

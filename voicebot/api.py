@@ -4358,7 +4358,7 @@ DASHBOARD_PAGE = """<!doctype html>
     th { position:sticky; top:0; background:var(--bg); color:var(--muted); font-weight:700; z-index:1; }
     tr.clickable { cursor:pointer; }
     tr.clickable:hover { background:#f6f8fa; }
-    pre { margin:0; padding:.75rem; max-height:24rem; overflow:auto; border:1px solid var(--border); border-radius:8px; background:#0d1117; color:#c9d1d9; white-space:pre-wrap; font-size:.78rem; }
+    pre { margin:0; padding:.75rem; max-height:24rem; overflow:auto; border:1px solid var(--border); border-radius:8px; background:#f6f8fa; color:#24292f; white-space:pre-wrap; font-size:.78rem; }
     iframe { width:100%; min-height:43rem; border:1px solid var(--border); border-radius:8px; background:#fff; }
     .muted { color:var(--muted); font-size:.85rem; }
     .toolbar { display:flex; align-items:end; gap:.75rem; margin:0 0 .85rem; flex-wrap:wrap; }

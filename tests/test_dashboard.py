@@ -68,6 +68,8 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("appendJsonBlockValue(pre, value, 0)", page.text)
         self.assertIn('className = "json-value json-string"', page.text)
         self.assertIn('className = "json-key"', page.text)
+        self.assertIn("background:#f6f8fa; color:#24292f;", page.text)
+        self.assertNotIn("background:#0d1117; color:#c9d1d9;", page.text)
         self.assertIn(".session-layout { display:grid; grid-template-columns:1fr;", page.text)
         self.assertNotIn("grid-template-columns:minmax(0,1.45fr) minmax(22rem,.75fr)", page.text)
         self.assertNotIn("session-stack", page.text)

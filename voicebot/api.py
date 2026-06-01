@@ -4599,6 +4599,10 @@ DASHBOARD_PAGE = """<!doctype html>
     let selectedVoicebotId = "";
     let previousView = "active";
     const views = ["workspaces", "active", "history", "session", "test"];
+    let pendingRoute = dashboardRouteFromLocation();
+    let suppressRouteUpdate = false;
+    if (pendingRoute.workspace_id) selectedWorkspaceId = pendingRoute.workspace_id;
+    if (pendingRoute.voicebot_id) selectedVoicebotId = pendingRoute.voicebot_id;
 
     document.getElementById("refresh").addEventListener("click", load);
     document.querySelectorAll("nav button[data-view]").forEach((button) => {
@@ -4622,13 +4626,23 @@ DASHBOARD_PAGE = """<!doctype html>
     document.getElementById("test-workspace").addEventListener("change", () => {
       selectedWorkspaceId = document.getElementById("test-workspace").value;
       renderTestVoicebots();
+      updateDashboardUrl({view: "test", workspace_id: selectedWorkspaceId, voicebot_id: selectedVoicebotId});
       load();
     });
     document.getElementById("test-voicebot").addEventListener("change", () => {
       selectedVoicebotId = document.getElementById("test-voicebot").value;
+      updateDashboardUrl({view: "test", workspace_id: selectedWorkspaceId, voicebot_id: selectedVoicebotId});
       postTestTarget();
     });
     document.getElementById("webrtc-console").addEventListener("load", postTestTarget);
+    window.addEventListener("hashchange", handleDashboardLocationChange);
+    window.addEventListener("popstate", handleDashboardLocationChange);
+    function handleDashboardLocationChange() {
+      pendingRoute = dashboardRouteFromLocation();
+      selectedWorkspaceId = pendingRoute.workspace_id || "";
+      selectedVoicebotId = pendingRoute.voicebot_id || "";
+      load(false);
+    }
     load();
     setInterval(() => {
       if (["active", "history", "test"].includes(currentView())) load(false);
@@ -4643,6 +4657,11 @@ DASHBOARD_PAGE = """<!doctype html>
         selectedWorkspaceId = state.selected_workspace_id || selectedWorkspaceId || "";
         selectedVoicebotId = selectedVoicebotId || ((state.voicebots || [])[0] || {}).voicebot_id || "";
         renderAll();
+        if (pendingRoute) {
+          const route = pendingRoute;
+          pendingRoute = null;
+          await applyDashboardRoute(route);
+        }
       } catch (error) {
         if (showErrors) alert(`Dashboard load failed: ${error}`);
       }
@@ -4668,6 +4687,7 @@ DASHBOARD_PAGE = """<!doctype html>
         row.onclick = () => {
           selectedWorkspaceId = workspace.workspace_id;
           selectedVoicebotId = "";
+          updateDashboardUrl({view: "workspaces", workspace_id: selectedWorkspaceId});
           load();
         };
       }
@@ -4691,9 +4711,12 @@ DASHBOARD_PAGE = """<!doctype html>
       applyTableFilter("voicebot-rows");
     }
 
-    async function openVoicebot(bot) {
+    async function openVoicebot(bot, options = {}) {
       selectedWorkspaceId = bot.workspace_id;
       selectedVoicebotId = bot.voicebot_id;
+      if (options.updateUrl !== false) {
+        updateDashboardUrl({view: "workspaces", workspace_id: selectedWorkspaceId, voicebot_id: selectedVoicebotId});
+      }
       document.getElementById("voicebot-detail").style.display = "block";
       document.getElementById("detail-voicebot-id").value = bot.voicebot_id || "";
       document.getElementById("detail-display-name").value = bot.display_name || "";
@@ -4784,9 +4807,18 @@ DASHBOARD_PAGE = """<!doctype html>
       applyTableFilter(targetId);
     }
 
-    async function openSession(item, fromView) {
+    async function openSession(item, fromView, options = {}) {
       previousView = fromView;
-      showView("session");
+      if (options.updateUrl !== false) {
+        updateDashboardUrl({
+          view: "session",
+          workspace_id: item.workspace_id || selectedWorkspaceId,
+          voicebot_id: item.voicebot_id || selectedVoicebotId,
+          session_id: item.session_id || "",
+          from: fromView
+        });
+      }
+      showView("session", {updateUrl: false});
       document.getElementById("session-title").textContent = `Session ${item.session_id}`;
       renderSessionSummary(item);
       const base = `/workspaces/${encodeURIComponent(item.workspace_id)}/voicebots/${encodeURIComponent(item.voicebot_id)}/sessions/${encodeURIComponent(item.session_id)}`;
@@ -5114,9 +5146,70 @@ DASHBOARD_PAGE = """<!doctype html>
       }, "*");
     }
 
-    function showView(name) {
+    async function applyDashboardRoute(route) {
+      const routeView = views.includes(route.view) ? route.view : "workspaces";
+      if (route.workspace_id && route.workspace_id !== selectedWorkspaceId) {
+        selectedWorkspaceId = route.workspace_id;
+        selectedVoicebotId = route.voicebot_id || "";
+        pendingRoute = route;
+        await load(false);
+        return;
+      }
+      if (route.voicebot_id) selectedVoicebotId = route.voicebot_id;
+      if (routeView === "session" && route.workspace_id && route.voicebot_id && route.session_id) {
+        const item = [...(state.active_sessions || []), ...(state.session_history || [])]
+          .find((session) => session.workspace_id === route.workspace_id
+            && session.voicebot_id === route.voicebot_id
+            && session.session_id === route.session_id) || {
+              workspace_id: route.workspace_id,
+              voicebot_id: route.voicebot_id,
+              session_id: route.session_id,
+              status: "unknown"
+            };
+        await openSession(item, route.from || "history", {updateUrl: false});
+        return;
+      }
+      showView(routeView, {updateUrl: false});
+      if (route.voicebot_id) {
+        const bot = (state.voicebots || []).find((entry) => entry.voicebot_id === route.voicebot_id);
+        if (bot) await openVoicebot(bot, {updateUrl: false});
+      }
+      if (routeView === "test") postTestTarget();
+    }
+
+    function dashboardRouteFromLocation() {
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      return {
+        view: params.get("view") || "",
+        workspace_id: params.get("workspace_id") || "",
+        voicebot_id: params.get("voicebot_id") || "",
+        session_id: params.get("session_id") || "",
+        from: params.get("from") || ""
+      };
+    }
+
+    function updateDashboardUrl(route, options = {}) {
+      if (suppressRouteUpdate) return;
+      const params = new URLSearchParams();
+      for (const key of ["view", "workspace_id", "voicebot_id", "session_id", "from"]) {
+        if (route[key]) params.set(key, route[key]);
+      }
+      const nextUrl = `${window.location.pathname}${window.location.search}#${params.toString()}`;
+      const method = options.replace ? "replaceState" : "pushState";
+      window.history[method](null, "", nextUrl);
+    }
+
+    function routeForView(name) {
+      const route = {view: name};
+      if (selectedWorkspaceId) route.workspace_id = selectedWorkspaceId;
+      if (selectedVoicebotId && ["workspaces", "test"].includes(name)) route.voicebot_id = selectedVoicebotId;
+      return route;
+    }
+
+    function showView(name, options = {}) {
       for (const view of views) document.getElementById(`view-${view}`).classList.toggle("active", view === name);
       document.querySelectorAll("nav button[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
+      if (options.updateUrl !== false) updateDashboardUrl(routeForView(name));
       if (name === "test") postTestTarget();
     }
 

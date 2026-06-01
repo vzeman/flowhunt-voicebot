@@ -54,8 +54,8 @@ provider.
 
 Current runtime adapters:
 
-- STT: local Whisper, OpenAI-compatible transcription
-- TTS: Supertonic, OpenAI-compatible speech
+- STT: local Whisper, OpenAI-compatible transcription, Deepgram, AssemblyAI
+- TTS: Supertonic, OpenAI-compatible speech, Deepgram, ElevenLabs
 - Agent: OpenAI Responses, OpenAI-compatible chat, Anthropic
 
 Future adapters should add a descriptor before adding factory code, so pipeline

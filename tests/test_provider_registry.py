@@ -28,8 +28,8 @@ class ProviderRegistryTests(unittest.TestCase):
     def test_provider_registry_reports_known_but_unimplemented_stt_provider(self) -> None:
         registry = ProviderRegistry()
 
-        with self.assertRaisesRegex(ValueError, "Unsupported STT provider adapter for 'deepgram'"):
-            registry.build_stt(Settings(stt_provider="deepgram"))
+        with self.assertRaisesRegex(ValueError, "Unsupported STT provider adapter for 'speechmatics'"):
+            registry.build_stt(Settings(stt_provider="speechmatics"))
 
     def test_provider_registry_reports_unknown_tts_provider(self) -> None:
         registry = ProviderRegistry()
@@ -42,8 +42,12 @@ class ProviderRegistryTests(unittest.TestCase):
 
         self.assertIn("whisper", registry.stt_factories)
         self.assertIn("openai", registry.stt_factories)
+        self.assertIn("deepgram", registry.stt_factories)
+        self.assertIn("assemblyai", registry.stt_factories)
         self.assertIn("supertonic", registry.tts_factories)
         self.assertIn("openai", registry.tts_factories)
+        self.assertIn("deepgram", registry.tts_factories)
+        self.assertIn("elevenlabs", registry.tts_factories)
 
     def test_registry_tracks_provider_capabilities(self) -> None:
         registry = default_provider_registry()
@@ -100,13 +104,13 @@ class ProviderRegistryTests(unittest.TestCase):
         registry = ProviderRegistry()
 
         with self.assertRaisesRegex(ValueError, "no adapter is registered"):
-            registry.route_stt("workspace-1", "voicebot-1", "deepgram")
+            registry.route_stt("workspace-1", "voicebot-1", "speechmatics")
 
     def test_registry_rejects_route_to_unregistered_tts_adapter(self) -> None:
         registry = ProviderRegistry()
 
         with self.assertRaisesRegex(ValueError, "no adapter is registered"):
-            registry.route_tts("workspace-1", "voicebot-1", "elevenlabs")
+            registry.route_tts("workspace-1", "voicebot-1", "piper")
 
 
 if __name__ == "__main__":

@@ -105,6 +105,11 @@ STT_OPENAI_COMPATIBLE_PROVIDERS = {
     "xai",
 }
 
+STT_HTTP_BATCH_PROVIDERS = {
+    "assemblyai",
+    "deepgram",
+}
+
 TTS_OPENAI_COMPATIBLE_PROVIDERS = {
     "openai",
     "openai-compatible",
@@ -112,6 +117,11 @@ TTS_OPENAI_COMPATIBLE_PROVIDERS = {
     "mistral",
     "nvidia",
     "xai",
+}
+
+TTS_HTTP_PROVIDERS = {
+    "deepgram",
+    "elevenlabs",
 }
 
 AGENT_CHAT_COMPATIBLE_PROVIDERS = {

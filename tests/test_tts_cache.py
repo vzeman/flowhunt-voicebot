@@ -3,10 +3,12 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
 from voicebot.tts import CALL_SAMPLE_RATE, OPENAI_TTS_PCM_SAMPLE_RATE, CachedTTSProvider, OpenAITTSProvider, TTSCacheConfig, pcm16le_bytes_to_float32
+from voicebot.tts import HttpTTSProvider
 
 
 class CountingTTS:
@@ -148,6 +150,70 @@ class TTSCacheTests(unittest.TestCase):
         self.assertEqual(speech.requests[0]["model"], "gpt-4o-mini-tts")
         self.assertEqual(speech.requests[0]["voice"], "alloy")
         self.assertAlmostEqual(len(audio), CALL_SAMPLE_RATE // 10, delta=2)
+
+    def test_deepgram_http_tts_posts_speak_request(self) -> None:
+        provider = HttpTTSProvider.__new__(HttpTTSProvider)
+        provider._provider = "deepgram"
+        provider._api_key = "dg-key"
+        provider._base_url = "https://api.deepgram.com"
+        provider._model = "aura-2-thalia-en"
+        provider._timeout = 5.0
+        provider._lock = _NoopLock()
+        calls = []
+
+        def fake_request(method, url, *, headers, body=None, timeout=0):
+            calls.append((method, url, headers, body, timeout))
+            return b"wav-bytes"
+
+        with patch("voicebot.tts._binary_request", side_effect=fake_request), patch(
+            "voicebot.tts._wav_bytes_to_call_audio",
+            return_value=(np.ones(CALL_SAMPLE_RATE // 10, dtype=np.float32), 0.1),
+        ):
+            audio, duration = provider.synthesize("Hello")
+
+        self.assertGreater(audio.size, 0)
+        self.assertAlmostEqual(duration, 0.1, places=2)
+        method, url, headers, body, timeout = calls[0]
+        self.assertEqual(method, "POST")
+        self.assertTrue(url.startswith("https://api.deepgram.com/v1/speak?"))
+        self.assertIn("model=aura-2-thalia-en", url)
+        self.assertIn("encoding=linear16", url)
+        self.assertIn("container=wav", url)
+        self.assertEqual(headers["Authorization"], "Token dg-key")
+        self.assertIn(b"Hello", body)
+        self.assertEqual(timeout, 5.0)
+
+    def test_elevenlabs_http_tts_posts_stream_request(self) -> None:
+        provider = HttpTTSProvider.__new__(HttpTTSProvider)
+        provider._provider = "elevenlabs"
+        provider._api_key = "el-key"
+        provider._base_url = "https://api.elevenlabs.io"
+        provider._model = "eleven_flash_v2_5"
+        provider._voice = "voice-1"
+        provider._timeout = 8.0
+        provider._lock = _NoopLock()
+        samples = (np.ones(OPENAI_TTS_PCM_SAMPLE_RATE // 10, dtype=np.int16) * 8192).astype("<i2")
+        calls = []
+
+        def fake_request(method, url, *, headers, body=None, timeout=0):
+            calls.append((method, url, headers, body, timeout))
+            return samples.tobytes()
+
+        with patch("voicebot.tts._binary_request", side_effect=fake_request):
+            audio, duration = provider.synthesize("Hello")
+
+        self.assertGreater(audio.size, 0)
+        self.assertAlmostEqual(duration, 0.1, places=2)
+        method, url, headers, body, timeout = calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(
+            url,
+            "https://api.elevenlabs.io/v1/text-to-speech/voice-1/stream?output_format=pcm_24000",
+        )
+        self.assertEqual(headers["xi-api-key"], "el-key")
+        self.assertEqual(headers["Accept"], "audio/pcm")
+        self.assertIn(b"eleven_flash_v2_5", body)
+        self.assertEqual(timeout, 8.0)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from .providers import (
     AGENT_CHAT_COMPATIBLE_PROVIDERS,
+    STT_HTTP_BATCH_PROVIDERS,
     STT_OPENAI_COMPATIBLE_PROVIDERS,
+    TTS_HTTP_PROVIDERS,
     SUPPORTED_AGENT_PROVIDERS,
     SUPPORTED_STT_PROVIDERS,
     SUPPORTED_TTS_PROVIDERS,
@@ -19,13 +21,13 @@ def provider_catalog() -> dict[str, dict[str, list[str]]]:
     return {
         "stt": {
             "supported": sorted(SUPPORTED_STT_PROVIDERS),
-            "native": ["whisper"],
+            "native": sorted({"whisper", *STT_HTTP_BATCH_PROVIDERS}),
             "openai_compatible": sorted(STT_OPENAI_COMPATIBLE_PROVIDERS),
             "capabilities": {provider: descriptor.to_dict() for provider, descriptor in sorted(stt_capabilities.items())},
         },
         "tts": {
             "supported": sorted(SUPPORTED_TTS_PROVIDERS),
-            "native": ["supertonic"],
+            "native": sorted({"supertonic", *TTS_HTTP_PROVIDERS}),
             "openai_compatible": sorted(TTS_OPENAI_COMPATIBLE_PROVIDERS),
             "capabilities": {provider: descriptor.to_dict() for provider, descriptor in sorted(tts_capabilities.items())},
         },
@@ -55,6 +57,26 @@ def _stt_capabilities() -> dict[str, ProviderDescriptor]:
             models=("tiny", "base", "small", "medium", "large", "turbo"),
         )
     }
+    for provider in STT_HTTP_BATCH_PROVIDERS:
+        descriptors[provider] = ProviderDescriptor(
+            provider=provider,
+            family="stt",
+            adapter="native",
+            capabilities=ProviderCapabilities(
+                modalities=frozenset({"stt"}),
+                required_credentials=("api_key",),
+                latency_profile="interactive",
+                interruption_support=True,
+                usage_metadata=("duration", "language", "request_id"),
+            ),
+            models=("nova-3", "nova-2", "base") if provider == "deepgram" else ("universal", "nano"),
+            config={
+                "default_base_url": "https://api.deepgram.com"
+                if provider == "deepgram"
+                else "https://api.assemblyai.com",
+                "api_key_env": "DEEPGRAM_API_KEY" if provider == "deepgram" else "ASSEMBLYAI_API_KEY",
+            },
+        )
     for provider in STT_OPENAI_COMPATIBLE_PROVIDERS:
         descriptors[provider] = ProviderDescriptor(
             provider=provider,
@@ -87,6 +109,31 @@ def _tts_capabilities() -> dict[str, ProviderDescriptor]:
             models=("supertonic-3",),
         )
     }
+    for provider in TTS_HTTP_PROVIDERS:
+        descriptors[provider] = ProviderDescriptor(
+            provider=provider,
+            family="tts",
+            adapter="native",
+            capabilities=ProviderCapabilities(
+                modalities=frozenset({"tts"}),
+                required_credentials=("api_key",),
+                latency_profile="interactive",
+                interruption_support=True,
+                output_audio_format="pcm_f32_8000",
+                usage_metadata=("duration", "model", "voice"),
+            ),
+            models=(
+                ("aura-2-thalia-en", "aura-2-asteria-en", "aura-2-luna-en")
+                if provider == "deepgram"
+                else ("eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_multilingual_v2")
+            ),
+            config={
+                "default_base_url": "https://api.deepgram.com"
+                if provider == "deepgram"
+                else "https://api.elevenlabs.io",
+                "api_key_env": "DEEPGRAM_API_KEY" if provider == "deepgram" else "ELEVENLABS_API_KEY",
+            },
+        )
     for provider in TTS_OPENAI_COMPATIBLE_PROVIDERS:
         descriptors[provider] = ProviderDescriptor(
             provider=provider,

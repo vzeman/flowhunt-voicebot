@@ -4,10 +4,16 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass
 import difflib
+import json
 import re
 import tempfile
 import threading
+import time
 import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any
 
 import numpy as np
 from scipy.io import wavfile
@@ -207,6 +213,176 @@ class OpenAISTTProvider(STTProvider):
         if overlap_ratio >= 0.25 and any(marker in normalized_text for marker in prompt_summary_markers):
             return True
         return False
+
+
+class HttpBatchSTTProvider(STTProvider):
+    def __init__(self, settings: Settings) -> None:
+        self._provider = normalize_provider(settings.stt_provider)
+        self._api_key = provider_api_key(self._provider, settings.stt_api_key, "")
+        self._base_url = settings.stt_base_url.strip() or _default_batch_stt_base_url(self._provider)
+        self._model = settings.stt_model.strip() or _default_batch_stt_model(self._provider)
+        self._language = _stt_language_hint(settings.language)
+        self._timeout = settings.stt_timeout_seconds
+        self._min_chars = settings.stt_min_chars
+        self._lock = threading.Lock()
+        if not self._api_key:
+            raise ValueError(f"API key is required when VOICEBOT_STT_PROVIDER={self._provider}")
+        if self._provider not in {"deepgram", "assemblyai"}:
+            raise ValueError(f"Unsupported HTTP batch STT provider: {self._provider}")
+        print(f"Using {self._provider} STT model: {self._model}")
+
+    def transcribe(self, call_audio: np.ndarray, sample_rate: int = CALL_SAMPLE_RATE) -> TranscriptionResult:
+        audio = resample_audio(call_audio, sample_rate, STT_SAMPLE_RATE)
+        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+            wavfile.write(tmp.name, STT_SAMPLE_RATE, np.clip(audio, -1.0, 1.0))
+            with open(tmp.name, "rb") as audio_file:
+                wav_bytes = audio_file.read()
+        with self._lock:
+            if self._provider == "deepgram":
+                return self._transcribe_deepgram(wav_bytes)
+            return self._transcribe_assemblyai(wav_bytes)
+
+    def _transcribe_deepgram(self, wav_bytes: bytes) -> TranscriptionResult:
+        query = {
+            "model": self._model,
+            "smart_format": "true",
+            "punctuate": "true",
+        }
+        if self._language:
+            query["language"] = self._language
+        url = f"{self._base_url.rstrip('/')}/v1/listen?{urllib.parse.urlencode(query)}"
+        payload = _json_request(
+            "POST",
+            url,
+            headers={
+                "Authorization": f"Token {self._api_key}",
+                "Content-Type": "audio/wav",
+            },
+            body=wav_bytes,
+            timeout=self._timeout,
+        )
+        alternatives = (
+            payload.get("results", {})
+            .get("channels", [{}])[0]
+            .get("alternatives", [{}])
+        )
+        alternative = alternatives[0] if alternatives else {}
+        text = str(alternative.get("transcript", "") or "").strip()
+        metadata = {
+            "provider": self._provider,
+            "model": self._model,
+            "language": self._language,
+            "confidence": alternative.get("confidence"),
+            "duration": payload.get("metadata", {}).get("duration"),
+            "request_id": payload.get("metadata", {}).get("request_id"),
+        }
+        return self._result(text, metadata)
+
+    def _transcribe_assemblyai(self, wav_bytes: bytes) -> TranscriptionResult:
+        base = self._base_url.rstrip("/")
+        headers = {"Authorization": self._api_key}
+        upload = _json_request(
+            "POST",
+            f"{base}/v2/upload",
+            headers={**headers, "Content-Type": "application/octet-stream"},
+            body=wav_bytes,
+            timeout=self._timeout,
+        )
+        audio_url = str(upload.get("upload_url", "") or "")
+        if not audio_url:
+            raise RuntimeError("AssemblyAI upload response did not include upload_url")
+        request_body: dict[str, Any] = {"audio_url": audio_url}
+        if self._language:
+            request_body["language_code"] = self._language
+        if self._model:
+            request_body["speech_model"] = self._model
+        submitted = _json_request(
+            "POST",
+            f"{base}/v2/transcript",
+            headers={**headers, "Content-Type": "application/json"},
+            body=json.dumps(request_body).encode("utf-8"),
+            timeout=self._timeout,
+        )
+        transcript_id = str(submitted.get("id", "") or "")
+        if not transcript_id:
+            raise RuntimeError("AssemblyAI transcript response did not include id")
+        deadline = time.monotonic() + max(0.1, self._timeout)
+        poll_payload = submitted
+        while time.monotonic() < deadline:
+            status = str(poll_payload.get("status", "") or "").lower()
+            if status == "completed":
+                text = str(poll_payload.get("text", "") or "").strip()
+                metadata = {
+                    "provider": self._provider,
+                    "model": self._model,
+                    "language": poll_payload.get("language_code") or self._language,
+                    "duration": poll_payload.get("audio_duration"),
+                    "request_id": transcript_id,
+                    "status": status,
+                }
+                return self._result(text, metadata)
+            if status == "error":
+                raise RuntimeError(str(poll_payload.get("error", "AssemblyAI transcription failed")))
+            time.sleep(min(0.5, max(0.05, deadline - time.monotonic())))
+            poll_payload = _json_request(
+                "GET",
+                f"{base}/v2/transcript/{urllib.parse.quote(transcript_id)}",
+                headers=headers,
+                timeout=self._timeout,
+            )
+        raise TimeoutError(f"AssemblyAI transcription did not complete within {self._timeout:g}s")
+
+    def _result(self, text: str, metadata: dict[str, Any]) -> TranscriptionResult:
+        if len(text) < self._min_chars:
+            return TranscriptionResult("", "empty_or_too_short", metadata)
+        if re.search(r"<\|.*?\|>", text):
+            return TranscriptionResult("", "whisper_token_artifact", metadata)
+        return TranscriptionResult(text, None, metadata)
+
+
+def _default_batch_stt_base_url(provider: str) -> str:
+    if provider == "deepgram":
+        return "https://api.deepgram.com"
+    if provider == "assemblyai":
+        return "https://api.assemblyai.com"
+    return ""
+
+
+def _default_batch_stt_model(provider: str) -> str:
+    if provider == "deepgram":
+        return "nova-3"
+    if provider == "assemblyai":
+        return "universal"
+    return ""
+
+
+def _json_request(
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    body: bytes | None = None,
+    timeout: float = 8.0,
+) -> dict[str, Any]:
+    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {exc.code} from STT provider: {raw[:1000]}") from exc
+    if not 200 <= status < 300:
+        raise RuntimeError(f"HTTP {status} from STT provider: {raw[:1000]}")
+    if not raw.strip():
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"STT provider returned invalid JSON: {raw[:1000]}") from exc
+    if not isinstance(data, dict):
+        return {"value": data}
+    return data
 
 
 def _average(values: list[float]) -> float | None:

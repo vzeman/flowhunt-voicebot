@@ -5,7 +5,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from .providers import (
+    STT_HTTP_BATCH_PROVIDERS,
     STT_OPENAI_COMPATIBLE_PROVIDERS,
+    TTS_HTTP_PROVIDERS,
     SUPPORTED_STT_PROVIDERS,
     SUPPORTED_TTS_PROVIDERS,
     TTS_OPENAI_COMPATIBLE_PROVIDERS,
@@ -144,7 +146,11 @@ def default_provider_registry() -> ProviderRegistry:
     registry.register_stt("whisper", _build_whisper_stt)
     for provider in STT_OPENAI_COMPATIBLE_PROVIDERS:
         registry.register_stt(provider, _build_openai_stt)
+    for provider in STT_HTTP_BATCH_PROVIDERS:
+        registry.register_stt(provider, _build_http_batch_stt)
     registry.register_tts("supertonic", _build_supertonic_tts)
+    for provider in TTS_HTTP_PROVIDERS:
+        registry.register_tts(provider, _build_http_tts)
     for provider in TTS_OPENAI_COMPATIBLE_PROVIDERS:
         registry.register_tts(provider, _build_openai_tts)
     return registry
@@ -160,6 +166,12 @@ def _build_openai_stt(settings: Settings):
     from .stt import OpenAISTTProvider
 
     return OpenAISTTProvider(settings)
+
+
+def _build_http_batch_stt(settings: Settings):
+    from .stt import HttpBatchSTTProvider
+
+    return HttpBatchSTTProvider(settings)
 
 
 def _build_supertonic_tts(settings: Settings):
@@ -199,6 +211,25 @@ def _build_openai_tts(settings: Settings):
     )
 
 
+def _build_http_tts(settings: Settings):
+    from .tts import CachedTTSProvider, HttpTTSProvider, TTSCacheConfig
+
+    provider = HttpTTSProvider(settings)
+    if not settings.tts_cache_enabled:
+        return provider
+    normalized_provider = normalize_provider(settings.tts_provider)
+    return CachedTTSProvider(
+        provider,
+        settings.tts_cache_dir,
+        TTSCacheConfig(
+            provider=normalized_provider,
+            model=settings.tts_model or _default_http_tts_model(normalized_provider),
+            voice=_default_http_tts_voice(normalized_provider, settings.tts_voice),
+            language=settings.language,
+        ),
+    )
+
+
 def _validate_descriptor(provider: str, descriptor: ProviderDescriptor) -> ProviderDescriptor:
     issues = list(descriptor.validation_issues())
     if descriptor.provider != provider:
@@ -223,6 +254,8 @@ def _default_stt_descriptor(provider: str) -> ProviderDescriptor:
             ),
             models=("tiny", "base", "small", "medium", "large", "turbo"),
         )
+    if provider in STT_HTTP_BATCH_PROVIDERS:
+        return _native_batch_stt_descriptor(provider)
     return ProviderDescriptor(
         provider=provider,
         family="stt",
@@ -235,6 +268,36 @@ def _default_stt_descriptor(provider: str) -> ProviderDescriptor:
             interruption_support=True,
             usage_metadata=("duration", "language", "segments"),
         ),
+    )
+
+
+def _native_batch_stt_descriptor(provider: str) -> ProviderDescriptor:
+    if provider == "deepgram":
+        models = ("nova-3", "nova-2", "base")
+        config = {"api_key_env": "DEEPGRAM_API_KEY", "default_base_url": "https://api.deepgram.com"}
+        usage_metadata = ("duration", "language", "confidence", "request_id")
+    elif provider == "assemblyai":
+        models = ("universal", "nano")
+        config = {"api_key_env": "ASSEMBLYAI_API_KEY", "default_base_url": "https://api.assemblyai.com"}
+        usage_metadata = ("duration", "language", "request_id", "status")
+    else:
+        models = ()
+        config = {}
+        usage_metadata = ("duration", "language")
+    return ProviderDescriptor(
+        provider=provider,
+        family="stt",
+        adapter="native",
+        capabilities=ProviderCapabilities(
+            modalities=frozenset({"stt"}),
+            languages=(),
+            required_credentials=("api_key",),
+            latency_profile="interactive",
+            interruption_support=True,
+            usage_metadata=usage_metadata,
+        ),
+        models=models,
+        config=config,
     )
 
 
@@ -254,6 +317,8 @@ def _default_tts_descriptor(provider: str) -> ProviderDescriptor:
             ),
             models=("supertonic-3",),
         )
+    if provider in TTS_HTTP_PROVIDERS:
+        return _native_http_tts_descriptor(provider)
     return ProviderDescriptor(
         provider=provider,
         family="tts",
@@ -267,3 +332,47 @@ def _default_tts_descriptor(provider: str) -> ProviderDescriptor:
             usage_metadata=("duration", "model", "voice"),
         ),
     )
+
+
+def _native_http_tts_descriptor(provider: str) -> ProviderDescriptor:
+    if provider == "deepgram":
+        models = ("aura-2-thalia-en", "aura-2-asteria-en", "aura-2-luna-en")
+        config = {"api_key_env": "DEEPGRAM_API_KEY", "default_base_url": "https://api.deepgram.com"}
+    elif provider == "elevenlabs":
+        models = ("eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_multilingual_v2")
+        config = {"api_key_env": "ELEVENLABS_API_KEY", "default_base_url": "https://api.elevenlabs.io"}
+    else:
+        models = ()
+        config = {}
+    return ProviderDescriptor(
+        provider=provider,
+        family="tts",
+        adapter="native",
+        capabilities=ProviderCapabilities(
+            modalities=frozenset({"tts"}),
+            required_credentials=("api_key",),
+            latency_profile="interactive",
+            interruption_support=True,
+            output_audio_format="pcm_f32_8000",
+            usage_metadata=("duration", "model", "voice"),
+        ),
+        models=models,
+        config=config,
+    )
+
+
+def _default_http_tts_model(provider: str) -> str:
+    if provider == "deepgram":
+        return "aura-2-thalia-en"
+    if provider == "elevenlabs":
+        return "eleven_flash_v2_5"
+    return ""
+
+
+def _default_http_tts_voice(provider: str, configured: str) -> str:
+    if provider != "elevenlabs":
+        return ""
+    value = configured.strip()
+    if value and value != "M1":
+        return value
+    return "21m00Tcm4TlvDq8ikWAM"

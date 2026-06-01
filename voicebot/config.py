@@ -78,6 +78,7 @@ class Settings:
     tts_api_key: str = os.getenv("VOICEBOT_TTS_API_KEY", "")
     tts_base_url: str = os.getenv("VOICEBOT_TTS_BASE_URL", "")
     tts_model: str = os.getenv("VOICEBOT_TTS_MODEL", "")
+    tts_timeout_seconds: float = env_float("VOICEBOT_TTS_TIMEOUT_SECONDS", 8.0)
     tts_voice: str = os.getenv("VOICEBOT_TTS_VOICE", "M1")
     openai_tts_model: str = os.getenv("VOICEBOT_OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
     openai_tts_voice: str = os.getenv("VOICEBOT_OPENAI_TTS_VOICE", "alloy")

@@ -1955,7 +1955,7 @@ def create_app(
             "selected_workspace_id": selected_workspace,
             "voicebots": voicebot_rows,
             "active_sessions": dashboard_session_rows(active_only=True),
-            "session_history": dashboard_session_rows(active_only=False, ended_only=True),
+            "session_history": dashboard_session_rows(include_active_snapshots=True),
             "recent_events": [event_to_dict(event) for event in events.list_events(limit=80, workspace_id=selected_workspace or None)],
         }
 
@@ -2190,13 +2190,17 @@ def create_app(
             )
         return rows
 
-    def dashboard_session_rows(active_only: bool = False, ended_only: bool = False) -> list[dict[str, Any]]:
+    def dashboard_session_rows(
+        active_only: bool = False,
+        ended_only: bool = False,
+        include_active_snapshots: bool = False,
+    ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for session in voicebot_session_store.list(active_only=active_only):
             if ended_only and session.status != "ended":
                 continue
             rows.append(session.as_dict())
-        if active_only and webrtc is not None:
+        if (active_only or include_active_snapshots) and webrtc is not None:
             known_session_ids = {str(row.get("session_id")) for row in rows}
             for snapshot in webrtc.snapshots():
                 session_id = str(snapshot.get("session_id") or "")
@@ -4475,7 +4479,6 @@ DASHBOARD_PAGE = """<!doctype html>
   <main>
     <nav aria-label="Main menu">
       <button class="active" type="button" data-view="workspaces">Workspaces</button>
-      <button type="button" data-view="active">Active Sessions</button>
       <button type="button" data-view="history">Sessions History</button>
       <button type="button" data-view="test">Voicebot Test</button>
     </nav>
@@ -4539,20 +4542,12 @@ DASHBOARD_PAGE = """<!doctype html>
       </div>
     </section>
 
-    <section id="view-active">
-      <h2>Active Sessions</h2>
-      <div class="table-filter"><input data-table-filter="active-session-rows" placeholder="Filter active sessions"></div>
-      <div class="table-wrap">
-        <table aria-label="Active sessions">
-          <thead><tr><th>workspace_id</th><th>voicebot_id</th><th>session_id</th><th>status</th><th>datetime started</th><th>length</th></tr></thead>
-          <tbody id="active-session-rows"></tbody>
-        </table>
-      </div>
-    </section>
-
     <section id="view-history">
       <h2>Sessions History</h2>
-      <div class="table-filter"><input data-table-filter="history-session-rows" placeholder="Filter session history"></div>
+      <div class="toolbar">
+        <label class="grow">Search<input data-table-filter="history-session-rows" placeholder="Filter sessions"></label>
+        <label>Status<select id="history-status-filter"><option value="">All statuses</option></select></label>
+      </div>
       <div class="table-wrap">
         <table aria-label="Sessions history">
           <thead><tr><th>workspace_id</th><th>voicebot_id</th><th>session_id</th><th>status</th><th>datetime started</th><th>length</th></tr></thead>
@@ -4624,9 +4619,9 @@ DASHBOARD_PAGE = """<!doctype html>
     let state = null;
     let selectedWorkspaceId = "";
     let selectedVoicebotId = "";
-    let previousView = "active";
+    let previousView = "history";
     let currentRuntimeConfig = null;
-    const views = ["workspaces", "active", "history", "session", "test"];
+    const views = ["workspaces", "history", "session", "test"];
     let pendingRoute = dashboardRouteFromLocation();
     let suppressRouteUpdate = false;
     if (pendingRoute.workspace_id) selectedWorkspaceId = pendingRoute.workspace_id;
@@ -4649,6 +4644,7 @@ DASHBOARD_PAGE = """<!doctype html>
     document.querySelectorAll("[data-table-filter]").forEach((input) => {
       input.addEventListener("input", () => applyTableFilter(input.dataset.tableFilter));
     });
+    document.getElementById("history-status-filter").addEventListener("change", () => applyTableFilter("history-session-rows"));
     document.getElementById("save-voicebot").addEventListener("click", saveVoicebot);
     document.getElementById("save-prompts").addEventListener("click", savePrompts);
     document.getElementById("test-workspace").addEventListener("change", () => {
@@ -4673,7 +4669,7 @@ DASHBOARD_PAGE = """<!doctype html>
     }
     load();
     setInterval(() => {
-      if (["active", "history", "test"].includes(currentView())) load(false);
+      if (["history", "test"].includes(currentView())) load(false);
     }, 5000);
 
     async function load(showErrors = true) {
@@ -4698,7 +4694,6 @@ DASHBOARD_PAGE = """<!doctype html>
     function renderAll() {
       renderWorkspaces();
       renderVoicebots();
-      renderSessions("active-session-rows", state.active_sessions || []);
       renderSessions("history-session-rows", state.session_history || []);
       renderTestSelectors();
       applyAllTableFilters();
@@ -4856,18 +4851,34 @@ DASHBOARD_PAGE = """<!doctype html>
     function renderSessions(targetId, items) {
       const tbody = document.getElementById(targetId);
       tbody.innerHTML = "";
+      if (targetId === "history-session-rows") renderHistoryStatusOptions(items);
       for (const item of items) {
         const row = tbody.insertRow();
         row.className = "clickable";
+        row.dataset.status = item.status || "";
         row.insertCell().textContent = item.workspace_id || "";
         row.insertCell().textContent = item.voicebot_id || "";
         row.insertCell().textContent = item.session_id || "";
         row.insertCell().textContent = item.status || "";
         row.insertCell().textContent = formatDate(item.started_at);
         row.insertCell().textContent = sessionLength(item);
-        row.onclick = () => openSession(item, targetId === "active-session-rows" ? "active" : "history");
+        row.onclick = () => openSession(item, "history");
       }
       applyTableFilter(targetId);
+    }
+
+    function renderHistoryStatusOptions(items) {
+      const select = document.getElementById("history-status-filter");
+      const selected = select.value;
+      const statuses = [...new Set(items.map((item) => item.status || "").filter(Boolean))].sort();
+      select.innerHTML = '<option value="">All statuses</option>';
+      for (const status of statuses) {
+        const option = document.createElement("option");
+        option.value = status;
+        option.textContent = status;
+        select.appendChild(option);
+      }
+      select.value = statuses.includes(selected) ? selected : "";
     }
 
     async function openSession(item, fromView, options = {}) {
@@ -5168,7 +5179,10 @@ DASHBOARD_PAGE = """<!doctype html>
         return;
       }
       for (const row of tbody.rows) {
-        row.hidden = Boolean(query) && !normalizeFilterText(row.textContent || "").includes(query);
+        const statusFilter = tbodyId === "history-session-rows" ? document.getElementById("history-status-filter").value : "";
+        const textMatches = !query || normalizeFilterText(row.textContent || "").includes(query);
+        const statusMatches = !statusFilter || row.dataset.status === statusFilter;
+        row.hidden = !textMatches || !statusMatches;
       }
     }
 
@@ -5242,7 +5256,8 @@ DASHBOARD_PAGE = """<!doctype html>
     }
 
     async function applyDashboardRoute(route) {
-      const routeView = views.includes(route.view) ? route.view : "workspaces";
+      const requestedView = route.view === "active" ? "history" : route.view;
+      const routeView = views.includes(requestedView) ? requestedView : "workspaces";
       if (route.workspace_id && route.workspace_id !== selectedWorkspaceId) {
         selectedWorkspaceId = route.workspace_id;
         selectedVoicebotId = route.voicebot_id || "";

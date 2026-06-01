@@ -4632,6 +4632,7 @@ DASHBOARD_PAGE = """<!doctype html>
     let selectedVoicebotId = "";
     let previousView = "history";
     let currentRuntimeConfig = null;
+    let currentSessionRoute = null;
     const views = ["workspaces", "history", "session", "test"];
     let pendingRoute = dashboardRouteFromLocation();
     let suppressRouteUpdate = false;
@@ -4897,16 +4898,22 @@ DASHBOARD_PAGE = """<!doctype html>
 
     async function openSession(item, fromView, options = {}) {
       previousView = fromView;
+      const sessionTab = options.sessionTab || "timeline";
+      currentSessionRoute = {
+        view: "session",
+        workspace_id: item.workspace_id || selectedWorkspaceId,
+        voicebot_id: item.voicebot_id || selectedVoicebotId,
+        session_id: item.session_id || "",
+        from: fromView,
+      };
       if (options.updateUrl !== false) {
         updateDashboardUrl({
-          view: "session",
-          workspace_id: item.workspace_id || selectedWorkspaceId,
-          voicebot_id: item.voicebot_id || selectedVoicebotId,
-          session_id: item.session_id || "",
-          from: fromView
+          ...currentSessionRoute,
+          session_tab: sessionTab,
         });
       }
       showView("session", {updateUrl: false});
+      showSessionTab(sessionTab, {updateUrl: false});
       document.getElementById("session-title").textContent = `Session ${item.session_id}`;
       renderSessionSummary(item);
       const base = `/workspaces/${encodeURIComponent(item.workspace_id)}/voicebots/${encodeURIComponent(item.voicebot_id)}/sessions/${encodeURIComponent(item.session_id)}`;
@@ -5290,7 +5297,7 @@ DASHBOARD_PAGE = """<!doctype html>
               session_id: route.session_id,
               status: "unknown"
             };
-        await openSession(item, route.from || "history", {updateUrl: false});
+        await openSession(item, route.from || "history", {updateUrl: false, sessionTab: route.session_tab || "timeline"});
         return;
       }
       showView(routeView, {updateUrl: false});
@@ -5308,6 +5315,7 @@ DASHBOARD_PAGE = """<!doctype html>
         workspace_id: params.get("workspace_id") || "",
         voicebot_id: params.get("voicebot_id") || "",
         session_id: params.get("session_id") || "",
+        session_tab: params.get("session_tab") || "",
         from: params.get("from") || ""
       };
     }
@@ -5315,7 +5323,7 @@ DASHBOARD_PAGE = """<!doctype html>
     function updateDashboardUrl(route, options = {}) {
       if (suppressRouteUpdate) return;
       const params = new URLSearchParams();
-      for (const key of ["view", "workspace_id", "voicebot_id", "session_id", "from"]) {
+      for (const key of ["view", "workspace_id", "voicebot_id", "session_id", "session_tab", "from"]) {
         if (route[key]) params.set(key, route[key]);
       }
       const nextUrl = `${window.location.pathname}${window.location.search}#${params.toString()}`;
@@ -5347,10 +5355,14 @@ DASHBOARD_PAGE = """<!doctype html>
       document.getElementById(`detail-${name}`).classList.add("active");
     }
 
-    function showSessionTab(name) {
-      document.querySelectorAll("[data-session-tab]").forEach((button) => button.classList.toggle("active", button.dataset.sessionTab === name));
+    function showSessionTab(name, options = {}) {
+      const selected = ["timeline", "recording", "transcript", "events"].includes(name) ? name : "timeline";
+      document.querySelectorAll("[data-session-tab]").forEach((button) => button.classList.toggle("active", button.dataset.sessionTab === selected));
       document.querySelectorAll(".session-tab-panel").forEach((panel) => panel.classList.remove("active"));
-      document.getElementById(`session-tab-${name}`).classList.add("active");
+      document.getElementById(`session-tab-${selected}`).classList.add("active");
+      if (options.updateUrl !== false && currentView() === "session" && currentSessionRoute) {
+        updateDashboardUrl({...currentSessionRoute, session_tab: selected});
+      }
     }
 
     async function fetchJson(url, options) {

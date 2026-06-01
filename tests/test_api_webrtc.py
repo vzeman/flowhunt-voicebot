@@ -487,6 +487,7 @@ class ApiWebRTCTests(unittest.TestCase):
         response = client.get("/dashboard")
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-store, max-age=0")
         html = response.text
         self.assertIn("Voicebot Test", html)
         self.assertIn('id="prompt-filler"', html)
@@ -537,6 +538,9 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertIn("backfillVoicebotEvents(finishedCallId)", html)
         self.assertIn("&amp;after=", html)
         self.assertIn("&amp;limit=1000", html)
+        self.assertIn("user_transcript_partial", html)
+        self.assertIn("kind !== &quot;stream_chunk&quot;", html)
+        self.assertIn("window.setInterval(() =&gt; backfillVoicebotEvents(), 1000)", html)
         self.assertIn("shouldSuppressClientLogMessage(message)", html)
         self.assertIn("appendEventRows(eventLogNode, event)", html)
         self.assertIn("detailCell.colSpan = 3", html)

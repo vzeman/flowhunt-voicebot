@@ -4390,6 +4390,11 @@ DASHBOARD_PAGE = """<!doctype html>
     .session-chip { display:inline-flex; align-items:center; gap:.25rem; padding:.18rem .5rem; border:1px solid var(--border); border-radius:999px; background:#f6f8fa; color:var(--muted); font-size:.78rem; font-weight:700; }
     .session-chip strong { color:var(--text); font-weight:700; }
     .session-layout { display:grid; grid-template-columns:1fr; gap:1rem; align-items:start; }
+    .session-tabs { display:flex; gap:.35rem; margin:0 0 .85rem; border-bottom:1px solid var(--border); overflow:auto; }
+    .session-tabs button { border-bottom:0; border-radius:6px 6px 0 0; white-space:nowrap; }
+    .session-tabs button.active { background:var(--accent-bg); color:#0550ae; border-color:#c9d7e8; font-weight:700; }
+    .session-tab-panel { display:none; }
+    .session-tab-panel.active { display:block; }
     .panel-title { display:flex; align-items:baseline; justify-content:space-between; gap:.75rem; margin:0 0 .65rem; }
     .panel-title h3 { margin:0; }
     .event-table th, .event-table td, .transcript-table th, .transcript-table td { padding:.48rem .6rem; }
@@ -4565,15 +4570,21 @@ DASHBOARD_PAGE = """<!doctype html>
         <div id="session-summary" class="session-summary"></div>
       </div>
       <div class="session-layout">
-        <div class="panel">
+        <div class="session-tabs" role="tablist" aria-label="Session detail sections">
+          <button type="button" class="active" data-session-tab="timeline">Timeline</button>
+          <button type="button" data-session-tab="recording">Recording</button>
+          <button type="button" data-session-tab="transcript">Transcript</button>
+          <button type="button" data-session-tab="events">Events</button>
+        </div>
+        <div id="session-tab-timeline" class="panel session-tab-panel active">
           <div class="panel-title"><h3>Timeline</h3><span class="muted">Click a bar to inspect details</span></div>
           <div id="session-gantt" class="gantt-wrap"></div>
         </div>
-        <div class="panel">
+        <div id="session-tab-recording" class="panel session-tab-panel">
           <div class="panel-title"><h3>Recording</h3></div>
           <div id="session-recording" class="muted">No recording loaded.</div>
         </div>
-        <div class="panel">
+        <div id="session-tab-transcript" class="panel session-tab-panel">
           <div class="panel-title"><h3>Transcript</h3><span class="muted" id="session-transcript-count"></span></div>
           <div class="table-filter"><input data-table-filter="session-transcript-rows" placeholder="Filter transcript"></div>
           <div class="table-wrap compact">
@@ -4583,7 +4594,7 @@ DASHBOARD_PAGE = """<!doctype html>
             </table>
           </div>
         </div>
-        <div class="panel">
+        <div id="session-tab-events" class="panel session-tab-panel">
           <div class="panel-title"><h3>Events</h3><span class="muted" id="session-event-count"></span></div>
           <div class="table-filter"><input data-table-filter="session-event-rows" placeholder="Filter events"></div>
           <div class="table-wrap">
@@ -4640,6 +4651,9 @@ DASHBOARD_PAGE = """<!doctype html>
     });
     document.querySelectorAll("[data-detail-tab]").forEach((button) => {
       button.addEventListener("click", () => showDetailTab(button.dataset.detailTab));
+    });
+    document.querySelectorAll("[data-session-tab]").forEach((button) => {
+      button.addEventListener("click", () => showSessionTab(button.dataset.sessionTab));
     });
     document.querySelectorAll("[data-table-filter]").forEach((input) => {
       input.addEventListener("input", () => applyTableFilter(input.dataset.tableFilter));
@@ -5331,6 +5345,12 @@ DASHBOARD_PAGE = """<!doctype html>
       document.querySelectorAll("[data-detail-tab]").forEach((button) => button.classList.toggle("active", button.dataset.detailTab === name));
       document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.remove("active"));
       document.getElementById(`detail-${name}`).classList.add("active");
+    }
+
+    function showSessionTab(name) {
+      document.querySelectorAll("[data-session-tab]").forEach((button) => button.classList.toggle("active", button.dataset.sessionTab === name));
+      document.querySelectorAll(".session-tab-panel").forEach((panel) => panel.classList.remove("active"));
+      document.getElementById(`session-tab-${name}`).classList.add("active");
     }
 
     async function fetchJson(url, options) {

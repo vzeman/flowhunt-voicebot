@@ -4390,6 +4390,7 @@ DASHBOARD_PAGE = """<!doctype html>
     fieldset { border:1px solid var(--border); border-radius:8px; padding:.75rem; min-width:0; }
     fieldset label { display:block; margin:.45rem 0; }
     fieldset label.full textarea { min-height:6rem; }
+    .inline-note { margin:.5rem 0 .75rem; padding:.5rem .65rem; border:1px solid #d8dee4; border-radius:8px; background:#f6f8fa; color:var(--muted); font-size:.85rem; }
     .badge { display:inline-block; padding:.1rem .45rem; border-radius:999px; background:#dafbe1; color:#1a7f37; font-weight:700; font-size:.75rem; }
     .badge.off { background:#ffebe9; color:var(--danger); }
     .session-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin:.25rem 0 1rem; flex-wrap:wrap; }
@@ -4582,6 +4583,7 @@ DASHBOARD_PAGE = """<!doctype html>
               <datalist id="stt-model-options"></datalist>
               <datalist id="tts-model-options"></datalist>
               <datalist id="agent-model-options"></datalist>
+              <div class="inline-note" id="provider-config-note"></div>
               <div class="toolbar"><button id="save-providers" type="button">Save providers</button><span class="muted" id="save-providers-status"></span></div>
               <pre id="provider-json">{}</pre>
             </div>
@@ -4592,6 +4594,7 @@ DASHBOARD_PAGE = """<!doctype html>
                 <label class="full">quotas_json<textarea id="runtime-quotas"></textarea></label>
                 <label class="full">subagents_json<textarea id="runtime-subagents"></textarea></label>
               </div>
+              <div class="inline-note" id="runtime-config-note"></div>
               <div class="toolbar"><button id="save-runtime" type="button">Save runtime</button><span class="muted" id="save-runtime-status"></span></div>
               <pre id="runtime-json">{}</pre>
             </div>
@@ -4836,23 +4839,77 @@ DASHBOARD_PAGE = """<!doctype html>
 
     async function loadProviderConfig() {
       const target = `/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/providers`;
-      const payload = await fetchJson(target).catch((error) => ({error: String(error)}));
-      currentProviderConfig = payload.config || currentRuntimeConfig?.providers || null;
-      renderProviderEditor(currentProviderConfig || {});
+      const payload = await fetchJson(target).catch((error) => ({missing: true, error: String(error)}));
+      currentProviderConfig = payload.config || currentRuntimeConfig?.providers || defaultProviderConfig();
+      renderProviderEditor(currentProviderConfig || defaultProviderConfig());
+      document.getElementById("provider-config-note").textContent = payload.config
+        ? "Provider config is saved for this voicebot."
+        : "Provider config is not saved yet. Defaults are shown and will be created when you save.";
       document.getElementById("provider-json").textContent = JSON.stringify(payload, null, 2);
     }
 
     async function loadRuntimeConfig() {
       const target = `/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/runtime-config`;
-      const payload = await fetchJson(target).catch((error) => ({error: String(error)}));
+      const payload = await fetchJson(target).catch((error) => ({missing: true, error: String(error)}));
       currentRuntimeConfig = payload.config || null;
-      renderRuntimeEditor(currentRuntimeConfig || {});
+      renderRuntimeEditor(currentRuntimeConfig || defaultRuntimeConfig());
+      document.getElementById("runtime-config-note").textContent = payload.config
+        ? "Runtime config is saved for this voicebot."
+        : "Runtime config is not saved yet. Defaults are shown and will be created when you save.";
       document.getElementById("prompt-subagent-prompts").value = JSON.stringify(
-        currentRuntimeConfig?.subagents?.prompts || {},
+        (currentRuntimeConfig || defaultRuntimeConfig()).subagents?.prompts || {},
         null,
         2
       );
       document.getElementById("runtime-json").textContent = JSON.stringify(payload, null, 2);
+    }
+
+    function defaultProviderConfig() {
+      return {
+        workspace_id: selectedWorkspaceId,
+        voicebot_id: selectedVoicebotId,
+        stt: providerDefaults("stt"),
+        tts: providerDefaults("tts"),
+        agent: providerDefaults("agent"),
+      };
+    }
+
+    function providerDefaults(family) {
+      if (family === "stt") return {family, provider: "whisper", model: null, voice: null, secret_ref: null, fallback_provider: null, config: {}};
+      if (family === "tts") return {family, provider: "supertonic", model: "supertonic-3", voice: "M1", secret_ref: null, fallback_provider: null, config: {}};
+      return {family, provider: "openai-responses", model: "gpt-4.1-nano", voice: null, secret_ref: null, fallback_provider: null, config: {}};
+    }
+
+    function defaultRuntimeConfig() {
+      return {
+        enabled: true,
+        providers: currentProviderConfig || defaultProviderConfig(),
+        prompts: currentPromptPayload(),
+        realtime: {
+          silence_ms: 450,
+          vad_start_ms: 60,
+          min_seconds: 0.35,
+          max_seconds: 20.0,
+          start_threshold: 0.020,
+          stop_threshold: 0.010,
+          barge_in_threshold: 0.08,
+          echo_tail_ms: 300,
+          max_reply_chars: 240,
+          tts_chunk_chars: 90,
+        },
+        quotas: {
+          max_concurrent_sessions: 1,
+          max_provider_inflight: 10,
+          enabled_actions: ["say", "hangup_call", "transfer_call", "send_dtmf", "delegate_to_subagent", "invoke_flowhunt_flow"],
+        },
+        subagents: {
+          flowhunt_workspace_id: "",
+          flowhunt_flow_id: "",
+          flowhunt_project_id: "",
+          complex_backend: "flow",
+          prompts: {},
+        },
+      };
     }
 
     function renderProviderEditor(config) {
@@ -4991,6 +5048,7 @@ DASHBOARD_PAGE = """<!doctype html>
       });
       currentProviderConfig = response.config || currentProviderConfig;
       document.getElementById("provider-json").textContent = JSON.stringify(response, null, 2);
+      document.getElementById("provider-config-note").textContent = "Provider config is saved for this voicebot.";
       if (response.ok === false) {
         status.textContent = `Validation failed: ${(response.validation || []).map((item) => item.message).join("; ")}`;
         return;
@@ -5036,6 +5094,7 @@ DASHBOARD_PAGE = """<!doctype html>
         currentProviderConfig = currentRuntimeConfig.providers || currentProviderConfig;
         renderRuntimeEditor(currentRuntimeConfig);
         renderProviderEditor(currentProviderConfig || {});
+        document.getElementById("runtime-config-note").textContent = "Runtime config is saved for this voicebot.";
       }
       document.getElementById("runtime-json").textContent = JSON.stringify(response, null, 2);
       if (response.ok === false) {

@@ -1920,7 +1920,10 @@ def create_app(
 
     @app.get("/dashboard")
     def dashboard() -> HTMLResponse:
-        return HTMLResponse(DASHBOARD_PAGE.replace("__WEBRTC_CONSOLE_SRCDOC__", html.escape(WEBRTC_TEST_PAGE, quote=True)))
+        return HTMLResponse(
+            DASHBOARD_PAGE.replace("__WEBRTC_CONSOLE_SRCDOC__", html.escape(WEBRTC_TEST_PAGE, quote=True)),
+            headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"},
+        )
 
     @app.get("/dashboard/state")
     def dashboard_state(request: Request, workspace_id: str | None = None) -> dict[str, Any]:
@@ -5971,16 +5974,19 @@ WEBRTC_TEST_PAGE = """<!doctype html>
 
     function isTranscriptEvent(event) {
       const kind = String(event.data?.response_kind || "");
+      if (event.type === "user_transcript_partial" && event.data?.text) return true;
       if (event.type === "user_transcript" && event.data?.text) return true;
       if (event.type === "agent_response_received" && event.data?.text) {
-        return !["progress_ack", "stream_chunk"].includes(kind);
+        return kind !== "stream_chunk";
       }
       return false;
     }
 
     function logTranscriptEvent(event) {
-      const speaker = event.type === "user_transcript" ? "Caller" : "Voicebot";
-      const kind = event.type === "user_transcript" ? "caller" : "voicebot";
+      const isCaller = event.type === "user_transcript" || event.type === "user_transcript_partial";
+      const isPartial = event.type === "user_transcript_partial" || event.data?.partial === true;
+      const speaker = isCaller ? `Caller${isPartial ? " partial" : ""}` : "Voicebot";
+      const kind = isCaller ? "caller" : "voicebot";
       appendTranscriptRows(transcriptLogNode, event.timestamp, speaker, kind, event.data?.text || "");
       applyTableFilter("transcript-log");
       trimRows(transcriptLogNode);
@@ -6130,7 +6136,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
 
     function startEventPolling() {
       stopEventPolling();
-      eventPollTimer = window.setInterval(() => backfillVoicebotEvents(), 2000);
+      eventPollTimer = window.setInterval(() => backfillVoicebotEvents(), 1000);
     }
 
     function stopEventPolling() {

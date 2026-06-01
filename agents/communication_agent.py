@@ -574,32 +574,16 @@ def progress_ack_text_for_task(task: dict) -> str:
     configured_filler = str(prompt_config.get("filler_message") or "").strip()
     if configured_filler:
         return configured_filler
-    session_language = data.get("session_language") if isinstance(data.get("session_language"), dict) else {}
-    language = str(session_language.get("language") or "").lower()
-    texts = {
-        "sk": "Hneď sa na to pozriem.",
-        "cs": "Hned se na to podívám.",
-        "de": "Ich schaue mir das kurz an.",
-        "es": "Lo reviso enseguida.",
-        "fr": "Je regarde cela tout de suite.",
-        "hu": "Mindjárt megnézem.",
-    }
-    return texts.get(language, "Give me a moment.")
+    return "Give me a moment."
 
 
 def colleague_progress_ack_text_for_task(task: dict) -> str:
     data = task.get("data", {}) if isinstance(task.get("data"), dict) else {}
-    session_language = data.get("session_language") if isinstance(data.get("session_language"), dict) else {}
-    language = str(session_language.get("language") or "").lower()
-    texts = {
-        "sk": "Požiadal som kolegu, aby to preveril. Hneď vám poviem výsledok.",
-        "cs": "Požádal jsem kolegu, aby to prověřil. Hned vám řeknu výsledek.",
-        "de": "Ich frage einen Kollegen und gebe Ihnen gleich das Ergebnis.",
-        "es": "Le pedí ayuda a un compañero y le diré el resultado enseguida.",
-        "fr": "Je demande à un collègue de vérifier cela et je reviens vers vous.",
-        "hu": "Megkértem egy kollégát, hogy ellenőrizze, és mindjárt mondom az eredményt.",
-    }
-    return texts.get(language, "I asked a colleague to check that. I will tell you the result as soon as it is ready.")
+    prompt_config = data.get("prompt_config") if isinstance(data.get("prompt_config"), dict) else {}
+    configured_message = str(prompt_config.get("colleague_progress_message") or "").strip()
+    if configured_message:
+        return configured_message
+    return "I asked a colleague to check that. I will tell you the result as soon as it is ready."
 
 
 def progress_ack_tool_call(task: dict) -> dict:

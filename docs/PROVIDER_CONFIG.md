@@ -114,8 +114,12 @@ prompts stored inside versioned runtime config; if neither exists, local `.env`
 defaults are used.
 
 Prompt config includes `filler_message`, a short progress phrase used for
-`progress_ack` filler speech while the agent prepares an answer or asks a
-subagent for help. Empty `filler_message` keeps the built-in localized filler.
+`progress_ack` filler speech while the agent prepares an answer. It also
+includes `colleague_progress_message`, the acknowledgement spoken when the
+agent asks a subagent for help. Both defaults are visible in the dashboard
+voicebot detail and can be edited per voicebot. The same prompt tab also
+exposes `subagent_prompts_json` for provider-specific subagent prompt hooks
+stored under runtime `subagents.prompts`.
 
 For multilingual voicebots, configure prompt `language` as `auto`. The STT
 runtime treats `auto`, `detect`, `multilingual`, and `any` as no fixed language

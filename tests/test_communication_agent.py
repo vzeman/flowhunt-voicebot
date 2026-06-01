@@ -185,11 +185,11 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
             },
         )
 
-    def test_progress_ack_uses_session_language(self) -> None:
+    def test_progress_ack_uses_default_prompt_when_no_configured_filler(self) -> None:
         task = {"id": 1, "call_id": "call-1", "data": {"session_language": {"language": "sk"}}}
 
-        self.assertEqual(progress_ack_text_for_task(task), "Hneď sa na to pozriem.")
-        self.assertEqual(progress_ack_tool_call(task)["arguments"]["text"], "Hneď sa na to pozriem.")
+        self.assertEqual(progress_ack_text_for_task(task), "Give me a moment.")
+        self.assertEqual(progress_ack_tool_call(task)["arguments"]["text"], "Give me a moment.")
 
     def test_progress_ack_uses_configured_filler_message(self) -> None:
         task = {
@@ -208,7 +208,16 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
         task = {"id": 1, "call_id": "call-1", "data": {}}
 
         self.assertIn("colleague", colleague_progress_ack_text_for_task(task))
-        self.assertIn("colleague", colleague_progress_ack_tool_call(task)["arguments"]["text"])
+
+    def test_colleague_progress_ack_uses_configured_prompt(self) -> None:
+        task = {
+            "id": 1,
+            "call_id": "call-1",
+            "data": {"prompt_config": {"colleague_progress_message": "I asked our billing specialist."}},
+        }
+
+        self.assertEqual(colleague_progress_ack_text_for_task(task), "I asked our billing specialist.")
+        self.assertEqual(colleague_progress_ack_tool_call(task)["arguments"]["text"], "I asked our billing specialist.")
         self.assertEqual(colleague_progress_ack_tool_call(task)["arguments"]["response_kind"], "progress_ack")
 
     def test_dropped_tool_fallback_asks_for_full_request(self) -> None:

@@ -107,6 +107,7 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
                 },
                 "prompts": {
                     "greeting": "Say hello.",
+                    "colleague_progress_message": "I asked a specialist.",
                     "system_prompt": "Be concise.",
                     "stt_prompt": "LiveAgent FlowHunt",
                     "language": "en",
@@ -133,6 +134,7 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["config"]["config_version"], 1)
         self.assertEqual(payload["config"]["prompts"]["greeting"], "Say hello.")
+        self.assertEqual(payload["config"]["prompts"]["colleague_progress_message"], "I asked a specialist.")
         self.assertEqual(
             payload["config"]["subagents"]["prompts"]["flowhunt_flow"]["result_prompt"],
             "Summarize this colleague result: {result}",
@@ -176,6 +178,7 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
             json={
                 "greeting": "Pozdrav volajuceho po slovensky.",
                 "filler_message": "Chvíľku strpenia.",
+                "colleague_progress_message": "Pýtam sa kolegu a hneď vám poviem výsledok.",
                 "system_prompt": "Use concise Slovak.",
                 "stt_prompt": "LiveAgent FlowHunt",
                 "language": "sk",
@@ -185,15 +188,24 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
         self.assertEqual(put_response.status_code, 200)
         self.assertEqual(put_response.json()["prompts"]["language"], "sk")
         self.assertEqual(put_response.json()["prompts"]["filler_message"], "Chvíľku strpenia.")
+        self.assertEqual(
+            put_response.json()["prompts"]["colleague_progress_message"],
+            "Pýtam sa kolegu a hneď vám poviem výsledok.",
+        )
 
         patch_response = client.patch(
             "/workspaces/workspace-1/voicebots/voicebot-1/prompts",
-            json={"system_prompt": "Use friendly Slovak.", "filler_message": "Hneď to overím."},
+            json={
+                "system_prompt": "Use friendly Slovak.",
+                "filler_message": "Hneď to overím.",
+                "colleague_progress_message": "Kolega to preveruje.",
+            },
         )
 
         self.assertEqual(patch_response.status_code, 200)
         self.assertEqual(patch_response.json()["prompts"]["greeting"], "Pozdrav volajuceho po slovensky.")
         self.assertEqual(patch_response.json()["prompts"]["filler_message"], "Hneď to overím.")
+        self.assertEqual(patch_response.json()["prompts"]["colleague_progress_message"], "Kolega to preveruje.")
         self.assertEqual(patch_response.json()["prompts"]["system_prompt"], "Use friendly Slovak.")
         get_response = client.get("/workspaces/workspace-1/voicebots/voicebot-1/prompts")
         self.assertEqual(get_response.json()["source"], "prompt_override")

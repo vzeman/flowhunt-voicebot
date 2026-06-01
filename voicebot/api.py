@@ -403,7 +403,6 @@ def create_app(
                 return runtime_config.prompts
         return VoicebotPromptConfig(
             greeting=runtime_settings.connect_greeting_prompt,
-            filler_message="",
             system_prompt="",
             stt_prompt=runtime_settings.stt_prompt,
             language=runtime_settings.language or "auto",
@@ -1323,6 +1322,7 @@ def create_app(
                 prompts=VoicebotPromptConfig(
                     greeting=request.prompts.greeting,
                     filler_message=request.prompts.filler_message,
+                    colleague_progress_message=request.prompts.colleague_progress_message,
                     system_prompt=request.prompts.system_prompt,
                     stt_prompt=request.prompts.stt_prompt,
                     language=request.prompts.language,
@@ -1404,6 +1404,7 @@ def create_app(
                 VoicebotPromptConfig(
                     greeting=request.greeting,
                     filler_message=request.filler_message,
+                    colleague_progress_message=request.colleague_progress_message,
                     system_prompt=request.system_prompt,
                     stt_prompt=request.stt_prompt,
                     language=request.language,
@@ -4500,8 +4501,10 @@ DASHBOARD_PAGE = """<!doctype html>
                 <label>language<input id="prompt-language"></label>
                 <label class="full">greeting<textarea id="prompt-greeting"></textarea></label>
                 <label class="full">filler_message<textarea id="prompt-filler"></textarea></label>
+                <label class="full">colleague_progress_message<textarea id="prompt-colleague-progress"></textarea></label>
                 <label class="full">system_prompt<textarea id="prompt-system"></textarea></label>
                 <label class="full">stt_prompt<textarea id="prompt-stt"></textarea></label>
+                <label class="full">subagent_prompts_json<textarea id="prompt-subagent-prompts"></textarea></label>
               </div>
               <div class="toolbar"><button id="save-prompts" type="button">Save prompts</button><span class="muted" id="save-prompts-status"></span></div>
             </div>
@@ -4598,7 +4601,12 @@ DASHBOARD_PAGE = """<!doctype html>
     let selectedWorkspaceId = "";
     let selectedVoicebotId = "";
     let previousView = "active";
+    let currentRuntimeConfig = null;
     const views = ["workspaces", "active", "history", "session", "test"];
+    let pendingRoute = dashboardRouteFromLocation();
+    let suppressRouteUpdate = false;
+    if (pendingRoute.workspace_id) selectedWorkspaceId = pendingRoute.workspace_id;
+    if (pendingRoute.voicebot_id) selectedVoicebotId = pendingRoute.voicebot_id;
 
     document.getElementById("refresh").addEventListener("click", load);
     document.querySelectorAll("nav button[data-view]").forEach((button) => {
@@ -4622,13 +4630,23 @@ DASHBOARD_PAGE = """<!doctype html>
     document.getElementById("test-workspace").addEventListener("change", () => {
       selectedWorkspaceId = document.getElementById("test-workspace").value;
       renderTestVoicebots();
+      updateDashboardUrl({view: "test", workspace_id: selectedWorkspaceId, voicebot_id: selectedVoicebotId});
       load();
     });
     document.getElementById("test-voicebot").addEventListener("change", () => {
       selectedVoicebotId = document.getElementById("test-voicebot").value;
+      updateDashboardUrl({view: "test", workspace_id: selectedWorkspaceId, voicebot_id: selectedVoicebotId});
       postTestTarget();
     });
     document.getElementById("webrtc-console").addEventListener("load", postTestTarget);
+    window.addEventListener("hashchange", handleDashboardLocationChange);
+    window.addEventListener("popstate", handleDashboardLocationChange);
+    function handleDashboardLocationChange() {
+      pendingRoute = dashboardRouteFromLocation();
+      selectedWorkspaceId = pendingRoute.workspace_id || "";
+      selectedVoicebotId = pendingRoute.voicebot_id || "";
+      load(false);
+    }
     load();
     setInterval(() => {
       if (["active", "history", "test"].includes(currentView())) load(false);
@@ -4643,6 +4661,11 @@ DASHBOARD_PAGE = """<!doctype html>
         selectedWorkspaceId = state.selected_workspace_id || selectedWorkspaceId || "";
         selectedVoicebotId = selectedVoicebotId || ((state.voicebots || [])[0] || {}).voicebot_id || "";
         renderAll();
+        if (pendingRoute) {
+          const route = pendingRoute;
+          pendingRoute = null;
+          await applyDashboardRoute(route);
+        }
       } catch (error) {
         if (showErrors) alert(`Dashboard load failed: ${error}`);
       }
@@ -4668,6 +4691,7 @@ DASHBOARD_PAGE = """<!doctype html>
         row.onclick = () => {
           selectedWorkspaceId = workspace.workspace_id;
           selectedVoicebotId = "";
+          updateDashboardUrl({view: "workspaces", workspace_id: selectedWorkspaceId});
           load();
         };
       }
@@ -4691,9 +4715,12 @@ DASHBOARD_PAGE = """<!doctype html>
       applyTableFilter("voicebot-rows");
     }
 
-    async function openVoicebot(bot) {
+    async function openVoicebot(bot, options = {}) {
       selectedWorkspaceId = bot.workspace_id;
       selectedVoicebotId = bot.voicebot_id;
+      if (options.updateUrl !== false) {
+        updateDashboardUrl({view: "workspaces", workspace_id: selectedWorkspaceId, voicebot_id: selectedVoicebotId});
+      }
       document.getElementById("voicebot-detail").style.display = "block";
       document.getElementById("detail-voicebot-id").value = bot.voicebot_id || "";
       document.getElementById("detail-display-name").value = bot.display_name || "";
@@ -4709,6 +4736,7 @@ DASHBOARD_PAGE = """<!doctype html>
       document.getElementById("prompt-language").value = prompts.language || "";
       document.getElementById("prompt-greeting").value = prompts.greeting || "";
       document.getElementById("prompt-filler").value = prompts.filler_message || "";
+      document.getElementById("prompt-colleague-progress").value = prompts.colleague_progress_message || "";
       document.getElementById("prompt-system").value = prompts.system_prompt || "";
       document.getElementById("prompt-stt").value = prompts.stt_prompt || "";
     }
@@ -4722,6 +4750,12 @@ DASHBOARD_PAGE = """<!doctype html>
     async function loadRuntimeConfig() {
       const target = `/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/runtime-config`;
       const payload = await fetchJson(target).catch((error) => ({error: String(error)}));
+      currentRuntimeConfig = payload.config || null;
+      document.getElementById("prompt-subagent-prompts").value = JSON.stringify(
+        currentRuntimeConfig?.subagents?.prompts || {},
+        null,
+        2
+      );
       document.getElementById("runtime-json").textContent = JSON.stringify(payload, null, 2);
     }
 
@@ -4756,6 +4790,7 @@ DASHBOARD_PAGE = """<!doctype html>
         language: document.getElementById("prompt-language").value,
         greeting: document.getElementById("prompt-greeting").value,
         filler_message: document.getElementById("prompt-filler").value,
+        colleague_progress_message: document.getElementById("prompt-colleague-progress").value,
         system_prompt: document.getElementById("prompt-system").value,
         stt_prompt: document.getElementById("prompt-stt").value
       };
@@ -4764,6 +4799,33 @@ DASHBOARD_PAGE = """<!doctype html>
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify(payload)
       });
+      if (currentRuntimeConfig) {
+        let subagentPrompts = {};
+        try {
+          subagentPrompts = JSON.parse(document.getElementById("prompt-subagent-prompts").value || "{}");
+        } catch (error) {
+          status.textContent = "Main prompts saved; invalid subagent_prompts_json";
+          return;
+        }
+        const runtimePayload = {
+          providers: currentRuntimeConfig.providers,
+          prompts: {...(currentRuntimeConfig.prompts || {}), ...payload},
+          realtime: currentRuntimeConfig.realtime || {},
+          quotas: currentRuntimeConfig.quotas || {},
+          subagents: {
+            ...(currentRuntimeConfig.subagents || {}),
+            prompts: subagentPrompts,
+          },
+          enabled: currentRuntimeConfig.enabled !== false,
+        };
+        const runtimeResponse = await fetchJson(`/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/runtime-config`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(runtimePayload)
+        });
+        currentRuntimeConfig = runtimeResponse.config || currentRuntimeConfig;
+        document.getElementById("runtime-json").textContent = JSON.stringify(runtimeResponse, null, 2);
+      }
       status.textContent = "Saved";
     }
 
@@ -4784,9 +4846,18 @@ DASHBOARD_PAGE = """<!doctype html>
       applyTableFilter(targetId);
     }
 
-    async function openSession(item, fromView) {
+    async function openSession(item, fromView, options = {}) {
       previousView = fromView;
-      showView("session");
+      if (options.updateUrl !== false) {
+        updateDashboardUrl({
+          view: "session",
+          workspace_id: item.workspace_id || selectedWorkspaceId,
+          voicebot_id: item.voicebot_id || selectedVoicebotId,
+          session_id: item.session_id || "",
+          from: fromView
+        });
+      }
+      showView("session", {updateUrl: false});
       document.getElementById("session-title").textContent = `Session ${item.session_id}`;
       renderSessionSummary(item);
       const base = `/workspaces/${encodeURIComponent(item.workspace_id)}/voicebots/${encodeURIComponent(item.voicebot_id)}/sessions/${encodeURIComponent(item.session_id)}`;
@@ -5114,9 +5185,70 @@ DASHBOARD_PAGE = """<!doctype html>
       }, "*");
     }
 
-    function showView(name) {
+    async function applyDashboardRoute(route) {
+      const routeView = views.includes(route.view) ? route.view : "workspaces";
+      if (route.workspace_id && route.workspace_id !== selectedWorkspaceId) {
+        selectedWorkspaceId = route.workspace_id;
+        selectedVoicebotId = route.voicebot_id || "";
+        pendingRoute = route;
+        await load(false);
+        return;
+      }
+      if (route.voicebot_id) selectedVoicebotId = route.voicebot_id;
+      if (routeView === "session" && route.workspace_id && route.voicebot_id && route.session_id) {
+        const item = [...(state.active_sessions || []), ...(state.session_history || [])]
+          .find((session) => session.workspace_id === route.workspace_id
+            && session.voicebot_id === route.voicebot_id
+            && session.session_id === route.session_id) || {
+              workspace_id: route.workspace_id,
+              voicebot_id: route.voicebot_id,
+              session_id: route.session_id,
+              status: "unknown"
+            };
+        await openSession(item, route.from || "history", {updateUrl: false});
+        return;
+      }
+      showView(routeView, {updateUrl: false});
+      if (route.voicebot_id) {
+        const bot = (state.voicebots || []).find((entry) => entry.voicebot_id === route.voicebot_id);
+        if (bot) await openVoicebot(bot, {updateUrl: false});
+      }
+      if (routeView === "test") postTestTarget();
+    }
+
+    function dashboardRouteFromLocation() {
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      return {
+        view: params.get("view") || "",
+        workspace_id: params.get("workspace_id") || "",
+        voicebot_id: params.get("voicebot_id") || "",
+        session_id: params.get("session_id") || "",
+        from: params.get("from") || ""
+      };
+    }
+
+    function updateDashboardUrl(route, options = {}) {
+      if (suppressRouteUpdate) return;
+      const params = new URLSearchParams();
+      for (const key of ["view", "workspace_id", "voicebot_id", "session_id", "from"]) {
+        if (route[key]) params.set(key, route[key]);
+      }
+      const nextUrl = `${window.location.pathname}${window.location.search}#${params.toString()}`;
+      const method = options.replace ? "replaceState" : "pushState";
+      window.history[method](null, "", nextUrl);
+    }
+
+    function routeForView(name) {
+      const route = {view: name};
+      if (selectedWorkspaceId) route.workspace_id = selectedWorkspaceId;
+      if (selectedVoicebotId && ["workspaces", "test"].includes(name)) route.voicebot_id = selectedVoicebotId;
+      return route;
+    }
+
+    function showView(name, options = {}) {
       for (const view of views) document.getElementById(`view-${view}`).classList.toggle("active", view === name);
       document.querySelectorAll("nav button[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
+      if (options.updateUrl !== false) updateDashboardUrl(routeForView(name));
       if (name === "test") postTestTarget();
     }
 

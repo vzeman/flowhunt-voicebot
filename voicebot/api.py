@@ -4421,6 +4421,30 @@ DASHBOARD_PAGE = """<!doctype html>
     .gantt-bar.agent { background:#0969da; }
     .gantt-bar.tts, .gantt-bar.playback { background:#bf8700; }
     .gantt-bar.subagent { background:#cf222e; }
+    .gantt-bar.call { box-shadow:0 0 0 1px rgba(31,35,40,.35); }
+    .gantt-bar.system { box-shadow:0 0 0 1px rgba(87,96,106,.55); }
+    .gantt-bar.control { box-shadow:0 0 0 1px rgba(207,34,46,.45); }
+    .gantt-type-call-connected { background:#2da44e; }
+    .gantt-type-call-ended { background:#57606a; }
+    .gantt-type-call-control { background:#d1242f; }
+    .gantt-type-speech { background:#1a7f37; }
+    .gantt-type-transcript { background:#116329; }
+    .gantt-type-stt { background:#8250df; }
+    .gantt-type-agent-requested { background:#0969da; }
+    .gantt-type-agent-received { background:#54aeef; }
+    .gantt-type-agent-queued { background:#1f6feb; }
+    .gantt-type-agent-error { background:#cf222e; }
+    .gantt-type-tts { background:#bf8700; }
+    .gantt-type-playback { background:#9a6700; }
+    .gantt-type-subagent-requested { background:#cf222e; }
+    .gantt-type-subagent-updated { background:#fb8f44; }
+    .gantt-type-subagent-completed { background:#2da44e; }
+    .gantt-type-subagent-failed { background:#a40e26; }
+    .gantt-type-flowhunt { background:#e36209; }
+    .gantt-type-recording { background:#6f42c1; }
+    .gantt-type-security { background:#57606a; }
+    .gantt-type-runtime { background:#6e7781; }
+    .gantt-type-system { background:#8c959f; }
     .gantt-empty { padding:.75rem; color:var(--muted); }
     .event-dialog { width:min(58rem,calc(100vw - 2rem)); max-height:min(42rem,calc(100vh - 2rem)); padding:0; border:1px solid var(--border); border-radius:8px; box-shadow:0 18px 48px rgba(31,35,40,.22); }
     .event-dialog::backdrop { background:rgba(31,35,40,.42); }
@@ -4917,7 +4941,7 @@ DASHBOARD_PAGE = """<!doctype html>
         laneNode.className = "gantt-lane";
         const bar = document.createElement("button");
         const duration = Math.max(0, item.end - item.start);
-        bar.className = `gantt-bar ${item.kind}${duration < 0.05 ? " marker" : ""}`;
+        bar.className = `gantt-bar ${item.kind} ${item.typeClass}${duration < 0.05 ? " marker" : ""}`;
         bar.style.left = `${((item.start - start) / span) * 100}%`;
         bar.style.width = `${Math.max(0.5, (duration / span) * 100)}%`;
         bar.title = `${item.type} #${item.id} ${formatSeconds(item.start - start)}-${formatSeconds(item.end - start)}`;
@@ -4987,6 +5011,7 @@ DASHBOARD_PAGE = """<!doctype html>
           type: event.type || "",
           lane: ganttEventLane(event),
           kind: ganttEventKind(event),
+          typeClass: ganttEventTypeClass(event),
           event,
           start,
           end: start + duration,
@@ -5020,6 +5045,9 @@ DASHBOARD_PAGE = """<!doctype html>
       if (type.startsWith("bot_playback")) return "Playback";
       if (type.startsWith("subagent_") || type.startsWith("flowhunt_")) return "Subagents";
       if (type.startsWith("call_control")) return "Call control";
+      if (type.startsWith("call_")) return "Call lifecycle";
+      if (type.startsWith("recording_")) return "Recording";
+      if (type === "security_audit" || type.includes("config") || type.includes("updated")) return "System";
       return "System";
     }
 
@@ -5031,7 +5059,35 @@ DASHBOARD_PAGE = """<!doctype html>
       if (lane === "TTS") return "tts";
       if (lane === "Playback") return "playback";
       if (lane === "Subagents") return "subagent";
-      return "";
+      if (lane === "Call control") return "control";
+      if (lane === "Call lifecycle") return "call";
+      return "system";
+    }
+
+    function ganttEventTypeClass(event) {
+      const type = String(event.type || "");
+      if (type === "call_connected") return "gantt-type-call-connected";
+      if (type === "call_ended") return "gantt-type-call-ended";
+      if (type.startsWith("call_control")) return "gantt-type-call-control";
+      if (type.includes("speech")) return "gantt-type-speech";
+      if (type === "user_transcript") return "gantt-type-transcript";
+      if (type.startsWith("stt_")) return "gantt-type-stt";
+      if (type === "agent_response_requested") return "gantt-type-agent-requested";
+      if (type === "agent_response_received") return "gantt-type-agent-received";
+      if (type === "agent_response_queued") return "gantt-type-agent-queued";
+      if (type.startsWith("agent_") && type.includes("error")) return "gantt-type-agent-error";
+      if (type.startsWith("agent_")) return "gantt-type-agent-requested";
+      if (type.startsWith("tts_")) return "gantt-type-tts";
+      if (type.startsWith("bot_playback")) return "gantt-type-playback";
+      if (type.startsWith("subagent_") && type.includes("completed")) return "gantt-type-subagent-completed";
+      if (type.startsWith("subagent_") && type.includes("failed")) return "gantt-type-subagent-failed";
+      if (type.startsWith("subagent_") && type.includes("updated")) return "gantt-type-subagent-updated";
+      if (type.startsWith("subagent_")) return "gantt-type-subagent-requested";
+      if (type.startsWith("flowhunt_")) return "gantt-type-flowhunt";
+      if (type.startsWith("recording_")) return "gantt-type-recording";
+      if (type === "security_audit") return "gantt-type-security";
+      if (type.includes("config") || type.includes("updated")) return "gantt-type-runtime";
+      return "gantt-type-system";
     }
 
     function formatSeconds(seconds) {

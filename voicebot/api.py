@@ -5653,7 +5653,12 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     .recording-panel.visible { display: flex; }
     .recording-panel h2 { flex: 0 0 auto; margin: 0; font-size: .875rem; color: var(--muted); }
     .recording-panel audio { min-width: 14rem; }
-    .logs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; width: 100%; }
+    .logs { margin-top: 1rem; width: 100%; }
+    .test-tabs { display: flex; gap: .35rem; margin: 0 0 .85rem; border-bottom: 1px solid var(--border); overflow: auto; }
+    .test-tabs button { border-bottom: 0; border-radius: 6px 6px 0 0; white-space: nowrap; }
+    .test-tabs button.active { background: #ddf4ff; border-color: #c9d7e8; color: #0550ae; font-weight: 700; }
+    .test-tab-panel { display: none; }
+    .test-tab-panel.active { display: block; }
     .log-panel h2 { font-size: 1rem; margin: 0 0 .5rem; }
     .table-filter { margin: 0 0 .5rem; }
     .table-filter input { width: 100%; padding: .45rem .55rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; }
@@ -5682,7 +5687,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     .json-string { color: #0a3069; }
     .json-null { color: #6e7781; font-weight: 700; }
     .empty-cell { color: #8c959f; font-family: inherit; }
-    @media (max-width: 800px) { .logs { grid-template-columns: 1fr; } .call-controls { align-items: stretch; flex-direction: column; } .button-group { width: 100%; } .button-group button { flex: 1; } audio { min-width: 0; } }
+    @media (max-width: 800px) { .call-controls { align-items: stretch; flex-direction: column; } .button-group { width: 100%; } .button-group button { flex: 1; } audio { min-width: 0; } }
   </style>
 </head>
 <body>
@@ -5700,7 +5705,13 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     <audio id="recording" controls></audio>
   </div>
   <div class="logs">
-    <section class="log-panel">
+    <div class="test-tabs" role="tablist" aria-label="Voicebot WebRTC test logs">
+      <button type="button" class="active" data-test-tab="client">Client Log</button>
+      <button type="button" data-test-tab="events">Voicebot Events</button>
+      <button type="button" data-test-tab="transcript">Call Transcript</button>
+      <button type="button" data-test-tab="subagents">Subagent Communication</button>
+    </div>
+    <section id="test-tab-client" class="log-panel test-tab-panel active">
       <h2>Client Log</h2>
       <div class="table-filter"><input data-table-filter="log" placeholder="Filter client log"></div>
       <div class="table-wrap">
@@ -5712,7 +5723,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         </table>
       </div>
     </section>
-    <section class="log-panel">
+    <section id="test-tab-events" class="log-panel test-tab-panel">
       <h2>Voicebot Events</h2>
       <div class="table-filter"><input data-table-filter="event-log" placeholder="Filter voicebot events"></div>
       <div class="table-wrap">
@@ -5724,7 +5735,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         </table>
       </div>
     </section>
-    <section class="log-panel">
+    <section id="test-tab-transcript" class="log-panel test-tab-panel">
       <h2>Call Transcript</h2>
       <div class="table-filter"><input data-table-filter="transcript-log" placeholder="Filter transcript"></div>
       <div class="table-wrap">
@@ -5736,7 +5747,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         </table>
       </div>
     </section>
-    <section class="log-panel">
+    <section id="test-tab-subagents" class="log-panel test-tab-panel">
       <h2>Subagent Communication</h2>
       <div class="table-filter"><input data-table-filter="subagent-log" placeholder="Filter subagent communication"></div>
       <div class="table-wrap">
@@ -5770,6 +5781,9 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     document.querySelectorAll("[data-table-filter]").forEach((input) => {
       input.addEventListener("input", () => applyTableFilter(input.dataset.tableFilter));
     });
+    document.querySelectorAll("[data-test-tab]").forEach((button) => {
+      button.addEventListener("click", () => showTestTab(button.dataset.testTab));
+    });
 
     window.addEventListener("message", (message) => {
       const data = message.data || {};
@@ -5781,6 +5795,15 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       };
       log(`target=${JSON.stringify(testTarget)}`);
     });
+
+    function showTestTab(name) {
+      const selected = ["client", "events", "transcript", "subagents"].includes(name) ? name : "client";
+      document.querySelectorAll("[data-test-tab]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.testTab === selected);
+      });
+      document.querySelectorAll(".test-tab-panel").forEach((panel) => panel.classList.remove("active"));
+      document.getElementById(`test-tab-${selected}`).classList.add("active");
+    }
 
     function formatTime(timestamp) {
       const date = timestamp instanceof Date ? timestamp : new Date(timestamp);

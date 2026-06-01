@@ -9,6 +9,9 @@ import json
 from pathlib import Path
 import threading
 from typing import Protocol
+import urllib.error
+import urllib.parse
+import urllib.request
 
 import numpy as np
 
@@ -227,6 +230,130 @@ class OpenAITTSProvider(TTSProvider):
                     call_audio = resample_audio(audio, OPENAI_TTS_PCM_SAMPLE_RATE, CALL_SAMPLE_RATE)
                     if call_audio.size:
                         yield call_audio, audio.size / float(OPENAI_TTS_PCM_SAMPLE_RATE)
+
+
+class HttpTTSProvider(TTSProvider):
+    def __init__(self, settings: Settings) -> None:
+        self._provider = normalize_provider(settings.tts_provider)
+        if self._provider == "deepgram" and sf is None:
+            raise RuntimeError("The soundfile package is required when using Deepgram TTS")
+        self._api_key = provider_api_key(self._provider, settings.tts_api_key, "")
+        self._base_url = settings.tts_base_url.strip() or _default_http_tts_base_url(self._provider)
+        self._model = settings.tts_model.strip() or _default_http_tts_model(self._provider)
+        self._voice = _http_tts_voice(self._provider, settings.tts_voice)
+        self._timeout = settings.tts_timeout_seconds
+        self._lock = threading.Lock()
+        if not self._api_key:
+            raise ValueError(f"API key is required when VOICEBOT_TTS_PROVIDER={self._provider}")
+        if self._provider not in {"deepgram", "elevenlabs"}:
+            raise ValueError(f"Unsupported HTTP TTS provider: {self._provider}")
+        print(f"Using {self._provider} TTS model: {self._model} voice={self._voice}")
+
+    def synthesize(self, text: str) -> tuple[np.ndarray, float]:
+        with self._lock:
+            if self._provider == "deepgram":
+                return self._synthesize_deepgram(text)
+            return self._synthesize_elevenlabs(text)
+
+    def _synthesize_deepgram(self, text: str) -> tuple[np.ndarray, float]:
+        query = {
+            "model": self._model,
+            "encoding": "linear16",
+            "container": "wav",
+            "sample_rate": str(OPENAI_TTS_PCM_SAMPLE_RATE),
+        }
+        content = _binary_request(
+            "POST",
+            f"{self._base_url.rstrip('/')}/v1/speak?{urllib.parse.urlencode(query)}",
+            headers={
+                "Authorization": f"Token {self._api_key}",
+                "Content-Type": "application/json",
+            },
+            body=json.dumps({"text": text}).encode("utf-8"),
+            timeout=self._timeout,
+        )
+        return _wav_bytes_to_call_audio(content)
+
+    def _synthesize_elevenlabs(self, text: str) -> tuple[np.ndarray, float]:
+        query = urllib.parse.urlencode({"output_format": f"pcm_{OPENAI_TTS_PCM_SAMPLE_RATE}"})
+        voice_id = urllib.parse.quote(self._voice)
+        content = _binary_request(
+            "POST",
+            f"{self._base_url.rstrip('/')}/v1/text-to-speech/{voice_id}/stream?{query}",
+            headers={
+                "xi-api-key": self._api_key,
+                "Content-Type": "application/json",
+                "Accept": "audio/pcm",
+            },
+            body=json.dumps({"text": text, "model_id": self._model}).encode("utf-8"),
+            timeout=self._timeout,
+        )
+        audio = pcm16le_bytes_to_float32(content)
+        call_audio = resample_audio(audio, OPENAI_TTS_PCM_SAMPLE_RATE, CALL_SAMPLE_RATE)
+        return call_audio, audio.size / float(OPENAI_TTS_PCM_SAMPLE_RATE)
+
+
+def _default_http_tts_base_url(provider: str) -> str:
+    if provider == "deepgram":
+        return "https://api.deepgram.com"
+    if provider == "elevenlabs":
+        return "https://api.elevenlabs.io"
+    return ""
+
+
+def _default_http_tts_model(provider: str) -> str:
+    if provider == "deepgram":
+        return "aura-2-thalia-en"
+    if provider == "elevenlabs":
+        return "eleven_flash_v2_5"
+    return ""
+
+
+def _default_http_tts_voice(provider: str) -> str:
+    if provider == "elevenlabs":
+        return "21m00Tcm4TlvDq8ikWAM"
+    return ""
+
+
+def _http_tts_voice(provider: str, configured: str) -> str:
+    if provider != "elevenlabs":
+        return ""
+    value = configured.strip()
+    if value and value != "M1":
+        return value
+    return _default_http_tts_voice(provider)
+
+
+def _binary_request(
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    body: bytes | None = None,
+    timeout: float = 8.0,
+) -> bytes:
+    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = response.status
+            content = response.read()
+    except urllib.error.HTTPError as exc:
+        content = exc.read()
+        message = content.decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"HTTP {exc.code} from TTS provider: {message}") from exc
+    if not 200 <= status < 300:
+        message = content.decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"HTTP {status} from TTS provider: {message}")
+    return content
+
+
+def _wav_bytes_to_call_audio(content: bytes) -> tuple[np.ndarray, float]:
+    wav, sample_rate = sf.read(BytesIO(content), dtype="float32")
+    audio = np.asarray(wav, dtype=np.float32)
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    call_audio = resample_audio(audio, sample_rate, CALL_SAMPLE_RATE)
+    return call_audio, len(audio) / float(sample_rate)
 
 
 def pcm16le_bytes_to_float32(content: bytes) -> np.ndarray:

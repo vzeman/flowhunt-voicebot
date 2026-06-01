@@ -59,6 +59,26 @@ The native Deepgram and AssemblyAI adapters can improve recognition quality or
 let a deployment choose a specialized speech provider, but they are still
 batch-turn adapters. True streaming STT requires a separate pipeline adapter.
 
+## TTS Runtime Providers
+
+Process-local TTS selection uses `VOICEBOT_TTS_PROVIDER` when no route or
+voicebot override is present. Supported runtime adapters are:
+
+- `supertonic`: local Supertonic, configured by `VOICEBOT_TTS_VOICE`.
+- `openai` and `openai-compatible`: OpenAI speech protocol, configured by
+  `VOICEBOT_TTS_API_KEY`, `VOICEBOT_TTS_BASE_URL`, `VOICEBOT_TTS_MODEL`, and
+  `VOICEBOT_OPENAI_TTS_VOICE`.
+- `deepgram`: native Speak API adapter, configured by `VOICEBOT_TTS_API_KEY` or
+  `DEEPGRAM_API_KEY`; default model `aura-2-thalia-en`.
+- `elevenlabs`: native text-to-speech stream adapter, configured by
+  `VOICEBOT_TTS_API_KEY` or `ELEVENLABS_API_KEY`; default model
+  `eleven_flash_v2_5`, with voice id from `VOICEBOT_TTS_VOICE`.
+
+All TTS adapters are wrapped by the existing cache when
+`VOICEBOT_TTS_CACHE_ENABLED=true`, so provider/model/voice/language changes
+produce separate cache entries. `VOICEBOT_TTS_TIMEOUT_SECONDS` bounds native
+HTTP TTS calls.
+
 ## Runtime Plan
 
 `provider_selection_plan()` converts product config into normalized provider,

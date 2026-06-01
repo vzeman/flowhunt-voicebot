@@ -499,10 +499,15 @@ Provider names:
   `VOICEBOT_STT_API_KEY` or the provider key env var, `DEEPGRAM_API_KEY` or
   `ASSEMBLYAI_API_KEY`; `VOICEBOT_STT_MODEL` defaults to `nova-3` for Deepgram
   and `universal` for AssemblyAI.
-- TTS: `supertonic` for local Supertonic, `openai` or `openai-compatible` for
-  OpenAI or a compatible speech endpoint via `VOICEBOT_TTS_BASE_URL`. Aliases
-  `groq`, `mistral`, `nvidia`, and `xai` use the same speech adapter with
-  provider-specific API key env vars and default base URLs.
+- TTS: `supertonic` for local Supertonic; `openai` or `openai-compatible` for
+  OpenAI or a compatible speech endpoint via `VOICEBOT_TTS_BASE_URL`; and
+  native HTTP adapters for `deepgram` and `elevenlabs`. Aliases `groq`,
+  `mistral`, `nvidia`, and `xai` use the same OpenAI-compatible speech adapter
+  with provider-specific API key env vars and default base URLs. For native
+  adapters set either `VOICEBOT_TTS_API_KEY` or `DEEPGRAM_API_KEY` /
+  `ELEVENLABS_API_KEY`; `VOICEBOT_TTS_MODEL` defaults to `aura-2-thalia-en`
+  for Deepgram and `eleven_flash_v2_5` for ElevenLabs. ElevenLabs voice ids are
+  configured with `VOICEBOT_TTS_VOICE`.
 - Agent: `openai-responses` for the OpenAI Responses API, or
   `openai-chat-compatible` for chat-completions providers via
   `VOICEBOT_AGENT_OPENAI_BASE_URL`. Provider aliases `azure`, `cerebras`,

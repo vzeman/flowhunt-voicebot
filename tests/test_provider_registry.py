@@ -46,6 +46,8 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertIn("assemblyai", registry.stt_factories)
         self.assertIn("supertonic", registry.tts_factories)
         self.assertIn("openai", registry.tts_factories)
+        self.assertIn("deepgram", registry.tts_factories)
+        self.assertIn("elevenlabs", registry.tts_factories)
 
     def test_registry_tracks_provider_capabilities(self) -> None:
         registry = default_provider_registry()
@@ -108,7 +110,7 @@ class ProviderRegistryTests(unittest.TestCase):
         registry = ProviderRegistry()
 
         with self.assertRaisesRegex(ValueError, "no adapter is registered"):
-            registry.route_tts("workspace-1", "voicebot-1", "elevenlabs")
+            registry.route_tts("workspace-1", "voicebot-1", "piper")
 
 
 if __name__ == "__main__":

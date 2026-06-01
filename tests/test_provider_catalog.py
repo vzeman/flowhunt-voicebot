@@ -30,6 +30,8 @@ class ProviderCatalogTests(unittest.TestCase):
         self.assertIn("deepgram", catalog["stt"]["native"])
         self.assertIn("assemblyai", catalog["stt"]["native"])
         self.assertIn("supertonic", catalog["tts"]["native"])
+        self.assertIn("deepgram", catalog["tts"]["native"])
+        self.assertIn("elevenlabs", catalog["tts"]["native"])
         self.assertIn("openai-responses", catalog["agent"]["native"])
         self.assertTrue(catalog["stt"]["capabilities"]["openai"]["capabilities"]["interruption_support"])
         self.assertEqual(

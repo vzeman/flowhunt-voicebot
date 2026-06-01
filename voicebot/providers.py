@@ -119,6 +119,11 @@ TTS_OPENAI_COMPATIBLE_PROVIDERS = {
     "xai",
 }
 
+TTS_HTTP_PROVIDERS = {
+    "deepgram",
+    "elevenlabs",
+}
+
 AGENT_CHAT_COMPATIBLE_PROVIDERS = {
     "azure",
     "cerebras",

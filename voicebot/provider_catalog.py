@@ -4,6 +4,7 @@ from .providers import (
     AGENT_CHAT_COMPATIBLE_PROVIDERS,
     STT_HTTP_BATCH_PROVIDERS,
     STT_OPENAI_COMPATIBLE_PROVIDERS,
+    TTS_HTTP_PROVIDERS,
     SUPPORTED_AGENT_PROVIDERS,
     SUPPORTED_STT_PROVIDERS,
     SUPPORTED_TTS_PROVIDERS,
@@ -26,7 +27,7 @@ def provider_catalog() -> dict[str, dict[str, list[str]]]:
         },
         "tts": {
             "supported": sorted(SUPPORTED_TTS_PROVIDERS),
-            "native": ["supertonic"],
+            "native": sorted({"supertonic", *TTS_HTTP_PROVIDERS}),
             "openai_compatible": sorted(TTS_OPENAI_COMPATIBLE_PROVIDERS),
             "capabilities": {provider: descriptor.to_dict() for provider, descriptor in sorted(tts_capabilities.items())},
         },
@@ -108,6 +109,31 @@ def _tts_capabilities() -> dict[str, ProviderDescriptor]:
             models=("supertonic-3",),
         )
     }
+    for provider in TTS_HTTP_PROVIDERS:
+        descriptors[provider] = ProviderDescriptor(
+            provider=provider,
+            family="tts",
+            adapter="native",
+            capabilities=ProviderCapabilities(
+                modalities=frozenset({"tts"}),
+                required_credentials=("api_key",),
+                latency_profile="interactive",
+                interruption_support=True,
+                output_audio_format="pcm_f32_8000",
+                usage_metadata=("duration", "model", "voice"),
+            ),
+            models=(
+                ("aura-2-thalia-en", "aura-2-asteria-en", "aura-2-luna-en")
+                if provider == "deepgram"
+                else ("eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_multilingual_v2")
+            ),
+            config={
+                "default_base_url": "https://api.deepgram.com"
+                if provider == "deepgram"
+                else "https://api.elevenlabs.io",
+                "api_key_env": "DEEPGRAM_API_KEY" if provider == "deepgram" else "ELEVENLABS_API_KEY",
+            },
+        )
     for provider in TTS_OPENAI_COMPATIBLE_PROVIDERS:
         descriptors[provider] = ProviderDescriptor(
             provider=provider,

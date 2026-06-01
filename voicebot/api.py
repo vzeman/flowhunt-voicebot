@@ -5775,6 +5775,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     let callId = null;
     let localStream = null;
     let eventSocket = null;
+    let eventPollTimer = null;
     let seenEventIds = new Set();
     let testTarget = {client: "browser-test"};
 
@@ -5957,8 +5958,9 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     }
 
     function logVoicebotEvent(event) {
-      if (seenEventIds.has(event.id)) return;
-      seenEventIds.add(event.id);
+      const eventKey = event.id ?? `${event.call_id || ""}:${event.type || ""}:${event.timestamp || ""}`;
+      if (seenEventIds.has(eventKey)) return;
+      seenEventIds.add(eventKey);
       if (isSubagentEvent(event)) logSubagentEvent(event);
       if (isTranscriptEvent(event)) logTranscriptEvent(event);
       appendEventRows(eventLogNode, event);
@@ -6106,10 +6108,16 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       scrollTableToBottom(subagentLogNode);
     }
 
-    async function backfillVoicebotEvents() {
-      if (!callId) return;
+    function latestSeenEventId() {
+      const ids = Array.from(seenEventIds).filter((value) => Number.isInteger(value));
+      return ids.length ? Math.max(...ids) : 0;
+    }
+
+    async function backfillVoicebotEvents(targetCallId = callId) {
+      if (!targetCallId) return;
       try {
-        const response = await fetch(`/events?call_id=${encodeURIComponent(callId)}&limit=300`);
+        const after = latestSeenEventId();
+        const response = await fetch(`/events?call_id=${encodeURIComponent(targetCallId)}&after=${encodeURIComponent(after)}&limit=1000`);
         if (!response.ok) throw new Error(await response.text());
         const payload = await response.json();
         for (const event of payload.events || []) {
@@ -6118,6 +6126,16 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       } catch (error) {
         log(`event backfill failed: ${error}`);
       }
+    }
+
+    function startEventPolling() {
+      stopEventPolling();
+      eventPollTimer = window.setInterval(() => backfillVoicebotEvents(), 2000);
+    }
+
+    function stopEventPolling() {
+      if (eventPollTimer) window.clearInterval(eventPollTimer);
+      eventPollTimer = null;
     }
 
     function setIdleButtons() {
@@ -6200,6 +6218,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         transcriptLogNode.innerHTML = "";
         subagentLogNode.innerHTML = "";
         connectEventSocket();
+        startEventPolling();
         await backfillVoicebotEvents();
         await pc.setRemoteDescription(payload.answer);
         setActiveButtons();
@@ -6220,6 +6239,9 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       if (eventSocket) eventSocket.close();
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       eventSocket = new WebSocket(`${protocol}//${window.location.host}/ws/events`);
+      eventSocket.onopen = () => {
+        backfillVoicebotEvents();
+      };
       eventSocket.onmessage = (message) => {
         const event = JSON.parse(message.data);
         if (event.call_id !== callId) return;
@@ -6239,9 +6261,9 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     function closeLocalPeer(reason = "") {
       const finishedCallId = callId;
       setIdleButtons();
+      stopEventPolling();
       sessionId = null;
       callId = null;
-      seenEventIds = new Set();
       if (localStream) {
         for (const track of localStream.getTracks()) track.stop();
       }
@@ -6257,7 +6279,10 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         eventSocket = null;
       }
       if (reason) log(reason);
-      if (finishedCallId) loadCallRecording(finishedCallId);
+      if (finishedCallId) {
+        backfillVoicebotEvents(finishedCallId);
+        loadCallRecording(finishedCallId);
+      }
     }
 
     async function stopCall() {

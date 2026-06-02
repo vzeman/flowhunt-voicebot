@@ -319,12 +319,7 @@ class WebRTCCallSession:
         event = self.events.append(
             self.call_id,
             event_type,
-            {
-                "text": text,
-                "response_to_event_id": response.response_to_event_id,
-                "response_kind": response.response_kind,
-                "partial": response.partial,
-            },
+            response.event_data(spoken_text=text),
         )
         startup_response = self._is_startup_response(response.response_to_event_id)
         persistent_response = self._is_persistent_response(response)

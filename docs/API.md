@@ -828,7 +828,11 @@ Request:
   "response_to_event_id": 123,
   "response_kind": "direct_answer",
   "partial": false,
-  "finalize_only": false
+  "finalize_only": false,
+  "chat": {
+    "text": "Hello, how can I help you?",
+    "blocks": []
+  }
 }
 ```
 
@@ -844,6 +848,8 @@ Fields:
 - `finalize_only`: optional boolean. When `true`, no audio is synthesized; the
   task identified by `response_to_event_id` is marked responded and a final
   stream marker is recorded. This is used after all streaming chunks were sent.
+- `chat`: optional visitor-readable chat payload for website/widget sessions.
+  It is persisted on the response event and ignored by voice-only playback.
 
 Response:
 
@@ -856,7 +862,11 @@ Response:
     "timestamp": "2026-05-28T12:00:01.000000Z",
     "data": {
       "text": "Hello, how can I help you?",
-      "response_to_event_id": 123
+      "response_to_event_id": 123,
+      "chat": {
+        "text": "Hello, how can I help you?",
+        "blocks": []
+      }
     }
   }
 }

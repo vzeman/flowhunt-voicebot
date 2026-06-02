@@ -364,7 +364,7 @@ Send an answer:
 ```bash
 curl -X POST http://127.0.0.1:8080/calls/CALL_ID/responses \
   -H 'Content-Type: application/json' \
-  -d '{"text":"Hello, how can I help you?", "response_to_event_id":123}'
+  -d '{"text":"Hello, how can I help you?", "response_to_event_id":123, "chat":{"text":"Hello, how can I help you?","blocks":[]}}'
 ```
 
 Watch events:

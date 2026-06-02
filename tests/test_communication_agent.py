@@ -21,6 +21,7 @@ from communication_agent import (
     progress_ack_text_for_task,
     progress_ack_tool_call,
     recover_missing_colleague_tool_call,
+    run_model_turn,
     run_model_turn_streaming,
     should_send_delayed_acknowledgement,
     should_prepend_colleague_progress_ack,
@@ -89,6 +90,31 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
         self.assertEqual(answer, "ok")
         self.assertEqual(tool_calls, [])
         self.assertEqual(calls, 2)
+
+    def test_model_turn_preserves_chat_payload_from_json_response(self) -> None:
+        def provider(client, model, prompt, timeout, max_output_tokens, tools):
+            return (
+                '{"say":"Short spoken answer.","chat":{"text":"Longer readable answer.",'
+                '"blocks":[{"type":"image","url":"https://example.com/image.png"}]}}',
+                [],
+            )
+
+        registry = AgentProviderRegistry()
+        registry.register("test", provider)
+
+        answer, tool_calls, chat = run_model_turn(
+            object(),
+            registry,
+            self.make_config(),
+            "prompt",
+            [{"id": 42, "call_id": "call-1", "data": {"text": "hello"}}],
+            [],
+        )
+
+        self.assertEqual(answer, "Short spoken answer.")
+        self.assertEqual(tool_calls, [])
+        self.assertEqual(chat["text"], "Longer readable answer.")
+        self.assertEqual(chat["blocks"][0]["type"], "image")
 
     def test_stable_stream_text_splits_on_sentence_or_size(self) -> None:
         ready, pending = split_stable_stream_text("Hello caller. I can help", 90)

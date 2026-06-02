@@ -78,6 +78,13 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
     colleague_progress_message = str(prompt_config.get("colleague_progress_message") or "").strip()
     output_format = {
         "say": "text to speak, if any",
+        "chat": {
+            "text": "optional visitor-readable chat message for website widget sessions",
+            "blocks": [
+                {"type": "link", "label": "optional label", "url": "https://example.com"},
+                {"type": "image", "url": "https://example.com/image.png", "alt": "optional image description"},
+            ],
+        },
         "tool_calls": [
             {"name": "hangup_call", "arguments": {"call_id": "...", "response_to_event_id": 123}},
             {"name": "transfer_call", "arguments": {"call_id": "...", "target": "123", "response_to_event_id": 123}},
@@ -300,17 +307,23 @@ def looks_like_codex_diagnostics(output: str) -> bool:
 
 
 def parse_agent_output(output: str) -> tuple[str, list[dict]]:
+    answer, tool_calls, _chat = parse_agent_output_with_chat(output)
+    return answer, tool_calls
+
+
+def parse_agent_output_with_chat(output: str) -> tuple[str, list[dict], dict | None]:
     try:
         data = json.loads(output)
     except json.JSONDecodeError:
-        return output, []
+        return output, [], None
     if not isinstance(data, dict):
-        return output, []
+        return output, [], None
     tool_calls = data.get("tool_calls", [])
     if not isinstance(tool_calls, list):
         tool_calls = []
     say = data.get("say") or data.get("text") or ""
-    return str(say).strip(), [call for call in tool_calls if isinstance(call, dict)]
+    chat = data.get("chat")
+    return str(say).strip(), [call for call in tool_calls if isinstance(call, dict)], chat if isinstance(chat, dict) else None
 
 
 def execute_tool_call(base_url: str, call: dict) -> dict:
@@ -498,16 +511,19 @@ def mark_prior_say_as_action_ack(calls: list[dict], acknowledgement: dict) -> No
         return
 
 
-def answer_as_say_call(answer: str, latest: dict) -> dict | None:
+def answer_as_say_call(answer: str, latest: dict, chat: dict | None = None) -> dict | None:
     if not answer:
         return None
+    arguments = {
+        "call_id": latest["call_id"],
+        "text": answer,
+        "response_to_event_id": latest["id"],
+    }
+    if chat is not None:
+        arguments["chat"] = chat
     return {
         "name": "say",
-        "arguments": {
-            "call_id": latest["call_id"],
-            "text": answer,
-            "response_to_event_id": latest["id"],
-        },
+        "arguments": arguments,
     }
 
 
@@ -1030,10 +1046,10 @@ def main() -> None:
                 tools = filter_voice_agent_tools(http_json("GET", f"{args.base_url}/agent/tools").get("tools", []))
                 prompt = build_prompt(pending, response.get("context", {}), tools)
                 raw_answer = run_agent_command(args.command, prompt, args.command_timeout)
-                answer, tool_calls = parse_agent_output(raw_answer)
+                answer, tool_calls, chat = parse_agent_output_with_chat(raw_answer)
                 if answer and is_echo_answer(answer, pending):
                     raw_answer = run_agent_command(args.command, build_retry_prompt(prompt, answer), args.command_timeout)
-                    answer, tool_calls = parse_agent_output(raw_answer)
+                    answer, tool_calls, chat = parse_agent_output_with_chat(raw_answer)
                     if answer and is_echo_answer(answer, pending):
                         raise RuntimeError(f"agent returned echo response twice: {answer}")
                 tool_calls = attach_task_context(tool_calls, latest)
@@ -1046,7 +1062,7 @@ def main() -> None:
                 )
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
                 calls_to_execute = []
-                say_call = answer_as_say_call(answer, latest)
+                say_call = answer_as_say_call(answer, latest, chat=chat)
                 if say_call:
                     calls_to_execute.append(say_call)
                 calls_to_execute.extend(tool_calls)

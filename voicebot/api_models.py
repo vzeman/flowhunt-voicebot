@@ -11,6 +11,7 @@ class AgentResponseRequest(BaseModel):
     response_kind: str | None = None
     partial: bool = False
     finalize_only: bool = False
+    chat: dict[str, Any] | None = None
 
 
 class SpeculativeSubagentTaskRequest(BaseModel):

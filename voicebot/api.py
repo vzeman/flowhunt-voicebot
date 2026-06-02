@@ -2873,6 +2873,7 @@ def create_app(
                     response_to_event_id=request.response_to_event_id,
                     response_kind=request.response_kind,
                     partial=request.partial,
+                    chat=request.chat,
                 ),
             )
         except Exception as exc:
@@ -3139,6 +3140,7 @@ def create_app(
             text=text,
             response_to_event_id=args.get("response_to_event_id"),
             response_kind=args.get("response_kind"),
+            chat=args.get("chat") if isinstance(args.get("chat"), dict) else None,
         )
         return await submit_response(call_id, response)
 

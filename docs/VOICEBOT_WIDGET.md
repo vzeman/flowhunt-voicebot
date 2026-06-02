@@ -54,6 +54,11 @@ For a direct link or iframe-style integration, use:
 The widget never receives internal API keys, prompts, provider config, task
 queues, event logs, diagnostics, or dashboard APIs.
 
+The internal dashboard WebRTC test console includes a `Widget Chat Preview` tab
+for administrator testing. It reads caller transcript events and voicebot chat
+payloads from the same event stream shape planned for the public widget, so
+admins can verify voice plus parallel readable chat before publishing an embed.
+
 ## Route Configuration
 
 Widget display settings are read from the public route metadata:

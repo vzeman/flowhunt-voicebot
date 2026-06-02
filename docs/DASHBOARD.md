@@ -67,7 +67,9 @@ workspace admin APIs or FlowHunt control plane instead of relying on this seed.
   playback when a recording artifact exists.
 - Embedded WebRTC voicebot test console. The dashboard-level test selector
   chooses workspace and voicebot, and that target is passed into the WebRTC
-  session metadata. There is no standalone `/webrtc/test` route.
+  session metadata. The console includes a widget chat preview tab that renders
+  caller transcripts and voicebot chat payloads from the same event stream the
+  public widget will use. There is no standalone `/webrtc/test` route.
 
 ## Management Model
 

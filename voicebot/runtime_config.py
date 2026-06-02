@@ -12,6 +12,28 @@ def utc_now_iso() -> str:
 
 
 @dataclass(frozen=True)
+class VoicebotChatPromptConfig:
+    mode: str = "disabled"
+    system_prompt: str = ""
+    response_prompt: str = (
+        "When chat is enabled, provide a visitor-readable message that may include more detail than the spoken answer."
+    )
+    rich_content_prompt: str = ""
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"disabled", "mirror_voice", "expanded_chat", "chat_only_when_useful"}:
+            raise ValueError("chat prompt mode must be disabled, mirror_voice, expanded_chat, or chat_only_when_useful")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "system_prompt": self.system_prompt,
+            "response_prompt": self.response_prompt,
+            "rich_content_prompt": self.rich_content_prompt,
+        }
+
+
+@dataclass(frozen=True)
 class VoicebotPromptConfig:
     greeting: str = "Hello, how can I help you?"
     filler_message: str = "Give me a moment."
@@ -21,12 +43,15 @@ class VoicebotPromptConfig:
     system_prompt: str = ""
     stt_prompt: str = ""
     language: str = "en"
+    chat: VoicebotChatPromptConfig = field(default_factory=VoicebotChatPromptConfig)
 
     def __post_init__(self) -> None:
         if not self.greeting.strip():
             raise ValueError("greeting prompt is required")
         if not self.language.strip():
             raise ValueError("language is required")
+        if not isinstance(self.chat, VoicebotChatPromptConfig):
+            raise ValueError("chat prompts must be VoicebotChatPromptConfig")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -36,6 +61,7 @@ class VoicebotPromptConfig:
             "system_prompt": self.system_prompt,
             "stt_prompt": self.stt_prompt,
             "language": self.language,
+            "chat": self.chat.as_dict(),
         }
 
 
@@ -82,6 +108,32 @@ class VoicebotRealtimeConfig:
             "echo_tail_ms": self.echo_tail_ms,
             "max_reply_chars": self.max_reply_chars,
             "tts_chunk_chars": self.tts_chunk_chars,
+        }
+
+
+@dataclass(frozen=True)
+class VoicebotChannelConfig:
+    voice_enabled: bool = True
+    chat_enabled: bool = False
+    chat_input_enabled: bool = False
+    transcript_visible: bool = False
+    rich_content_enabled: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.voice_enabled and not self.chat_enabled:
+            raise ValueError("at least one voicebot channel must be enabled")
+        if self.chat_input_enabled and not self.chat_enabled:
+            raise ValueError("chat_input_enabled requires chat_enabled")
+        if self.rich_content_enabled and not self.chat_enabled:
+            raise ValueError("rich_content_enabled requires chat_enabled")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "voice_enabled": self.voice_enabled,
+            "chat_enabled": self.chat_enabled,
+            "chat_input_enabled": self.chat_input_enabled,
+            "transcript_visible": self.transcript_visible,
+            "rich_content_enabled": self.rich_content_enabled,
         }
 
 
@@ -166,6 +218,7 @@ class VoicebotRuntimeConfig:
     providers: VoicebotProviderConfig
     prompts: VoicebotPromptConfig = field(default_factory=VoicebotPromptConfig)
     realtime: VoicebotRealtimeConfig = field(default_factory=VoicebotRealtimeConfig)
+    channels: VoicebotChannelConfig = field(default_factory=VoicebotChannelConfig)
     quotas: VoicebotQuotaConfig = field(default_factory=VoicebotQuotaConfig)
     subagents: VoicebotSubagentConfig = field(default_factory=VoicebotSubagentConfig)
     enabled: bool = True
@@ -199,6 +252,7 @@ class VoicebotRuntimeConfig:
             "selection_plan": selection_plan_to_dict(provider_selection_plan(self.providers)),
             "prompts": self.prompts.as_dict(),
             "realtime": self.realtime.as_dict(),
+            "channels": self.channels.as_dict(),
             "quotas": self.quotas.as_dict(),
             "subagents": self.subagents.as_dict(),
         }

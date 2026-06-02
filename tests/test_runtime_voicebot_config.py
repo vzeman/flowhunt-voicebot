@@ -11,6 +11,8 @@ from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.provider_config import ProviderChoice, SecretReference, VoicebotProviderConfig
 from voicebot.runtime_config import (
+    VoicebotChannelConfig,
+    VoicebotChatPromptConfig,
     VoicebotPromptConfigStore,
     VoicebotPromptConfig,
     VoicebotQuotaConfig,
@@ -71,8 +73,9 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
             voicebot_id="voicebot-1",
             config_version=1,
             providers=self.provider_config(),
-            prompts=VoicebotPromptConfig(language="en"),
+            prompts=VoicebotPromptConfig(language="en", chat=VoicebotChatPromptConfig(mode="mirror_voice")),
             realtime=VoicebotRealtimeConfig(tts_chunk_chars=80),
+            channels=VoicebotChannelConfig(chat_enabled=True, transcript_visible=True),
             quotas=VoicebotQuotaConfig(max_concurrent_sessions=2),
         )
 
@@ -111,8 +114,21 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
                     "system_prompt": "Be concise.",
                     "stt_prompt": "LiveAgent FlowHunt",
                     "language": "en",
+                    "chat": {
+                        "mode": "expanded_chat",
+                        "system_prompt": "Write helpful chat messages.",
+                        "response_prompt": "Give more detail in chat than voice.",
+                        "rich_content_prompt": "Use cards only when useful.",
+                    },
                 },
                 "realtime": {"silence_ms": 420, "tts_chunk_chars": 75},
+                "channels": {
+                    "voice_enabled": True,
+                    "chat_enabled": True,
+                    "chat_input_enabled": False,
+                    "transcript_visible": True,
+                    "rich_content_enabled": True,
+                },
                 "quotas": {"max_concurrent_sessions": 3, "enabled_actions": ["say", "hangup_call"]},
                 "subagents": {
                     "complex_backend": "flow",
@@ -134,6 +150,9 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["config"]["config_version"], 1)
         self.assertEqual(payload["config"]["prompts"]["greeting"], "Say hello.")
+        self.assertEqual(payload["config"]["prompts"]["chat"]["mode"], "expanded_chat")
+        self.assertEqual(payload["config"]["channels"]["chat_enabled"], True)
+        self.assertEqual(payload["config"]["channels"]["rich_content_enabled"], True)
         self.assertEqual(payload["config"]["prompts"]["colleague_progress_message"], "I asked a specialist.")
         self.assertEqual(
             payload["config"]["subagents"]["prompts"]["flowhunt_flow"]["result_prompt"],
@@ -182,11 +201,18 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
                 "system_prompt": "Use concise Slovak.",
                 "stt_prompt": "LiveAgent FlowHunt",
                 "language": "sk",
+                "chat": {
+                    "mode": "mirror_voice",
+                    "system_prompt": "Mirror spoken Slovak in chat.",
+                    "response_prompt": "Show the spoken answer as text.",
+                    "rich_content_prompt": "",
+                },
             },
         )
 
         self.assertEqual(put_response.status_code, 200)
         self.assertEqual(put_response.json()["prompts"]["language"], "sk")
+        self.assertEqual(put_response.json()["prompts"]["chat"]["mode"], "mirror_voice")
         self.assertEqual(put_response.json()["prompts"]["filler_message"], "Chvíľku strpenia.")
         self.assertEqual(
             put_response.json()["prompts"]["colleague_progress_message"],
@@ -199,6 +225,12 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
                 "system_prompt": "Use friendly Slovak.",
                 "filler_message": "Hneď to overím.",
                 "colleague_progress_message": "Kolega to preveruje.",
+                "chat": {
+                    "mode": "expanded_chat",
+                    "response_prompt": "Add readable detail in chat.",
+                    "system_prompt": "Keep Slovak chat concise.",
+                    "rich_content_prompt": "No rich content yet.",
+                },
             },
         )
 
@@ -207,6 +239,20 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
         self.assertEqual(patch_response.json()["prompts"]["filler_message"], "Hneď to overím.")
         self.assertEqual(patch_response.json()["prompts"]["colleague_progress_message"], "Kolega to preveruje.")
         self.assertEqual(patch_response.json()["prompts"]["system_prompt"], "Use friendly Slovak.")
+        self.assertEqual(patch_response.json()["prompts"]["chat"]["mode"], "expanded_chat")
+        self.assertEqual(patch_response.json()["prompts"]["chat"]["response_prompt"], "Add readable detail in chat.")
+
+        partial_chat_patch = client.patch(
+            "/workspaces/workspace-1/voicebots/voicebot-1/prompts",
+            json={"chat": {"response_prompt": "Keep the existing mode but change detail."}},
+        )
+
+        self.assertEqual(partial_chat_patch.status_code, 200)
+        self.assertEqual(partial_chat_patch.json()["prompts"]["chat"]["mode"], "expanded_chat")
+        self.assertEqual(
+            partial_chat_patch.json()["prompts"]["chat"]["response_prompt"],
+            "Keep the existing mode but change detail.",
+        )
         get_response = client.get("/workspaces/workspace-1/voicebots/voicebot-1/prompts")
         self.assertEqual(get_response.json()["source"], "prompt_override")
         self.assertEqual(events.list_events(call_id="system")[-1].type, "voicebot_prompts_updated")

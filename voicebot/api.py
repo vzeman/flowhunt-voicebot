@@ -146,6 +146,8 @@ from .sip_trunks import SipTrunk, SipTrunkStore
 from .storage_contracts import storage_contracts_payload
 from .runtime_storage import storage_drivers_payload
 from .runtime_config import (
+    VoicebotChannelConfig,
+    VoicebotChatPromptConfig,
     VoicebotPromptConfig,
     VoicebotQuotaConfig,
     VoicebotRealtimeConfig,
@@ -407,6 +409,11 @@ def create_app(
             stt_prompt=runtime_settings.stt_prompt,
             language=runtime_settings.language or "auto",
         )
+
+    def prompt_config_from_request(data: Any) -> VoicebotPromptConfig:
+        payload = data.model_dump()
+        chat_payload = payload.pop("chat", {}) or {}
+        return VoicebotPromptConfig(**payload, chat=VoicebotChatPromptConfig(**chat_payload))
 
     def default_subagent_config() -> VoicebotSubagentConfig:
         return VoicebotSubagentConfig(
@@ -1319,15 +1326,9 @@ def create_app(
                 voicebot_id=voicebot_id,
                 config_version=1,
                 providers=providers,
-                prompts=VoicebotPromptConfig(
-                    greeting=request.prompts.greeting,
-                    filler_message=request.prompts.filler_message,
-                    colleague_progress_message=request.prompts.colleague_progress_message,
-                    system_prompt=request.prompts.system_prompt,
-                    stt_prompt=request.prompts.stt_prompt,
-                    language=request.prompts.language,
-                ),
+                prompts=prompt_config_from_request(request.prompts),
                 realtime=VoicebotRealtimeConfig(**request.realtime.model_dump()),
+                channels=VoicebotChannelConfig(**request.channels.model_dump()),
                 quotas=VoicebotQuotaConfig(
                     max_concurrent_sessions=request.quotas.max_concurrent_sessions,
                     max_provider_inflight=request.quotas.max_provider_inflight,
@@ -1401,14 +1402,7 @@ def create_app(
             prompts = prompt_config_store.save(
                 workspace_id,
                 voicebot_id,
-                VoicebotPromptConfig(
-                    greeting=request.greeting,
-                    filler_message=request.filler_message,
-                    colleague_progress_message=request.colleague_progress_message,
-                    system_prompt=request.system_prompt,
-                    stt_prompt=request.stt_prompt,
-                    language=request.language,
-                ),
+                prompt_config_from_request(request),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
@@ -1453,9 +1447,16 @@ def create_app(
         current = effective_prompt_config(workspace_id, voicebot_id)
         payload = current.as_dict()
         updates = request.model_dump(exclude_none=True)
+        if isinstance(updates.get("chat"), dict):
+            payload["chat"] = {**payload.get("chat", {}), **updates.pop("chat")}
         payload.update(updates)
         try:
-            prompts = prompt_config_store.save(workspace_id, voicebot_id, VoicebotPromptConfig(**payload))
+            chat_payload = payload.pop("chat", {}) or {}
+            prompts = prompt_config_store.save(
+                workspace_id,
+                voicebot_id,
+                VoicebotPromptConfig(**payload, chat=VoicebotChatPromptConfig(**chat_payload)),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         event = events.append(
@@ -4545,6 +4546,10 @@ DASHBOARD_PAGE = """<!doctype html>
                 <label class="full">colleague_progress_message<textarea id="prompt-colleague-progress"></textarea></label>
                 <label class="full">system_prompt<textarea id="prompt-system"></textarea></label>
                 <label class="full">stt_prompt<textarea id="prompt-stt"></textarea></label>
+                <label>chat_mode<select id="prompt-chat-mode"><option value="disabled">disabled</option><option value="mirror_voice">mirror_voice</option><option value="expanded_chat">expanded_chat</option><option value="chat_only_when_useful">chat_only_when_useful</option></select></label>
+                <label class="full">chat_system_prompt<textarea id="prompt-chat-system"></textarea></label>
+                <label class="full">chat_response_prompt<textarea id="prompt-chat-response"></textarea></label>
+                <label class="full">chat_rich_content_prompt<textarea id="prompt-chat-rich-content"></textarea></label>
                 <label class="full">subagent_prompts_json<textarea id="prompt-subagent-prompts"></textarea></label>
               </div>
               <div class="toolbar"><button id="save-prompts" type="button">Save prompts</button><span class="muted" id="save-prompts-status"></span></div>
@@ -4591,6 +4596,7 @@ DASHBOARD_PAGE = """<!doctype html>
               <div class="form-grid">
                 <label>enabled<select id="runtime-enabled"><option value="true">true</option><option value="false">false</option></select></label>
                 <label class="full">realtime_json<textarea id="runtime-realtime"></textarea></label>
+                <label class="full">channels_json<textarea id="runtime-channels"></textarea></label>
                 <label class="full">quotas_json<textarea id="runtime-quotas"></textarea></label>
                 <label class="full">subagents_json<textarea id="runtime-subagents"></textarea></label>
               </div>
@@ -4835,6 +4841,10 @@ DASHBOARD_PAGE = """<!doctype html>
       document.getElementById("prompt-colleague-progress").value = prompts.colleague_progress_message || "";
       document.getElementById("prompt-system").value = prompts.system_prompt || "";
       document.getElementById("prompt-stt").value = prompts.stt_prompt || "";
+      document.getElementById("prompt-chat-mode").value = prompts.chat?.mode || "disabled";
+      document.getElementById("prompt-chat-system").value = prompts.chat?.system_prompt || "";
+      document.getElementById("prompt-chat-response").value = prompts.chat?.response_prompt || "";
+      document.getElementById("prompt-chat-rich-content").value = prompts.chat?.rich_content_prompt || "";
     }
 
     async function loadProviderConfig() {
@@ -4897,6 +4907,13 @@ DASHBOARD_PAGE = """<!doctype html>
           max_reply_chars: 240,
           tts_chunk_chars: 90,
         },
+        channels: {
+          voice_enabled: true,
+          chat_enabled: false,
+          chat_input_enabled: false,
+          transcript_visible: false,
+          rich_content_enabled: false,
+        },
         quotas: {
           max_concurrent_sessions: 1,
           max_provider_inflight: 10,
@@ -4944,6 +4961,7 @@ DASHBOARD_PAGE = """<!doctype html>
     function renderRuntimeEditor(config) {
       setValue("runtime-enabled", String(config.enabled !== false));
       setValue("runtime-realtime", JSON.stringify(config.realtime || {}, null, 2));
+      setValue("runtime-channels", JSON.stringify(config.channels || defaultRuntimeConfig().channels, null, 2));
       setValue("runtime-quotas", JSON.stringify(config.quotas || {}, null, 2));
       setValue("runtime-subagents", JSON.stringify(config.subagents || {}, null, 2));
       if (config.subagents?.prompts) setValue("prompt-subagent-prompts", JSON.stringify(config.subagents.prompts, null, 2));
@@ -4993,7 +5011,13 @@ DASHBOARD_PAGE = """<!doctype html>
         filler_message: document.getElementById("prompt-filler").value,
         colleague_progress_message: document.getElementById("prompt-colleague-progress").value,
         system_prompt: document.getElementById("prompt-system").value,
-        stt_prompt: document.getElementById("prompt-stt").value
+        stt_prompt: document.getElementById("prompt-stt").value,
+        chat: {
+          mode: document.getElementById("prompt-chat-mode").value,
+          system_prompt: document.getElementById("prompt-chat-system").value,
+          response_prompt: document.getElementById("prompt-chat-response").value,
+          rich_content_prompt: document.getElementById("prompt-chat-rich-content").value,
+        }
       };
       await fetchJson(`/workspaces/${encodeURIComponent(selectedWorkspaceId)}/voicebots/${encodeURIComponent(selectedVoicebotId)}/prompts`, {
         method: "PUT",
@@ -5012,6 +5036,7 @@ DASHBOARD_PAGE = """<!doctype html>
           providers: currentRuntimeConfig.providers,
           prompts: {...(currentRuntimeConfig.prompts || {}), ...payload},
           realtime: currentRuntimeConfig.realtime || {},
+          channels: currentRuntimeConfig.channels || defaultRuntimeConfig().channels,
           quotas: currentRuntimeConfig.quotas || {},
           subagents: {
             ...(currentRuntimeConfig.subagents || {}),
@@ -5067,9 +5092,11 @@ DASHBOARD_PAGE = """<!doctype html>
       let realtime;
       let quotas;
       let subagents;
+      let channels;
       try {
         providers = options.providers || buildProviderPayloadFromEditor();
         realtime = parseJsonField("runtime-realtime", "realtime_json");
+        channels = parseJsonField("runtime-channels", "channels_json");
         quotas = parseJsonField("runtime-quotas", "quotas_json");
         subagents = parseJsonField("runtime-subagents", "subagents_json");
       } catch (error) {
@@ -5080,6 +5107,7 @@ DASHBOARD_PAGE = """<!doctype html>
         providers,
         prompts: currentPromptPayload(),
         realtime,
+        channels,
         quotas,
         subagents,
         enabled: document.getElementById("runtime-enabled").value === "true",
@@ -5140,6 +5168,12 @@ DASHBOARD_PAGE = """<!doctype html>
         colleague_progress_message: document.getElementById("prompt-colleague-progress").value,
         system_prompt: document.getElementById("prompt-system").value,
         stt_prompt: document.getElementById("prompt-stt").value,
+        chat: {
+          mode: document.getElementById("prompt-chat-mode").value,
+          system_prompt: document.getElementById("prompt-chat-system").value,
+          response_prompt: document.getElementById("prompt-chat-response").value,
+          rich_content_prompt: document.getElementById("prompt-chat-rich-content").value,
+        },
       };
     }
 

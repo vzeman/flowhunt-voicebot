@@ -570,7 +570,13 @@ Response:
     "colleague_progress_message": "Pýtam sa kolegu a hneď vám poviem výsledok.",
     "system_prompt": "Use concise Slovak.",
     "stt_prompt": "LiveAgent FlowHunt",
-    "language": "sk"
+    "language": "sk",
+    "chat": {
+      "mode": "expanded_chat",
+      "system_prompt": "Write concise readable Slovak chat messages.",
+      "response_prompt": "Give the website visitor more detail in chat than the spoken answer.",
+      "rich_content_prompt": "Use links or images only when they help the visitor."
+    }
   }
 }
 ```
@@ -584,7 +590,7 @@ send every field when replacing the config.
 
 Updates only the supplied prompt fields. Supported fields are `greeting`,
 `filler_message`, `colleague_progress_message`, `system_prompt`, `stt_prompt`,
-and `language`.
+`language`, and `chat`.
 
 `filler_message` is the short progress phrase spoken while the communication
 agent is still preparing an answer. `colleague_progress_message` is the phrase
@@ -594,6 +600,29 @@ the dashboard. The dashboard voicebot detail also exposes
 `subagent_prompts_json`, which edits runtime `subagents.prompts` hooks such as
 `before_call_prompt`, `after_call_prompt`, and `result_prompt` for configured
 subagent providers.
+
+`chat` configures optional parallel website-widget chat output. Supported
+`chat.mode` values are `disabled`, `mirror_voice`, `expanded_chat`, and
+`chat_only_when_useful`. These prompt fields define desired agent behavior only;
+the runtime emits chat output later only when the active session/channel also
+has chat enabled.
+
+Versioned runtime config also includes `channels`:
+
+```json
+{
+  "channels": {
+    "voice_enabled": true,
+    "chat_enabled": true,
+    "chat_input_enabled": false,
+    "transcript_visible": true,
+    "rich_content_enabled": true
+  }
+}
+```
+
+At least one of `voice_enabled` or `chat_enabled` must be true.
+`chat_input_enabled` and `rich_content_enabled` require `chat_enabled`.
 
 Use `language: "auto"` for multilingual voicebots. In that mode the default STT
 adapter does not force a language hint, and the communication agent is

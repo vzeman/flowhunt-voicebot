@@ -66,6 +66,22 @@ Widget display settings are read from the public route metadata:
 - `show_captions`
 - `recording_visible_to_visitor`
 
+Voice/chat capability is controlled by the voicebot runtime config rather than
+by the browser script. The `channels` section defines whether the bot supports
+voice, parallel chat output, typed chat input, visitor-visible transcripts, and
+rich chat content. The `prompts.chat` section defines how the communication
+agent should behave when chat is enabled:
+
+- `disabled`: do not generate chat messages.
+- `mirror_voice`: show the spoken answer as text.
+- `expanded_chat`: keep voice concise and put extra detail in chat.
+- `chat_only_when_useful`: send chat messages only for useful supplements such
+  as links, images, summaries, or cards.
+
+Public widget sessions must treat chat as optional. Voice-only sessions should
+continue without chat events, while voice+chat sessions should render the same
+chat schema that the internal WebRTC test preview uses.
+
 Allowed origins are configured on the public route. If `allowed_origins` is
 non-empty, browser session creation must include a matching `Origin` header.
 The public runtime also answers CORS preflight requests for allowed origins so

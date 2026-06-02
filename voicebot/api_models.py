@@ -218,6 +218,22 @@ class VoicebotProviderConfigRequest(BaseModel):
     agent: ProviderChoiceRequest
 
 
+class VoicebotChatPromptConfigRequest(BaseModel):
+    mode: str = "disabled"
+    system_prompt: str = ""
+    response_prompt: str = (
+        "When chat is enabled, provide a visitor-readable message that may include more detail than the spoken answer."
+    )
+    rich_content_prompt: str = ""
+
+
+class VoicebotChatPromptConfigPatchRequest(BaseModel):
+    mode: str | None = None
+    system_prompt: str | None = None
+    response_prompt: str | None = None
+    rich_content_prompt: str | None = None
+
+
 class VoicebotPromptConfigRequest(BaseModel):
     greeting: str = "Hello, how can I help you?"
     filler_message: str = "Give me a moment."
@@ -227,6 +243,7 @@ class VoicebotPromptConfigRequest(BaseModel):
     system_prompt: str = ""
     stt_prompt: str = ""
     language: str = "en"
+    chat: VoicebotChatPromptConfigRequest = Field(default_factory=VoicebotChatPromptConfigRequest)
 
 
 class VoicebotPromptConfigPatchRequest(BaseModel):
@@ -236,6 +253,7 @@ class VoicebotPromptConfigPatchRequest(BaseModel):
     system_prompt: str | None = None
     stt_prompt: str | None = None
     language: str | None = None
+    chat: VoicebotChatPromptConfigPatchRequest | None = None
 
 
 class VoicebotRealtimeConfigRequest(BaseModel):
@@ -249,6 +267,14 @@ class VoicebotRealtimeConfigRequest(BaseModel):
     echo_tail_ms: int = 300
     max_reply_chars: int = 240
     tts_chunk_chars: int = 90
+
+
+class VoicebotChannelConfigRequest(BaseModel):
+    voice_enabled: bool = True
+    chat_enabled: bool = False
+    chat_input_enabled: bool = False
+    transcript_visible: bool = False
+    rich_content_enabled: bool = False
 
 
 class VoicebotQuotaConfigRequest(BaseModel):
@@ -277,6 +303,7 @@ class VoicebotRuntimeConfigRequest(BaseModel):
     providers: VoicebotProviderConfigRequest
     prompts: VoicebotPromptConfigRequest = Field(default_factory=VoicebotPromptConfigRequest)
     realtime: VoicebotRealtimeConfigRequest = Field(default_factory=VoicebotRealtimeConfigRequest)
+    channels: VoicebotChannelConfigRequest = Field(default_factory=VoicebotChannelConfigRequest)
     quotas: VoicebotQuotaConfigRequest = Field(default_factory=VoicebotQuotaConfigRequest)
     subagents: VoicebotSubagentConfigRequest = Field(default_factory=VoicebotSubagentConfigRequest)
     enabled: bool = True

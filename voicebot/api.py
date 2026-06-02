@@ -6045,6 +6045,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       <button type="button" class="active" data-test-tab="client">Client Log</button>
       <button type="button" data-test-tab="events">Voicebot Events</button>
       <button type="button" data-test-tab="transcript">Call Transcript</button>
+      <button type="button" data-test-tab="chat">Widget Chat Preview</button>
       <button type="button" data-test-tab="subagents">Subagent Communication</button>
     </div>
     <section id="test-tab-client" class="log-panel test-tab-panel active">
@@ -6095,6 +6096,18 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         </table>
       </div>
     </section>
+    <section id="test-tab-chat" class="log-panel test-tab-panel">
+      <h2>Widget Chat Preview</h2>
+      <div class="table-filter"><input data-table-filter="chat-log" placeholder="Filter widget chat preview"></div>
+      <div class="table-wrap">
+        <table aria-label="Widget chat preview">
+          <thead>
+            <tr><th class="time-col">Time</th><th class="type-col">Sender</th></tr>
+          </thead>
+          <tbody id="chat-log"></tbody>
+        </table>
+      </div>
+    </section>
   </div>
   <script>
     const startButton = document.getElementById("start");
@@ -6106,6 +6119,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     const eventLogNode = document.getElementById("event-log");
     const transcriptLogNode = document.getElementById("transcript-log");
     const subagentLogNode = document.getElementById("subagent-log");
+    const chatLogNode = document.getElementById("chat-log");
     let pc = null;
     let sessionId = null;
     let callId = null;
@@ -6134,7 +6148,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     });
 
     function showTestTab(name) {
-      const selected = ["client", "events", "transcript", "subagents"].includes(name) ? name : "client";
+      const selected = ["client", "events", "transcript", "chat", "subagents"].includes(name) ? name : "client";
       document.querySelectorAll("[data-test-tab]").forEach((button) => {
         button.classList.toggle("active", button.dataset.testTab === selected);
       });
@@ -6299,6 +6313,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       seenEventIds.add(eventKey);
       if (isSubagentEvent(event)) logSubagentEvent(event);
       if (isTranscriptEvent(event)) logTranscriptEvent(event);
+      if (isChatPreviewEvent(event)) logChatPreviewEvent(event);
       appendEventRows(eventLogNode, event);
       applyTableFilter("event-log");
       trimRows(eventLogNode);
@@ -6326,6 +6341,36 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       scrollTableToBottom(transcriptLogNode);
     }
 
+    function isChatPreviewEvent(event) {
+      const kind = String(event.data?.response_kind || "");
+      if (event.type === "user_transcript" && event.data?.text) return true;
+      if (event.type === "agent_response_received" && kind !== "stream_chunk") {
+        return Boolean(chatTextForEvent(event));
+      }
+      return false;
+    }
+
+    function logChatPreviewEvent(event) {
+      const isCaller = event.type === "user_transcript";
+      const sender = isCaller ? "Visitor" : "Voicebot chat";
+      const kind = isCaller ? "caller" : "voicebot";
+      const text = isCaller ? event.data?.text || "" : chatTextForEvent(event);
+      appendTranscriptRows(chatLogNode, event.timestamp, sender, kind, text);
+      const blocks = !isCaller && Array.isArray(event.data?.chat?.blocks) ? event.data.chat.blocks : [];
+      if (blocks.length) appendJsonDetailRow(chatLogNode, blocks, 2);
+      applyTableFilter("chat-log");
+      trimRows(chatLogNode);
+      scrollTableToBottom(chatLogNode);
+    }
+
+    function chatTextForEvent(event) {
+      const chat = event.data?.chat;
+      if (chat && typeof chat === "object" && typeof chat.text === "string" && chat.text.trim()) {
+        return chat.text;
+      }
+      return String(event.data?.text || "");
+    }
+
     function appendTranscriptRows(tableBody, timestamp, speaker, kind, text) {
       const row = tableBody.insertRow();
       row.className = "summary-row";
@@ -6337,6 +6382,16 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       type.title = speaker;
       typeCell.appendChild(type);
       appendDetailTextRow(tableBody, text, 2, "summary-detail-cell");
+    }
+
+    function appendJsonDetailRow(tableBody, value, colSpan) {
+      const detailRow = tableBody.insertRow();
+      detailRow.className = "detail-row";
+      const detailCell = document.createElement("td");
+      detailCell.className = "json-cell";
+      detailCell.colSpan = colSpan;
+      detailCell.appendChild(renderJson(value));
+      detailRow.appendChild(detailCell);
     }
 
     function appendEventRows(tableBody, event) {
@@ -6557,6 +6612,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         eventLogNode.innerHTML = "";
         transcriptLogNode.innerHTML = "";
         subagentLogNode.innerHTML = "";
+        chatLogNode.innerHTML = "";
         connectEventSocket();
         startEventPolling();
         await backfillVoicebotEvents();

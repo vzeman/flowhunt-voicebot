@@ -39,4 +39,14 @@ jobs:
         run: '! rg -n "PIPECAT|Pipecat|pipecat" voicebot agents tests'
 
       - name: Check committed secrets
-        run: '! rg -n "sk[-]proj[-][A-Za-z0-9_-]+|[A-Za-z0-9]{32,}" --glob "!.env" --glob "!*.pyc" .'
+        run: |
+          SECRET_PATTERN="sk[-]proj[-][A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|(?i:(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][A-Za-z0-9_./+=-]{20,}['\"])"
+          if rg -n "$SECRET_PATTERN" \
+            --glob "!.env" \
+            --glob "!*.pyc" \
+            --glob "!__pycache__/**" \
+            --glob "!.git/**" \
+            . \
+            | rg -v "your-[A-Za-z0-9_-]+-here|REPLACE_WITH_[A-Z0-9_]+"; then
+            exit 1
+          fi

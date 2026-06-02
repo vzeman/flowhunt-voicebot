@@ -81,11 +81,7 @@ class RecordingResponseSession:
         return self.events.append(
             self.call_id,
             "agent_response_partial" if response.partial else "agent_response_received",
-            {
-                "text": response.text,
-                "response_to_event_id": response.response_to_event_id,
-                "partial": response.partial,
-            },
+            response.event_data(),
         )
 
 
@@ -265,6 +261,30 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertTrue(session.responses[0].partial)
         persisted = events.list_events(call_id="call-1")
         self.assertEqual(persisted[-1].data["stream_finalized"], True)
+
+    def test_agent_response_accepts_optional_chat_payload(self) -> None:
+        registry = CallRegistry()
+        client, events, _tracker = self.build_client(registry=registry)
+        session = RecordingResponseSession("call-1", events)
+        registry.add(session)
+
+        response = client.post(
+            "/calls/call-1/responses",
+            json={
+                "text": "Short spoken answer.",
+                "response_to_event_id": 42,
+                "chat": {
+                    "text": "Longer readable answer.",
+                    "blocks": [{"type": "link", "label": "Details", "url": "https://example.com"}],
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(session.responses[0].chat["text"], "Longer readable answer.")
+        persisted = events.list_events(call_id="call-1")
+        self.assertEqual(persisted[-1].data["text"], "Short spoken answer.")
+        self.assertEqual(persisted[-1].data["chat"]["blocks"][0]["type"], "link")
 
     def test_call_control_records_failure_when_transfer_target_is_missing(self) -> None:
         client, events, tracker = self.build_client(asterisk=FakeAsterisk())

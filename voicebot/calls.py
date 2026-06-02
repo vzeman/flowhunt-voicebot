@@ -51,6 +51,18 @@ class AgentResponse:
     response_to_event_id: int | None = None
     response_kind: str | None = None
     partial: bool = False
+    chat: dict[str, object] | None = None
+
+    def event_data(self, spoken_text: str | None = None) -> dict[str, object]:
+        data: dict[str, object] = {
+            "text": spoken_text if spoken_text is not None else self.text,
+            "response_to_event_id": self.response_to_event_id,
+            "response_kind": self.response_kind,
+            "partial": self.partial,
+        }
+        if self.chat is not None:
+            data["chat"] = self.chat
+        return data
 
 
 DEFAULT_STT_PIPELINE = (ProcessorSpec("stt"), ProcessorSpec("agent-request"))
@@ -271,12 +283,7 @@ class CallSession:
         event = self.events.append(
             self.call_id,
             event_type,
-            {
-                "text": text,
-                "response_to_event_id": response.response_to_event_id,
-                "response_kind": response.response_kind,
-                "partial": response.partial,
-            },
+            response.event_data(spoken_text=text),
         )
         startup_response = self._is_startup_response(response.response_to_event_id)
         persistent_response = self._is_persistent_response(response)

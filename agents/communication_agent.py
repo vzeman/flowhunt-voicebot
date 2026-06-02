@@ -27,6 +27,7 @@ from local_command_agent import (
     is_echo_answer,
     needs_spoken_followup,
     parse_agent_output,
+    parse_agent_output_with_chat,
     remove_colleague_reentrant_tool_calls,
     release_tasks,
 )
@@ -98,6 +99,7 @@ def run_communication_agent(
                 delayed_ack = DelayedProgressAcknowledgement(config.base_url, latest)
                 delayed_ack.start()
                 streamed_response = False
+                chat = None
                 try:
                     if config.streaming_enabled:
                         answer, tool_calls, streamed_response = run_model_turn_streaming(
@@ -110,10 +112,11 @@ def run_communication_agent(
                             latest,
                         )
                     else:
-                        answer, tool_calls = run_model_turn(client, providers, config, prompt, pending, native_tools)
+                        answer, tool_calls, chat = run_model_turn(client, providers, config, prompt, pending, native_tools)
                 except Exception as exc:
                     answer = provider_failure_answer(exc)
                     tool_calls = []
+                    chat = None
                     print(f"provider turn failed for event {latest['id']}: {exc}", flush=True)
                 finally:
                     delayed_ack.stop()
@@ -143,7 +146,7 @@ def run_communication_agent(
                     tool_calls = suppress_colleague_tool_progress(tool_calls)
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
                 tool_calls = ensure_action_acknowledgements(tool_calls)
-                initial_say = None if streamed_response else answer_as_say_call(answer, latest)
+                initial_say = None if streamed_response else answer_as_say_call(answer, latest, chat=chat)
                 if should_prepend_colleague_progress_ack(
                     latest,
                     tool_calls,
@@ -174,13 +177,14 @@ def run_communication_agent(
                             follow_up_prompt,
                             None,
                         )
-                        answer, _parsed_tool_calls = parse_agent_output(raw_answer)
+                        answer, _parsed_tool_calls, chat = parse_agent_output_with_chat(raw_answer)
                     except Exception as exc:
                         answer = provider_failure_answer(exc)
+                        chat = None
                         print(f"provider follow-up failed for event {latest['id']}: {exc}", flush=True)
                 if answer and not streamed_response:
                     tool_results.extend(
-                        execute_conversational_tool_calls(config.base_url, [answer_as_say_call(answer, latest)])
+                        execute_conversational_tool_calls(config.base_url, [answer_as_say_call(answer, latest, chat=chat)])
                     )
                 elif streamed_response and not tool_calls:
                     finalize_streamed_response(config.base_url, latest)
@@ -227,18 +231,18 @@ def run_model_turn(
     prompt: str,
     pending: list[dict],
     native_tools: list[dict],
-) -> tuple[str, list[dict]]:
+) -> tuple[str, list[dict], dict | None]:
     raw_answer, native_tool_calls = run_provider_with_retry(client, providers, config, prompt, native_tools)
-    answer, parsed_tool_calls = parse_agent_output(raw_answer)
+    answer, parsed_tool_calls, chat = parse_agent_output_with_chat(raw_answer)
     tool_calls = [*native_tool_calls, *parsed_tool_calls]
     if answer and is_echo_answer(answer, pending):
         retry_prompt = build_retry_prompt(prompt, answer)
         raw_answer, native_tool_calls = run_provider_with_retry(client, providers, config, retry_prompt, native_tools)
-        answer, parsed_tool_calls = parse_agent_output(raw_answer)
+        answer, parsed_tool_calls, chat = parse_agent_output_with_chat(raw_answer)
         tool_calls = [*native_tool_calls, *parsed_tool_calls]
         if answer and is_echo_answer(answer, pending):
             raise RuntimeError(f"{config.echo_error_label} returned echo response twice: {answer}")
-    return answer, tool_calls
+    return answer, tool_calls, chat
 
 
 def run_model_turn_streaming(

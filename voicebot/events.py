@@ -5,8 +5,15 @@ from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
 from typing import Any, Literal
+import contextlib
 import json
+import os
 import threading
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - fcntl is unavailable on non-POSIX platforms.
+    fcntl = None
 
 from .execution_model import ExecutionIds, ExecutionScope
 from .transcripts import TranscriptStore
@@ -85,6 +92,8 @@ EventType = Literal[
 
 
 _event_ids = count(1)
+_json_event_log_locks_guard = threading.Lock()
+_json_event_log_locks: dict[str, threading.Lock] = {}
 
 
 def utc_now() -> str:
@@ -124,12 +133,15 @@ class EventStore:
             timestamp=utc_now(),
             data=data or {},
         )
+        self._record_event(event)
+        return event
+
+    def _record_event(self, event: VoicebotEvent) -> None:
         with self._lock:
             self._events.append(event)
             if self._transcript_store is not None:
                 self._transcript_store.append(event)
             self._compact_locked()
-        return event
 
     def append_scoped(
         self,
@@ -252,8 +264,8 @@ class JsonEventStore(EventStore):
         )
 
     def append(self, call_id: str, event_type: EventType, data: dict[str, Any] | None = None) -> VoicebotEvent:
-        event = super().append(call_id, event_type, data)
-        self._append_to_log(event)
+        event = self._append_to_log(call_id, event_type, data or {})
+        self._record_event(event)
         return event
 
     def _load_events(self) -> list[VoicebotEvent]:
@@ -286,10 +298,59 @@ class JsonEventStore(EventStore):
         self.load_diagnostics = diagnostics
         return events
 
-    def _append_to_log(self, event: VoicebotEvent) -> None:
+    def _append_to_log(self, call_id: str, event_type: EventType, data: dict[str, Any]) -> VoicebotEvent:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event_to_dict(event), ensure_ascii=False, sort_keys=True) + "\n")
+        with _json_event_log_lock(self.path), self.path.open("a+", encoding="utf-8") as handle:
+            with _locked_file(handle):
+                event = VoicebotEvent(
+                    id=_max_event_id_in_jsonl(handle) + 1,
+                    call_id=call_id,
+                    type=event_type,
+                    timestamp=utc_now(),
+                    data=data,
+                )
+                handle.seek(0, os.SEEK_END)
+                handle.write(json.dumps(event_to_dict(event), ensure_ascii=False, sort_keys=True) + "\n")
+                handle.flush()
+                return event
+
+
+def _json_event_log_lock(path: Path) -> threading.Lock:
+    key = str(path.expanduser().resolve(strict=False))
+    with _json_event_log_locks_guard:
+        lock = _json_event_log_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _json_event_log_locks[key] = lock
+        return lock
+
+
+@contextlib.contextmanager
+def _locked_file(handle):
+    if fcntl is not None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _max_event_id_in_jsonl(handle) -> int:
+    handle.seek(0)
+    max_id = 0
+    for line in handle:
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            event = event_from_dict(payload)
+            if event is not None:
+                max_id = max(max_id, event.id)
+    return max_id
 
 
 def event_from_dict(data: dict[str, Any]) -> VoicebotEvent | None:

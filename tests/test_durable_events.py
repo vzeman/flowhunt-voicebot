@@ -34,6 +34,21 @@ class DurableEventTests(unittest.TestCase):
         self.assertEqual([event.id for event in events], [first.id, second.id, third.id])
         self.assertEqual(third.id, second.id + 1)
 
+    def test_json_event_store_allocates_ids_from_locked_log_for_multiple_instances(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/events.jsonl"
+            first_store = JsonEventStore(path, max_context_events=100)
+            second_store = JsonEventStore(path, max_context_events=100)
+
+            first = first_store.append("call-1", "call_started", {})
+            second = second_store.append("call-2", "call_started", {})
+            third = first_store.append("call-1", "call_ended", {})
+            reloaded = JsonEventStore(path, max_context_events=100)
+
+        self.assertEqual([first.id, second.id, third.id], [1, 2, 3])
+        self.assertEqual([event.id for event in reloaded.list_events()], [1, 2, 3])
+        self.assertEqual(reloaded.load_diagnostics["skipped_duplicate_event_ids"], 0)
+
     def test_json_event_store_reports_load_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = f"{directory}/events.jsonl"

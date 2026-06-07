@@ -206,6 +206,7 @@ class Settings:
     subagent_task_max_poll_seconds: float = env_float("VOICEBOT_SUBAGENT_TASK_MAX_POLL_SECONDS", 30.0)
     subagent_task_timeout_seconds: float = env_float("VOICEBOT_SUBAGENT_TASK_TIMEOUT_SECONDS", 600.0)
     subagent_task_max_attempts: int = env_int("VOICEBOT_SUBAGENT_TASK_MAX_ATTEMPTS", 100)
+    http_subagent_providers: tuple[dict[str, Any], ...] = env_json_list("VOICEBOT_HTTP_SUBAGENT_PROVIDERS", [])
 
     stt_pipeline: tuple[dict[str, Any], ...] = env_json_list(
         "VOICEBOT_STT_PIPELINE",
@@ -229,6 +230,8 @@ def redacted_settings(settings: Settings) -> dict[str, Any]:
                 "configured": bool(value),
                 "redacted": True,
             }
+        elif field.name == "http_subagent_providers":
+            result[field.name] = [redact_http_subagent_provider(item) for item in value]
         else:
             result[field.name] = json_safe_value(value)
     return result
@@ -247,3 +250,10 @@ def json_safe_value(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): json_safe_value(item) for key, item in value.items()}
     return value
+
+
+def redact_http_subagent_provider(provider: dict[str, Any]) -> dict[str, Any]:
+    redacted = json_safe_value(provider)
+    if isinstance(redacted, dict) and redacted.get("headers"):
+        redacted["headers"] = {"configured": True, "redacted": True}
+    return redacted

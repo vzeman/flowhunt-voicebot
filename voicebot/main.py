@@ -28,7 +28,7 @@ from .runtime_storage import (
     build_voicebot_session_store,
     build_worker_queue_store,
 )
-from .subagents import FlowHuntSubagentProvider, SubagentCoordinator
+from .subagents import FlowHuntSubagentProvider, HttpSubagentProvider, HttpSubagentProviderManifest, SubagentCoordinator
 from .transports import TransportKind, TransportRegistry, default_transport_registry
 from .webrtc import WebRTCSessionManager
 from .workspace_model import VoicebotDefinition, VoicebotStore
@@ -156,6 +156,19 @@ def build_subagent_coordinator(settings: Settings, events: EventStore) -> Subage
         coordinator.register(FlowHuntSubagentProvider("flowhunt_flow", client, settings.flowhunt_flow_id))
     if settings.flowhunt_project_id:
         coordinator.register(FlowHuntSubagentProvider("flowhunt_project", client, settings.flowhunt_project_id))
+    for provider_config in settings.http_subagent_providers:
+        manifest = HttpSubagentProviderManifest(
+            submit_url=str(provider_config.get("submit_url") or ""),
+            label=str(provider_config.get("label") or "HTTP subagent service"),
+            poll_url=str(provider_config["poll_url"]) if provider_config.get("poll_url") else None,
+            cancel_url=str(provider_config["cancel_url"]) if provider_config.get("cancel_url") else None,
+            headers={str(key): str(value) for key, value in dict(provider_config.get("headers") or {}).items()},
+            timeout_seconds=float(provider_config.get("timeout_seconds") or 10.0),
+            required_metadata=tuple(str(item) for item in provider_config.get("required_metadata") or ()),
+            result_context=str(provider_config.get("result_context") or "clean"),  # type: ignore[arg-type]
+        )
+        provider = HttpSubagentProvider(manifest)
+        coordinator.register(provider, provider.descriptor)
     return coordinator
 
 

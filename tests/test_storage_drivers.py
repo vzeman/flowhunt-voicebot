@@ -32,18 +32,49 @@ class StorageDriverTests(unittest.TestCase):
     def test_default_registry_lists_local_and_managed_drivers(self) -> None:
         registry = default_storage_registry()
 
-        event_drivers = {definition.driver for definition in registry.definitions_for_family("events")}
+        event_definitions = {definition.driver: definition for definition in registry.definitions_for_family("events")}
         artifact_drivers = {definition.driver for definition in registry.definitions_for_family("audio_artifacts")}
         queue_drivers = {definition.driver for definition in registry.definitions_for_family("worker_queue")}
 
-        self.assertIn("jsonl", event_drivers)
-        self.assertIn("sqlite", event_drivers)
-        self.assertIn("postgres", event_drivers)
-        self.assertIn("flowhunt_db", event_drivers)
+        self.assertIn("jsonl", event_definitions)
+        self.assertIn("sqlite", event_definitions)
+        self.assertIn("postgres", event_definitions)
+        self.assertIn("flowhunt_db", event_definitions)
+        self.assertTrue(event_definitions["jsonl"].implemented)
+        self.assertTrue(event_definitions["sqlite"].implemented)
+        self.assertFalse(event_definitions["postgres"].implemented)
+        self.assertFalse(event_definitions["flowhunt_db"].implemented)
         self.assertIn("s3", artifact_drivers)
         self.assertIn("redis", {definition.driver for definition in registry.definitions_for_family("session_leases")})
         self.assertIn("redis_streams", queue_drivers)
         self.assertIn("flowhunt_queue", queue_drivers)
+
+    def test_registry_payload_marks_planned_drivers_as_not_implemented(self) -> None:
+        payload = storage_drivers_payload(Settings())
+
+        events = {
+            definition["driver"]: definition
+            for definition in payload["registry"]["families"]["events"]
+        }
+        queues = {
+            definition["driver"]: definition
+            for definition in payload["registry"]["families"]["worker_queue"]
+        }
+
+        self.assertTrue(events["jsonl"]["implemented"])
+        self.assertTrue(events["sqlite"]["implemented"])
+        self.assertFalse(events["postgres"]["implemented"])
+        self.assertFalse(queues["redis_streams"]["implemented"])
+
+    def test_planned_driver_selection_is_visible_but_not_buildable(self) -> None:
+        settings = Settings(agent_task_store_provider="redis")
+
+        payload = storage_drivers_payload(settings)
+
+        self.assertEqual(payload["selected"]["agent_tasks"]["driver"], "redis")
+        self.assertFalse(payload["selected"]["agent_tasks"]["definition"]["implemented"])
+        with self.assertRaisesRegex(ValueError, "Planned drivers not yet selectable"):
+            build_agent_task_tracker(settings)
 
     def test_driver_aliases_are_normalized(self) -> None:
         self.assertEqual(normalize_driver_name("in-memory"), "memory")

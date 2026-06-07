@@ -66,6 +66,13 @@ session lease storage are implemented first; other relational and cache families
 are registered in the driver catalog so deployment configuration and readiness
 can fail explicitly until their concrete driver is added.
 
+Driver catalog entries distinguish production intent from runtime availability:
+`supports_production=true` means the backend is a valid production target for
+that storage family, while `implemented=true` means the current runtime can
+actually construct and select that driver. Planned drivers remain visible in
+`/storage/drivers` with `implemented=false` and produce a startup error if
+selected before their concrete adapter is added.
+
 | Family | Provider env var | Default | Path/config env var | Current drivers | Managed target |
 | --- | --- | --- | --- | --- | --- |
 | `events` | `VOICEBOT_EVENT_STORE_PROVIDER` | `json` | `VOICEBOT_EVENT_STORE_PATH` or `VOICEBOT_RELATIONAL_DATABASE_URL` | `json`, `jsonl`, `memory`, `sqlite` | `postgres`, `flowhunt_db`, `append_only_event_log` |

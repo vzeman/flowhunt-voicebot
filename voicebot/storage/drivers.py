@@ -23,6 +23,7 @@ class StorageDriverDefinition:
     supports_local_dev: bool
     supports_production: bool
     consistency: str
+    implemented: bool = True
     idempotency_fields: tuple[str, ...] = ()
     required_scope_fields: tuple[str, ...] = ()
     notes: str = ""
@@ -38,6 +39,7 @@ class StorageDriverDefinition:
             "managed": self.managed,
             "supports_local_dev": self.supports_local_dev,
             "supports_production": self.supports_production,
+            "implemented": self.implemented,
             "consistency": self.consistency,
             "idempotency_fields": list(self.idempotency_fields),
             "required_scope_fields": list(self.required_scope_fields),

@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 
+from voicebot.storage.redis_subagent_tasks import RedisSubagentTaskStore
 from voicebot.subagents import (
     JsonSubagentTaskStore,
     SubagentCoordinator,
@@ -69,6 +70,20 @@ class TaskLifecycleTests(unittest.TestCase):
 
             reloaded = JsonSubagentTaskStore(path)
             duplicate, duplicate_created = reloaded.get_or_create_requested(self.request())
+
+        self.assertTrue(created)
+        self.assertFalse(duplicate_created)
+        self.assertEqual(duplicate.task_id, task.task_id)
+        self.assertEqual(duplicate.external_task_id, "external-1")
+
+    def test_redis_store_shares_external_task_ids_and_dedupe_index(self) -> None:
+        client = FakeRedis()
+        first = RedisSubagentTaskStore("redis://test", client=client)
+        second = RedisSubagentTaskStore("redis://test", client=client)
+
+        task, created = first.get_or_create_requested(self.request())
+        first.update(task.with_status("running", external_task_id="external-1"))
+        duplicate, duplicate_created = second.get_or_create_requested(self.request())
 
         self.assertTrue(created)
         self.assertFalse(duplicate_created)
@@ -373,6 +388,43 @@ class TaskLifecycleTests(unittest.TestCase):
 
         self.assertEqual(changed[0].status, "failed")
         self.assertIn("invalid subagent task schedule timestamp", changed[0].error or "")
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    def ping(self) -> bool:
+        return True
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        px: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        _ = ex, px
+        if nx and key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+    def delete(self, *keys: str) -> int:
+        removed = 0
+        for key in keys:
+            if key in self.values:
+                removed += 1
+            self.values.pop(key, None)
+        return removed
+
+    def keys(self, pattern: str) -> list[str]:
+        prefix = pattern.rstrip("*")
+        return [key for key in self.values if key.startswith(prefix)]
 
 
 if __name__ == "__main__":

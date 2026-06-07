@@ -4,6 +4,7 @@ import time
 from typing import Any, Callable
 
 from voicebot.scaling import WorkerInstance
+from voicebot.subagents import SubagentTaskRequest, SubagentTaskResult
 
 
 def assert_event_store_contract(testcase: Any, factory: Callable[[], Any]) -> None:
@@ -76,6 +77,36 @@ def assert_worker_registry_contract(testcase: Any, factory: Callable[[], Any]) -
     testcase.assertTrue(store.remove("agent-1"))
     testcase.assertFalse(store.remove("agent-1"))
     testcase.assertEqual([worker["worker_id"] for worker in store.snapshot()["workers"]], ["agent-2", "stt-1"])
+
+
+def assert_subagent_task_store_contract(testcase: Any, factory: Callable[[], Any]) -> None:
+    store = factory()
+    request = SubagentTaskRequest(
+        workspace_id="ws-1",
+        voicebot_id="bot-1",
+        session_id="call-1",
+        request_event_id=7,
+        provider="internal_worker",
+        input_text="check this",
+    )
+
+    task, created = store.get_or_create_requested(request)
+    duplicate, duplicate_created = store.get_or_create_requested(request)
+
+    testcase.assertTrue(created)
+    testcase.assertFalse(duplicate_created)
+    testcase.assertEqual(duplicate.task_id, task.task_id)
+    testcase.assertIsNone(store.get(task.task_id, workspace_id="ws-2"))
+    testcase.assertEqual([item.task_id for item in store.list(workspace_id="ws-1", session_id="call-1")], [task.task_id])
+
+    running = store.update(task.with_status("running", external_task_id="external-1", progress_message="started"))
+    testcase.assertEqual(running.external_task_id, "external-1")
+    testcase.assertEqual(store.get(task.task_id).progress_messages, ("started",))
+    testcase.assertEqual([item.task_id for item in store.pending()], [task.task_id])
+
+    completed = store.update(running.with_status("completed", result=SubagentTaskResult(summary="done")))
+    testcase.assertEqual(completed.status, "completed")
+    testcase.assertEqual(store.pending(), [])
 
 
 def assert_artifact_store_contract(testcase: Any, factory: Callable[[], Any]) -> None:

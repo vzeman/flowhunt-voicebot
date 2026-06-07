@@ -27,6 +27,7 @@ from voicebot.runtime_storage import (
 )
 from voicebot.storage import attached_storage_driver, normalize_driver_name
 from voicebot.storage.redis_leases import RedisSessionLeaseStore
+from voicebot.storage.redis_subagent_tasks import RedisSubagentTaskStore
 from voicebot.storage.redis_worker_registry import RedisWorkerRegistry
 from voicebot.storage.sqlite_events import SQLiteEventStore
 from voicebot.transcripts import TranscriptStore
@@ -43,6 +44,9 @@ class StorageDriverTests(unittest.TestCase):
         worker_registry_definitions = {
             definition.driver: definition for definition in registry.definitions_for_family("worker_registry")
         }
+        subagent_task_definitions = {
+            definition.driver: definition for definition in registry.definitions_for_family("subagent_tasks")
+        }
         artifact_drivers = {definition.driver for definition in registry.definitions_for_family("audio_artifacts")}
         queue_drivers = {definition.driver for definition in registry.definitions_for_family("worker_queue")}
 
@@ -58,6 +62,8 @@ class StorageDriverTests(unittest.TestCase):
         self.assertTrue(call_state_definitions["redis"].implemented)
         self.assertTrue(worker_registry_definitions["redis"].implemented)
         self.assertFalse(worker_registry_definitions["flowhunt_db"].implemented)
+        self.assertTrue(subagent_task_definitions["redis"].implemented)
+        self.assertFalse(subagent_task_definitions["flowhunt_db"].implemented)
         self.assertIn("s3", artifact_drivers)
         self.assertIn("redis", {definition.driver for definition in registry.definitions_for_family("session_leases")})
         self.assertIn("redis_streams", queue_drivers)
@@ -210,6 +216,16 @@ class StorageDriverTests(unittest.TestCase):
         self.assertIsInstance(registry, RedisWorkerRegistry)
         self.assertEqual(attached_storage_driver(registry).driver, "redis")
         self.assertEqual(attached_storage_driver(registry).options["redis_url"], "redis://test")
+
+    def test_subagent_task_redis_driver_is_buildable(self) -> None:
+        with patch("voicebot.storage.redis_subagent_tasks._redis_client_from_url", return_value=FakeRedis()):
+            store = build_subagent_task_store(
+                Settings(subagent_task_store_provider="redis", redis_url="redis://test")
+            )
+
+        self.assertIsInstance(store, RedisSubagentTaskStore)
+        self.assertEqual(attached_storage_driver(store).driver, "redis")
+        self.assertEqual(attached_storage_driver(store).options["redis_url"], "redis://test")
 
     def test_unknown_storage_driver_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported storage driver"):

@@ -85,7 +85,7 @@ selected before their concrete adapter is added.
 | `call_states` | `VOICEBOT_CALL_STATE_STORE_PROVIDER` | `json` | `VOICEBOT_CALL_STATE_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `flowhunt_db` |
 | `provider_config` | `VOICEBOT_PROVIDER_CONFIG_STORE_PROVIDER` | `json` | `VOICEBOT_PROVIDER_CONFIG_STORE_PATH` | `json`, `memory` | `flowhunt_db`, secret references |
 | `sip_trunks` | `VOICEBOT_SIP_TRUNK_STORE_PROVIDER` | `json` | `VOICEBOT_SIP_TRUNK_REGISTRY_PATH`, `VOICEBOT_SIP_TRUNK_PJSIP_INCLUDE_PATH` | `json` | `flowhunt_db`, secret references |
-| `subagent_tasks` | `VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER` | `json` | `VOICEBOT_SUBAGENT_TASK_STORE_PATH` | `json`, `memory` | `flowhunt_db`, `redis`, `flowhunt_queue` |
+| `subagent_tasks` | `VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER` | `json` | `VOICEBOT_SUBAGENT_TASK_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `flowhunt_db`, `flowhunt_queue` |
 | `audio_artifacts` | `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER` | `filesystem` | `VOICEBOT_TTS_CACHE_DIR`, `VOICEBOT_DEBUG_AUDIO_DIR`, object-storage env vars | `filesystem` | `object_storage`, `s3`, CDN/cache |
 
 Compatibility note: existing `json` and `jsonl` aliases are preserved for local

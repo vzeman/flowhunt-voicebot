@@ -13,6 +13,7 @@ from .storage import (
     RedisAgentTaskTracker,
     RedisCallStateStore,
     RedisSessionLeaseStore,
+    RedisWorkerRegistry,
     SQLiteEventStore,
     StorageDriverDefinition,
     StorageDriverSelection,
@@ -58,7 +59,7 @@ def default_storage_registry() -> StorageRegistry:
             _definition("worker_queue", "flowhunt_queue", "shared", True, False, True, "FlowHunt managed queue", implemented=False),
             _definition("worker_registry", "memory", "process", False, True, False, "in-memory worker heartbeats"),
             _definition("worker_registry", "json", "node", False, True, False, "local JSON worker heartbeats"),
-            _definition("worker_registry", "redis", "shared", True, False, True, "shared heartbeat registry", implemented=False),
+            _definition("worker_registry", "redis", "shared", True, False, True, "shared heartbeat registry"),
             _definition("worker_registry", "flowhunt_db", "shared", True, False, True, "durable worker records", implemented=False),
             _definition("call_states", "memory", "process", False, True, False, "in-memory active call snapshots"),
             _definition("call_states", "json", "node", False, True, False, "local JSON active call snapshots"),
@@ -257,6 +258,20 @@ def build_worker_registry(settings: Settings) -> WorkerRegistry:
             WorkerRegistry(heartbeat_ttl_seconds=settings.worker_registry_heartbeat_ttl_seconds),
             selection,
         )
+    if driver == "redis":
+        return attach_storage_driver(
+            RedisWorkerRegistry(
+                settings.redis_url,
+                heartbeat_ttl_seconds=settings.worker_registry_heartbeat_ttl_seconds,
+            ),
+            storage_driver_selection(
+                "worker_registry",
+                driver,
+                settings.worker_registry_store_provider,
+                None,
+                {"redis_url": settings.redis_url},
+            ),
+        )
     raise_unsupported_storage("VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER", settings.worker_registry_store_provider, selection)
 
 
@@ -372,7 +387,8 @@ def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelec
             "worker_registry",
             json_object_driver(settings.worker_registry_store_provider),
             settings.worker_registry_store_provider,
-            settings.worker_registry_store_path,
+            settings.worker_registry_store_path if json_object_driver(settings.worker_registry_store_provider) != "redis" else None,
+            {"redis_url": settings.redis_url} if json_object_driver(settings.worker_registry_store_provider) == "redis" else None,
         ),
         "call_states": storage_driver_selection(
             "call_states",

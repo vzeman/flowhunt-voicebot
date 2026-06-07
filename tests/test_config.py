@@ -47,6 +47,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(result["worker_registry_store_path"], "/data/worker_registry.json")
         self.assertEqual(result["scaling_backpressure_max_inflight"], 100)
         self.assertEqual(result["allowed_workspace_ids"], [])
+        self.assertEqual(result["enabled_transports"], ["asterisk_audiosocket", "webrtc"])
 
     def test_agent_task_retention_can_be_configured(self) -> None:
         settings = Settings(agent_task_responded_event_retention=25)

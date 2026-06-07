@@ -13,6 +13,7 @@ from .config import Settings
 from .events import EventStore
 from .flowhunt import FlowHuntClient
 from .provider_registry import default_provider_registry
+from .processor_registry import processor_specs_from_config
 from .runtime_storage import (
     build_agent_task_tracker,
     build_audio_artifact_store,
@@ -28,6 +29,7 @@ from .runtime_storage import (
     build_worker_queue_store,
 )
 from .subagents import FlowHuntSubagentProvider, SubagentCoordinator
+from .transports import TransportKind, TransportRegistry, default_transport_registry
 from .webrtc import WebRTCSessionManager
 from .workspace_model import VoicebotDefinition, VoicebotStore
 
@@ -58,30 +60,46 @@ def main() -> None:
     stt = providers.build_stt(settings)
     tts = providers.build_tts(settings)
 
-    audiosocket_server = ThreadingAudioSocketServer(
-        (settings.audiosocket_host, settings.audiosocket_port),
-        settings,
-        events,
-        registry,
-        stt,
-        tts,
-        audio_artifacts,
+    transport_registry = build_transport_registry(settings)
+    audiosocket_server = None
+    thread = None
+    if transport_enabled(transport_registry, "asterisk_audiosocket"):
+        audiosocket_server = ThreadingAudioSocketServer(
+            (settings.audiosocket_host, settings.audiosocket_port),
+            settings,
+            events,
+            registry,
+            stt,
+            tts,
+            audio_artifacts,
+        )
+        thread = threading.Thread(target=audiosocket_server.serve_forever, daemon=True)
+        thread.start()
+        print(f"AudioSocket listening on {settings.audiosocket_host}:{settings.audiosocket_port}")
+    stt_pipeline_specs = (
+        audiosocket_server.stt_pipeline_specs
+        if audiosocket_server is not None
+        else tuple(processor_specs_from_config(settings.stt_pipeline))
     )
-    thread = threading.Thread(target=audiosocket_server.serve_forever, daemon=True)
-    thread.start()
-    print(f"AudioSocket listening on {settings.audiosocket_host}:{settings.audiosocket_port}")
+    tts_pipeline_specs = (
+        audiosocket_server.tts_pipeline_specs
+        if audiosocket_server is not None
+        else tuple(processor_specs_from_config(settings.tts_pipeline))
+    )
 
-    webrtc = WebRTCSessionManager(
-        settings,
-        events,
-        registry,
-        stt,
-        tts,
-        audiosocket_server.stt_pipeline_specs,
-        audiosocket_server.tts_pipeline_specs,
-        voicebot_sessions,
-        audio_artifacts,
-    )
+    webrtc = None
+    if transport_enabled(transport_registry, "webrtc"):
+        webrtc = WebRTCSessionManager(
+            settings,
+            events,
+            registry,
+            stt,
+            tts,
+            stt_pipeline_specs,
+            tts_pipeline_specs,
+            voicebot_sessions,
+            audio_artifacts,
+        )
     app = create_app(
         events,
         registry,
@@ -103,8 +121,26 @@ def main() -> None:
     )
     uvicorn.run(app, host=settings.api_host, port=settings.api_port)
 
-    audiosocket_server.shutdown()
-    thread.join(timeout=2.0)
+    if audiosocket_server is not None:
+        audiosocket_server.shutdown()
+    if thread is not None:
+        thread.join(timeout=2.0)
+
+
+def build_transport_registry(settings: Settings) -> TransportRegistry:
+    enabled = set(settings.enabled_transports)
+    registry = default_transport_registry(enabled_kinds=enabled)
+    for kind in enabled:
+        registry.get(kind)  # fail startup for planned or unknown transports selected by config
+    return registry
+
+
+def transport_enabled(registry: TransportRegistry, kind: TransportKind) -> bool:
+    try:
+        registry.get(kind)
+    except (KeyError, ValueError):
+        return False
+    return True
 
 
 def build_subagent_coordinator(settings: Settings, events: EventStore) -> SubagentCoordinator:

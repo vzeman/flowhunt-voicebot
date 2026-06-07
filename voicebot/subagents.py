@@ -153,6 +153,8 @@ class HttpSubagentProviderManifest:
             raise ValueError("timeout_seconds must be positive")
         if any(not key.strip() for key in self.required_metadata):
             raise ValueError("required metadata keys must not be blank")
+        if self.result_context not in {"clean", "raw"}:
+            raise ValueError("result_context must be clean or raw")
 
     def descriptor(self) -> SubagentProviderDescriptor:
         return SubagentProviderDescriptor(

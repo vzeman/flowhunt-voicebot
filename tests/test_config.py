@@ -57,6 +57,23 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.agent_task_responded_event_retention, 25)
         self.assertEqual(result["agent_task_responded_event_retention"], 25)
 
+    def test_http_subagent_provider_headers_are_redacted(self) -> None:
+        settings = Settings(
+            http_subagent_providers=(
+                {
+                    "submit_url": "https://agent.example/submit",
+                    "headers": {"Authorization": "Bearer secret"},
+                },
+            )
+        )
+
+        result = redacted_settings(settings)
+
+        self.assertEqual(
+            result["http_subagent_providers"][0]["headers"],
+            {"configured": True, "redacted": True},
+        )
+
     def test_voice_defaults_prefer_openai_stt_quality(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             settings = Settings()

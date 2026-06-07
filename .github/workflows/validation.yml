@@ -26,11 +26,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Run unit tests
+      - name: Run unit and integration tests
         run: python -m unittest discover -s tests
 
+      - name: Run pytest suite without deployed E2E
+        run: python -m pytest -q -m "not e2e"
+
       - name: Compile Python files
-        run: python -m py_compile voicebot/*.py agents/*.py tests/*.py
+        run: find voicebot agents tests -name '*.py' -print0 | xargs -0 python -m py_compile
 
       - name: Check whitespace
         run: git diff --check

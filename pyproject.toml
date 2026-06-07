@@ -27,3 +27,6 @@ dependencies = { file = ["requirements.txt"] }
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+  "e2e: deployed-stack tests that require VOICEBOT_E2E_BASE_URL",
+]

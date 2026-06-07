@@ -12,3 +12,4 @@ soundfile
 supertonic
 uvicorn[standard]
 redis
+pytest

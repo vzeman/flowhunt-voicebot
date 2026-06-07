@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowhunt-voicebot"
+version = "0.1.0"
+description = "Event-driven SIP/WebRTC voicebot runtime for external AI agents."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [
+  { name = "FlowHunt" }
+]
+dynamic = ["dependencies"]
+
+[project.scripts]
+flowhunt-voicebot = "voicebot.main:main"
+
+[tool.setuptools]
+packages = ["voicebot", "voicebot.storage"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"

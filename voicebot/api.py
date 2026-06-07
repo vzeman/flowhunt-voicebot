@@ -160,6 +160,7 @@ from .runtime_config import (
 )
 from .realtime_quality import metric_latency_budget_seconds, realtime_audio_profile, realtime_audio_profile_issues
 from .routing_admission import IncomingSessionRequest, evaluate_incoming_session
+from .session_ownership import audit_session_ownership
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
 from .tool_executor import AgentToolExecutor
@@ -1670,6 +1671,21 @@ def create_app(
     def scaling_session_lease_snapshot(workspace_id: str | None = None, voicebot_id: str | None = None) -> dict[str, Any]:
         return {"leases": [lease.as_dict() for lease in session_lease_store.list(workspace_id=workspace_id, voicebot_id=voicebot_id)]}
 
+    @app.get("/scaling/session-ownership")
+    def scaling_session_ownership(expected_owner: str | None = None) -> dict[str, Any]:
+        rows = audit_session_ownership(registry.snapshots(), session_lease_store, expected_owner=expected_owner)
+        return {
+            "expected_owner": expected_owner,
+            "sessions": rows,
+            "summary": {
+                "total": len(rows),
+                "owned": sum(1 for row in rows if row["status"] == "owned"),
+                "missing": sum(1 for row in rows if row["status"] == "missing"),
+                "owner_mismatch": sum(1 for row in rows if row["status"] == "owner_mismatch"),
+                "unscoped": sum(1 for row in rows if row["status"] == "unscoped"),
+            },
+        }
+
     @app.post("/scaling/session-leases/acquire")
     def scaling_session_lease_acquire(request: SessionLeaseRequest) -> dict[str, Any]:
         try:
@@ -1734,30 +1750,30 @@ def create_app(
             events.append(lease.call_id or lease.session_id, "session_lease_expired", lease.as_dict())
         interrupted = []
         recovered = []
-        for snapshot in registry.snapshots():
-            identity = session_identity_from_snapshot(snapshot)
-            if identity is None:
-                continue
-            lease = session_lease_store.get(identity["workspace_id"], identity["voicebot_id"], identity["session_id"])
-            if lease is not None and lease.owner == request.owner:
+        for row in audit_session_ownership(registry.snapshots(), session_lease_store, expected_owner=request.owner):
+            if row["status"] in {"owned", "unscoped"}:
                 continue
             loss_data = {
-                **identity,
+                "workspace_id": row["workspace_id"],
+                "voicebot_id": row["voicebot_id"],
+                "session_id": row["session_id"],
+                "call_id": row["call_id"],
+                "transport": row["transport"],
                 "expected_owner": request.owner,
-                "current_owner": lease.owner if lease is not None else None,
-                "reason": "lease_owner_mismatch" if lease is not None else "lease_missing",
+                "current_owner": row["current_owner"],
+                "reason": row["reason"],
             }
-            events.append(identity["call_id"], "session_lease_lost", loss_data)
+            events.append(row["call_id"], "session_lease_lost", loss_data)
             if request.recover_non_media_work:
                 recovered_event = events.append(
-                    identity["call_id"],
+                    row["call_id"],
                     "session_recovered",
                     {**loss_data, "recovered_work": ["subagent_polling", "transcript_storage", "late_task_results"]},
                 )
                 recovered.append(event_to_dict(recovered_event))
             if request.stop_unleased_sessions:
-                stopped = registry.stop(identity["call_id"])
-                interrupted_event = events.append(identity["call_id"], "session_interrupted", {**loss_data, "stopped": stopped})
+                stopped = registry.stop(row["call_id"])
+                interrupted_event = events.append(row["call_id"], "session_interrupted", {**loss_data, "stopped": stopped})
                 interrupted.append(event_to_dict(interrupted_event))
         return {
             "expired": [lease.as_dict() for lease in expired],

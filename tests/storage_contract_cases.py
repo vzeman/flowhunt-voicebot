@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
+from voicebot.scaling import WorkerInstance
+
 
 def assert_event_store_contract(testcase: Any, factory: Callable[[], Any]) -> None:
     store = factory()
@@ -54,6 +56,26 @@ def assert_agent_task_store_contract(testcase: Any, factory: Callable[[], Any]) 
     testcase.assertEqual(store.claim([3], "worker-1", 0.1), [3])
     time.sleep(0.12)
     testcase.assertTrue(store.is_pending(3))
+
+
+def assert_worker_registry_contract(testcase: Any, factory: Callable[[], Any]) -> None:
+    store = factory()
+
+    first = store.heartbeat(WorkerInstance("agent-1", "agent_worker", "voicebot.agent", workspace_id="ws-1", capacity=2))
+    store.heartbeat(WorkerInstance("agent-2", "agent_worker", "voicebot.agent", workspace_id="ws-2", capacity=3))
+    store.heartbeat(WorkerInstance("stt-1", "stt_worker", "voicebot.stt", capacity=4))
+
+    testcase.assertEqual(first.worker_id, "agent-1")
+    testcase.assertEqual([worker.worker_id for worker in store.active(role="agent_worker", workspace_id="ws-1")], ["agent-1"])
+    testcase.assertEqual(store.capacity_summary(workspace_id="ws-1")["total_capacity"], 6)
+
+    drained = store.mark_draining("agent-1")
+    testcase.assertEqual(drained.status, "draining")
+    testcase.assertEqual([worker.worker_id for worker in store.active(role="agent_worker")], ["agent-2"])
+
+    testcase.assertTrue(store.remove("agent-1"))
+    testcase.assertFalse(store.remove("agent-1"))
+    testcase.assertEqual([worker["worker_id"] for worker in store.snapshot()["workers"]], ["agent-2", "stt-1"])
 
 
 def assert_artifact_store_contract(testcase: Any, factory: Callable[[], Any]) -> None:

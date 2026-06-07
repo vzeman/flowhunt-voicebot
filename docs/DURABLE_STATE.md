@@ -81,7 +81,7 @@ selected before their concrete adapter is added.
 | `session_leases` | `VOICEBOT_SESSION_LEASE_STORE_PROVIDER` | `json` | `VOICEBOT_SESSION_LEASE_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `redis` |
 | `agent_tasks` | `VOICEBOT_AGENT_TASK_STORE_PROVIDER` | `json` | `VOICEBOT_AGENT_TASK_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `flowhunt_db` |
 | `worker_queue` | `VOICEBOT_WORKER_QUEUE_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_QUEUE_STORE_PATH` | `json`, `memory` | `redis_streams`, `nats_jetstream`, `rabbitmq`, `flowhunt_queue` |
-| `worker_registry` | `VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_REGISTRY_STORE_PATH` | `json`, `memory` | `redis`, `flowhunt_db` |
+| `worker_registry` | `VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_REGISTRY_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `flowhunt_db` |
 | `call_states` | `VOICEBOT_CALL_STATE_STORE_PROVIDER` | `json` | `VOICEBOT_CALL_STATE_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `flowhunt_db` |
 | `provider_config` | `VOICEBOT_PROVIDER_CONFIG_STORE_PROVIDER` | `json` | `VOICEBOT_PROVIDER_CONFIG_STORE_PATH` | `json`, `memory` | `flowhunt_db`, secret references |
 | `sip_trunks` | `VOICEBOT_SIP_TRUNK_STORE_PROVIDER` | `json` | `VOICEBOT_SIP_TRUNK_REGISTRY_PATH`, `VOICEBOT_SIP_TRUNK_PJSIP_INCLUDE_PATH` | `json` | `flowhunt_db`, secret references |

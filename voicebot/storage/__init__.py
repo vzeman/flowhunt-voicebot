@@ -22,6 +22,7 @@ from .health import storage_component_diagnostics, storage_component_health
 from .redis_agent_tasks import RedisAgentTaskTracker
 from .redis_call_state import RedisCallStateStore
 from .redis_leases import RedisSessionLeaseStore
+from .redis_worker_registry import RedisWorkerRegistry
 from .sqlite_events import SQLiteEventStore
 from .protocols import (
     AgentTaskStoreProtocol,
@@ -50,6 +51,7 @@ __all__ = [
     "RedisAgentTaskTracker",
     "RedisCallStateStore",
     "RedisSessionLeaseStore",
+    "RedisWorkerRegistry",
     "SessionLeaseStoreProtocol",
     "SipTrunkStoreProtocol",
     "StorageDriverDefinition",

@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import tempfile
+import time
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -32,6 +34,7 @@ from voicebot.scaling import (
 )
 from voicebot.config import Settings
 from voicebot.runtime_storage import build_worker_registry
+from voicebot.storage.redis_worker_registry import RedisWorkerRegistry
 from voicebot.transcripts import TranscriptStore
 
 
@@ -621,15 +624,54 @@ class ScalingTests(unittest.TestCase):
             self.assertEqual(registry.load_diagnostics["skipped_expired_workers"], 1)
             self.assertEqual(registry.load_diagnostics["skipped_invalid_workers"], 1)
 
+    def test_redis_worker_registry_shares_heartbeats_and_drain_state(self) -> None:
+        client = FakeRedis()
+        first = RedisWorkerRegistry("redis://test", heartbeat_ttl_seconds=30, client=client)
+        second = RedisWorkerRegistry("redis://test", heartbeat_ttl_seconds=30, client=client)
+        now = datetime.now(UTC)
+
+        first.heartbeat(WorkerInstance("agent-1", "agent_worker", "voicebot.agent", capacity=2), now)
+        second.mark_draining("agent-1", now + timedelta(seconds=1))
+
+        snapshot = first.snapshot(now + timedelta(seconds=2))
+
+        self.assertEqual(snapshot["workers"][0]["worker_id"], "agent-1")
+        self.assertEqual(snapshot["workers"][0]["status"], "draining")
+        self.assertEqual(second.active(now=now + timedelta(seconds=2)), ())
+
+    def test_redis_worker_registry_expires_with_redis_ttl(self) -> None:
+        registry = RedisWorkerRegistry("redis://test", heartbeat_ttl_seconds=1, client=FakeRedis())
+
+        registry.heartbeat(WorkerInstance("agent-1", "agent_worker", "voicebot.agent"), datetime.now(UTC))
+        time.sleep(1.1)
+
+        self.assertEqual(registry.snapshot()["workers"], [])
+
+    def test_redis_worker_registry_rejects_role_or_queue_moves(self) -> None:
+        registry = RedisWorkerRegistry("redis://test", heartbeat_ttl_seconds=30, client=FakeRedis())
+        now = datetime.now(UTC)
+
+        registry.heartbeat(WorkerInstance("agent-1", "agent_worker", "voicebot.agent"), now)
+
+        with self.assertRaisesRegex(ValueError, "roles"):
+            registry.heartbeat(WorkerInstance("agent-1", "stt_worker", "voicebot.agent"), now)
+        with self.assertRaisesRegex(ValueError, "queues"):
+            registry.heartbeat(WorkerInstance("agent-1", "agent_worker", "voicebot.other"), now)
+
     def test_worker_registry_builder_supports_configured_providers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             json_registry = build_worker_registry(
                 Settings(worker_registry_store_provider="json", worker_registry_store_path=f"{tmp}/workers.json")
             )
             memory_registry = build_worker_registry(Settings(worker_registry_store_provider="memory"))
+        with patch("voicebot.storage.redis_worker_registry._redis_client_from_url", return_value=FakeRedis()):
+            redis_registry = build_worker_registry(
+                Settings(worker_registry_store_provider="redis", redis_url="redis://test")
+            )
 
         self.assertIsInstance(json_registry, JsonWorkerRegistry)
         self.assertIsInstance(memory_registry, WorkerRegistry)
+        self.assertIsInstance(redis_registry, RedisWorkerRegistry)
 
     def test_scaling_topology_endpoint_returns_runtime_topology(self) -> None:
         client = self.build_client()
@@ -913,6 +955,58 @@ class ScalingTests(unittest.TestCase):
             settings=settings,
         )
         return TestClient(app)
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, tuple[str, float | None]] = {}
+
+    def ping(self) -> bool:
+        return True
+
+    def get(self, key: str) -> str | None:
+        self._expire()
+        item = self.values.get(key)
+        return item[0] if item is not None else None
+
+    def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        px: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        self._expire()
+        if nx and key in self.values:
+            return False
+        if px is not None:
+            expires_at = time.monotonic() + (px / 1000)
+        elif ex is not None:
+            expires_at = time.monotonic() + ex
+        else:
+            expires_at = None
+        self.values[key] = (value, expires_at)
+        return True
+
+    def delete(self, *keys: str) -> int:
+        removed = 0
+        for key in keys:
+            if key in self.values:
+                removed += 1
+            self.values.pop(key, None)
+        return removed
+
+    def keys(self, pattern: str) -> list[str]:
+        self._expire()
+        prefix = pattern.rstrip("*")
+        return [key for key in self.values if key.startswith(prefix)]
+
+    def _expire(self) -> None:
+        now = time.monotonic()
+        expired = [key for key, (_value, expires_at) in self.values.items() if expires_at is not None and expires_at <= now]
+        for key in expired:
+            self.values.pop(key, None)
 
 
 if __name__ == "__main__":

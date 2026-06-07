@@ -29,56 +29,56 @@ def default_storage_registry() -> StorageRegistry:
             _definition("events", "memory", "process", False, True, False, "in-memory append-only event list"),
             _definition("events", "jsonl", "node", False, True, False, "append-only JSONL event log"),
             _definition("events", "sqlite", "node", False, True, False, "SQLite event table with workspace indexes"),
-            _definition("events", "postgres", "shared", True, False, True, "PostgreSQL event table with workspace indexes"),
-            _definition("events", "flowhunt_db", "shared", True, False, True, "workspace-scoped durable DB event rows"),
-            _definition("events", "append_only_event_log", "shared", True, False, True, "managed append-only event log"),
+            _definition("events", "postgres", "shared", True, False, True, "PostgreSQL event table with workspace indexes", implemented=False),
+            _definition("events", "flowhunt_db", "shared", True, False, True, "workspace-scoped durable DB event rows", implemented=False),
+            _definition("events", "append_only_event_log", "shared", True, False, True, "managed append-only event log", implemented=False),
             _definition("transcripts", "jsonl", "node", False, True, False, "per-call JSONL transcript files"),
-            _definition("transcripts", "sqlite", "node", False, True, False, "SQLite transcript metadata and text index"),
-            _definition("transcripts", "postgres", "shared", True, False, True, "PostgreSQL transcript metadata and text index"),
-            _definition("transcripts", "flowhunt_db", "shared", True, False, True, "workspace-scoped transcript rows"),
+            _definition("transcripts", "sqlite", "node", False, True, False, "SQLite transcript metadata and text index", implemented=False),
+            _definition("transcripts", "postgres", "shared", True, False, True, "PostgreSQL transcript metadata and text index", implemented=False),
+            _definition("transcripts", "flowhunt_db", "shared", True, False, True, "workspace-scoped transcript rows", implemented=False),
             _definition("voicebot_sessions", "memory", "process", False, True, False, "in-memory routed session records"),
             _definition("voicebot_sessions", "json", "node", False, True, False, "local JSON session records"),
-            _definition("voicebot_sessions", "sqlite", "node", False, True, False, "SQLite session records"),
-            _definition("voicebot_sessions", "postgres", "shared", True, False, True, "PostgreSQL session records"),
-            _definition("voicebot_sessions", "flowhunt_db", "shared", True, False, True, "workspace-scoped session table"),
+            _definition("voicebot_sessions", "sqlite", "node", False, True, False, "SQLite session records", implemented=False),
+            _definition("voicebot_sessions", "postgres", "shared", True, False, True, "PostgreSQL session records", implemented=False),
+            _definition("voicebot_sessions", "flowhunt_db", "shared", True, False, True, "workspace-scoped session table", implemented=False),
             _definition("session_leases", "memory", "process", False, True, False, "best-effort in-memory leases"),
             _definition("session_leases", "json", "node", False, True, False, "local JSON leases"),
             _definition("session_leases", "redis", "shared", True, False, True, "atomic lease-capable KV"),
             _definition("agent_tasks", "memory", "process", False, True, False, "in-memory task claims/responded ids"),
             _definition("agent_tasks", "json", "node", False, True, False, "local JSON task claims/responded ids"),
-            _definition("agent_tasks", "redis", "shared", True, False, True, "shared claim and responded-id state"),
-            _definition("agent_tasks", "flowhunt_db", "shared", True, False, True, "durable task response table"),
+            _definition("agent_tasks", "redis", "shared", True, False, True, "shared claim and responded-id state", implemented=False),
+            _definition("agent_tasks", "flowhunt_db", "shared", True, False, True, "durable task response table", implemented=False),
             _definition("worker_queue", "memory", "process", False, True, False, "in-memory queue"),
             _definition("worker_queue", "json", "node", False, True, False, "local JSON queue"),
-            _definition("worker_queue", "redis_streams", "shared", True, False, True, "Redis Streams queue"),
-            _definition("worker_queue", "nats_jetstream", "shared", True, False, True, "NATS JetStream queue"),
-            _definition("worker_queue", "rabbitmq", "shared", True, False, True, "RabbitMQ queue"),
-            _definition("worker_queue", "flowhunt_queue", "shared", True, False, True, "FlowHunt managed queue"),
+            _definition("worker_queue", "redis_streams", "shared", True, False, True, "Redis Streams queue", implemented=False),
+            _definition("worker_queue", "nats_jetstream", "shared", True, False, True, "NATS JetStream queue", implemented=False),
+            _definition("worker_queue", "rabbitmq", "shared", True, False, True, "RabbitMQ queue", implemented=False),
+            _definition("worker_queue", "flowhunt_queue", "shared", True, False, True, "FlowHunt managed queue", implemented=False),
             _definition("worker_registry", "memory", "process", False, True, False, "in-memory worker heartbeats"),
             _definition("worker_registry", "json", "node", False, True, False, "local JSON worker heartbeats"),
-            _definition("worker_registry", "redis", "shared", True, False, True, "shared heartbeat registry"),
-            _definition("worker_registry", "flowhunt_db", "shared", True, False, True, "durable worker records"),
+            _definition("worker_registry", "redis", "shared", True, False, True, "shared heartbeat registry", implemented=False),
+            _definition("worker_registry", "flowhunt_db", "shared", True, False, True, "durable worker records", implemented=False),
             _definition("call_states", "memory", "process", False, True, False, "in-memory active call snapshots"),
             _definition("call_states", "json", "node", False, True, False, "local JSON active call snapshots"),
-            _definition("call_states", "redis", "shared", True, False, True, "shared active call snapshots"),
-            _definition("call_states", "flowhunt_db", "shared", True, False, True, "durable call state snapshots"),
+            _definition("call_states", "redis", "shared", True, False, True, "shared active call snapshots", implemented=False),
+            _definition("call_states", "flowhunt_db", "shared", True, False, True, "durable call state snapshots", implemented=False),
             _definition("provider_config", "memory", "process", False, True, False, "in-memory provider config"),
             _definition("provider_config", "json", "node", False, True, False, "local JSON provider config records"),
-            _definition("provider_config", "sqlite", "node", False, True, False, "SQLite provider config records"),
-            _definition("provider_config", "postgres", "shared", True, False, True, "PostgreSQL provider config records"),
-            _definition("provider_config", "flowhunt_db", "shared", True, False, True, "versioned provider config records"),
+            _definition("provider_config", "sqlite", "node", False, True, False, "SQLite provider config records", implemented=False),
+            _definition("provider_config", "postgres", "shared", True, False, True, "PostgreSQL provider config records", implemented=False),
+            _definition("provider_config", "flowhunt_db", "shared", True, False, True, "versioned provider config records", implemented=False),
             _definition("sip_trunks", "json", "node", False, True, False, "local trunk registry plus generated PJSIP include"),
-            _definition("sip_trunks", "sqlite", "node", False, True, False, "SQLite trunk records plus generated PJSIP include"),
-            _definition("sip_trunks", "postgres", "shared", True, False, True, "PostgreSQL trunk records with secret references"),
-            _definition("sip_trunks", "flowhunt_db", "shared", True, False, True, "workspace-scoped trunk records"),
+            _definition("sip_trunks", "sqlite", "node", False, True, False, "SQLite trunk records plus generated PJSIP include", implemented=False),
+            _definition("sip_trunks", "postgres", "shared", True, False, True, "PostgreSQL trunk records with secret references", implemented=False),
+            _definition("sip_trunks", "flowhunt_db", "shared", True, False, True, "workspace-scoped trunk records", implemented=False),
             _definition("subagent_tasks", "memory", "process", False, True, False, "in-memory delegated task lifecycle"),
             _definition("subagent_tasks", "json", "node", False, True, False, "local JSON delegated task lifecycle"),
-            _definition("subagent_tasks", "flowhunt_db", "shared", True, False, True, "durable delegated task records"),
-            _definition("subagent_tasks", "redis", "shared", True, False, True, "shared delegated task coordination"),
-            _definition("subagent_tasks", "flowhunt_queue", "shared", True, False, True, "FlowHunt task queue handoff"),
+            _definition("subagent_tasks", "flowhunt_db", "shared", True, False, True, "durable delegated task records", implemented=False),
+            _definition("subagent_tasks", "redis", "shared", True, False, True, "shared delegated task coordination", implemented=False),
+            _definition("subagent_tasks", "flowhunt_queue", "shared", True, False, True, "FlowHunt task queue handoff", implemented=False),
             _definition("audio_artifacts", "filesystem", "node", False, True, False, "local filesystem artifacts/cache"),
-            _definition("audio_artifacts", "object_storage", "shared", True, False, True, "managed object storage"),
-            _definition("audio_artifacts", "s3", "shared", True, False, True, "S3-compatible object storage"),
+            _definition("audio_artifacts", "object_storage", "shared", True, False, True, "managed object storage", implemented=False),
+            _definition("audio_artifacts", "s3", "shared", True, False, True, "S3-compatible object storage", implemented=False),
         ]
     )
 
@@ -91,6 +91,8 @@ def _definition(
     supports_local_dev: bool,
     supports_production: bool,
     consistency: str,
+    *,
+    implemented: bool = True,
 ) -> StorageDriverDefinition:
     return StorageDriverDefinition(
         family=family,
@@ -100,6 +102,7 @@ def _definition(
         supports_local_dev=supports_local_dev,
         supports_production=supports_production,
         consistency=consistency,
+        implemented=implemented,
     )
 
 
@@ -412,6 +415,11 @@ def storage_drivers_payload(settings: Settings) -> dict:
 
 
 def raise_unsupported_storage(env_name: str, configured: str, selection: StorageDriverSelection):
-    _ = selection
-    supported = [definition.driver for definition in default_storage_registry().definitions_for_family(selection.family)]
-    raise ValueError(f"Unsupported {env_name}: {configured}. Supported drivers for {selection.family}: {sorted(supported)}")
+    definitions = default_storage_registry().definitions_for_family(selection.family)
+    implemented = sorted(definition.driver for definition in definitions if definition.implemented)
+    planned = sorted(definition.driver for definition in definitions if not definition.implemented)
+    planned_text = f" Planned drivers not yet selectable: {planned}." if planned else ""
+    raise ValueError(
+        f"Unsupported {env_name}: {configured}. "
+        f"Implemented drivers for {selection.family}: {implemented}.{planned_text}"
+    )

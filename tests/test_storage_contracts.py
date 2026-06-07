@@ -18,14 +18,17 @@ from voicebot.storage import (
 )
 from voicebot.storage.redis_agent_tasks import RedisAgentTaskTracker
 from voicebot.storage.redis_call_state import RedisCallStateStore
+from voicebot.storage.redis_subagent_tasks import RedisSubagentTaskStore
 from voicebot.storage.redis_worker_registry import RedisWorkerRegistry
 from voicebot.scaling import JsonWorkerRegistry, WorkerRegistry
+from voicebot.subagents import JsonSubagentTaskStore, SubagentTaskStore
 
 from storage_contract_cases import (
     assert_agent_task_store_contract,
     assert_artifact_store_contract,
     assert_call_state_store_contract,
     assert_event_store_contract,
+    assert_subagent_task_store_contract,
     assert_worker_registry_contract,
 )
 
@@ -79,6 +82,20 @@ class StorageContractTests(unittest.TestCase):
         assert_worker_registry_contract(
             self,
             lambda: RedisWorkerRegistry("redis://test", client=FakeRedis()),
+        )
+
+    def test_memory_subagent_task_store_contract(self) -> None:
+        assert_subagent_task_store_contract(self, SubagentTaskStore)
+
+    def test_json_subagent_task_store_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "subagent_tasks.json"
+            assert_subagent_task_store_contract(self, lambda: JsonSubagentTaskStore(path))
+
+    def test_redis_subagent_task_store_contract(self) -> None:
+        assert_subagent_task_store_contract(
+            self,
+            lambda: RedisSubagentTaskStore("redis://test", client=FakeRedis()),
         )
 
     def test_filesystem_artifact_store_contract(self) -> None:

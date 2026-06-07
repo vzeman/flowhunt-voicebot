@@ -13,6 +13,7 @@ from .storage import (
     RedisAgentTaskTracker,
     RedisCallStateStore,
     RedisSessionLeaseStore,
+    RedisSubagentTaskStore,
     RedisWorkerRegistry,
     SQLiteEventStore,
     StorageDriverDefinition,
@@ -77,7 +78,7 @@ def default_storage_registry() -> StorageRegistry:
             _definition("subagent_tasks", "memory", "process", False, True, False, "in-memory delegated task lifecycle"),
             _definition("subagent_tasks", "json", "node", False, True, False, "local JSON delegated task lifecycle"),
             _definition("subagent_tasks", "flowhunt_db", "shared", True, False, True, "durable delegated task records", implemented=False),
-            _definition("subagent_tasks", "redis", "shared", True, False, True, "shared delegated task coordination", implemented=False),
+            _definition("subagent_tasks", "redis", "shared", True, False, True, "shared delegated task coordination"),
             _definition("subagent_tasks", "flowhunt_queue", "shared", True, False, True, "FlowHunt task queue handoff", implemented=False),
             _definition("audio_artifacts", "filesystem", "node", False, True, False, "local filesystem artifacts/cache"),
             _definition("audio_artifacts", "object_storage", "shared", True, False, True, "managed object storage", implemented=False),
@@ -323,6 +324,17 @@ def build_subagent_task_store(settings: Settings) -> SubagentTaskStore:
         return attach_storage_driver(JsonSubagentTaskStore(settings.subagent_task_store_path), selection)
     if driver == "memory":
         return attach_storage_driver(SubagentTaskStore(), selection)
+    if driver == "redis":
+        return attach_storage_driver(
+            RedisSubagentTaskStore(settings.redis_url),
+            storage_driver_selection(
+                "subagent_tasks",
+                driver,
+                settings.subagent_task_store_provider,
+                None,
+                {"redis_url": settings.redis_url},
+            ),
+        )
     raise_unsupported_storage("VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER", settings.subagent_task_store_provider, selection)
 
 
@@ -413,7 +425,8 @@ def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelec
             "subagent_tasks",
             json_object_driver(settings.subagent_task_store_provider),
             settings.subagent_task_store_provider,
-            settings.subagent_task_store_path,
+            settings.subagent_task_store_path if json_object_driver(settings.subagent_task_store_provider) != "redis" else None,
+            {"redis_url": settings.redis_url} if json_object_driver(settings.subagent_task_store_provider) == "redis" else None,
         ),
         "audio_artifacts": storage_driver_selection(
             "audio_artifacts",

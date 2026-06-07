@@ -5,6 +5,8 @@ import unittest
 
 from voicebot.subagents import (
     FlowHuntSubagentProvider,
+    HttpSubagentProvider,
+    HttpSubagentProviderManifest,
     SubagentProviderDescriptor,
     SubagentCoordinator,
     SubagentTask,
@@ -60,6 +62,31 @@ class FakeFlowHuntClient:
     def get_flow_task(self, flow_id: str, task_id: str):
         self.polled.append((flow_id, task_id))
         return FakeFlowHuntResult(True, "The answer is 42.", {"status": "completed", "result": "The answer is 42."})
+
+
+class FakeHttpSubagentService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def __call__(self, method: str, url: str, payload: dict, headers: dict, timeout: float) -> dict:
+        self.calls.append((method, url, payload, headers, timeout))
+        if url.endswith("/submit"):
+            return {
+                "status": "running",
+                "external_task_id": "http-task-1",
+                "progress_messages": ["HTTP worker accepted the task."],
+                "provider_references": {"service": "research"},
+            }
+        if url.endswith("/poll"):
+            return {
+                "status": "completed",
+                "summary": "The HTTP worker found the answer.",
+                "content": "There are 42 pages.",
+                "context": {"confidence": "high"},
+            }
+        if url.endswith("/cancel"):
+            return {"status": "cancelled", "progress_messages": ["Cancelled by HTTP worker."]}
+        raise AssertionError(f"unexpected URL: {url}")
 
 
 class SubagentTests(unittest.TestCase):
@@ -352,6 +379,47 @@ class SubagentTests(unittest.TestCase):
         coordinator.request(request)
 
         self.assertEqual(provider.submitted, 1)
+
+    def test_http_subagent_provider_submits_polls_and_cancels_generic_service_tasks(self) -> None:
+        service = FakeHttpSubagentService()
+        manifest = HttpSubagentProviderManifest(
+            submit_url="https://agent.example/submit",
+            poll_url="https://agent.example/poll",
+            cancel_url="https://agent.example/cancel",
+            label="Research HTTP service",
+            headers={"Authorization": "Bearer token"},
+            required_metadata=("skill",),
+        )
+        provider = HttpSubagentProvider(manifest, http_json=service)
+        coordinator = SubagentCoordinator()
+        coordinator.register(provider, provider.descriptor)
+        request = SubagentTaskRequest(
+            workspace_id="workspace-1",
+            session_id="call-1",
+            request_event_id=10,
+            provider="http_service",
+            input_text="Count pages",
+            metadata={"skill": "research"},
+        )
+
+        submitted = coordinator.request(request)
+        completed = coordinator.poll(submitted.task_id, "workspace-1")
+        cancelled = provider.cancel(completed)
+
+        self.assertEqual(submitted.status, "running")
+        self.assertEqual(submitted.external_task_id, "http-task-1")
+        self.assertEqual(completed.status, "completed")
+        self.assertEqual(completed.result.summary, "The HTTP worker found the answer.")
+        self.assertEqual(cancelled.status, "cancelled")
+        self.assertEqual(coordinator.provider_catalog()["providers"]["http_service"]["label"], "Research HTTP service")
+        self.assertEqual(service.calls[0][2]["request"]["input_text"], "Count pages")
+        self.assertEqual(service.calls[0][3]["Authorization"], "Bearer token")
+
+    def test_http_subagent_manifest_rejects_invalid_configuration(self) -> None:
+        with self.assertRaisesRegex(ValueError, "submit_url"):
+            HttpSubagentProviderManifest(submit_url="")
+        with self.assertRaisesRegex(ValueError, "timeout_seconds"):
+            HttpSubagentProviderManifest(submit_url="https://agent.example/submit", timeout_seconds=0)
 
 
 if __name__ == "__main__":

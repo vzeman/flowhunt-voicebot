@@ -31,7 +31,6 @@ from .api_models import (
     CallControlRequest,
     CompactContextRequest,
     ConversationEvaluationRequest,
-    DrainRequest,
     IncomingSessionAdmissionRequest,
     MultimodalContentRequest,
     PlaybackInterruptRequest,
@@ -69,8 +68,8 @@ from .asterisk_control import AsteriskAMI, ControlResult
 from .call_recording import recording_artifact_id
 from .calls import AgentResponse, CallRegistry
 from .config import Settings, redacted_settings
-from .deployment_topology import deployment_topology_payload, role_readiness_payload
-from .drain import DrainState, rollout_contract
+from .api_runtime import RuntimeApiContext, create_runtime_router
+from .drain import DrainState
 from .event_catalog import event_catalog, event_catalog_integrity_issues
 from .events import EventStore, VoicebotEvent, event_to_dict
 from .execution_model import ExecutionScope
@@ -87,7 +86,6 @@ from .flowhunt import (
     is_flow_task_terminal,
     is_terminal_issue_state,
 )
-from .health import readiness_report
 from .internal_auth import (
     internal_scope_for_request,
     parse_internal_api_keys,
@@ -143,8 +141,6 @@ from .session_leases import SessionLeaseStore
 from .security_contract import redact_sensitive_data, security_contract_issues, security_contract_payload
 from .sip_media_plane import sip_media_plane_payload
 from .sip_trunks import SipTrunk, SipTrunkStore
-from .storage_contracts import storage_contracts_payload
-from .runtime_storage import storage_drivers_payload
 from .runtime_config import (
     VoicebotChannelConfig,
     VoicebotChatPromptConfig,
@@ -604,89 +600,26 @@ def create_app(
         else None
     )
 
-    @app.get("/health")
-    def health() -> dict[str, Any]:
-        return {"ok": True, "active_calls": registry.active_call_ids()}
-
-    @app.get("/health/readiness")
-    def readiness() -> dict[str, Any]:
-        return build_readiness_report()
-
-    def build_readiness_report() -> dict[str, Any]:
-        return readiness_report(
-            transcripts=transcripts,
-            asterisk=asterisk,
-            active_call_ids=registry.active_call_ids(),
-            storage_components={
-                "events": events,
-                "agent_tasks": tracker,
-                "call_states": registry.state_store,
-                "session_leases": session_lease_store,
-                "worker_registry": scaling_workers,
-                "voicebot_sessions": voicebot_session_store,
-                "provider_config": provider_config_store,
-                "worker_queue": scaling_queue,
-                **({"subagent_tasks": subagent_coordinator.store} if subagent_coordinator is not None else {}),
-            },
-            drain_state=drain_state.snapshot(),
-            settings=runtime_settings,
-            workspace_policy=workspace_access_policy,
+    app.include_router(
+        create_runtime_router(
+            RuntimeApiContext(
+                events=events,
+                registry=registry,
+                tracker=tracker,
+                transcripts=transcripts,
+                asterisk=asterisk,
+                runtime_settings=runtime_settings,
+                workspace_access_policy=workspace_access_policy,
+                session_lease_store=session_lease_store,
+                scaling_workers=scaling_workers,
+                voicebot_session_store=voicebot_session_store,
+                provider_config_store=provider_config_store,
+                scaling_queue=scaling_queue,
+                subagent_coordinator=subagent_coordinator,
+                drain_state=drain_state,
+            )
         )
-
-    @app.get("/health/readiness/roles")
-    def role_readiness() -> dict[str, Any]:
-        return role_readiness_payload(runtime_settings, build_readiness_report())
-
-    @app.get("/health/liveness")
-    def liveness() -> dict[str, Any]:
-        return {"ok": True, "draining": drain_state.draining}
-
-    @app.get("/deployment/topology")
-    def deployment_topology() -> dict[str, Any]:
-        return deployment_topology_payload(runtime_settings)
-
-    @app.get("/operations/drain")
-    def get_drain_state() -> dict[str, Any]:
-        return {"drain": drain_state.snapshot(), "rollout": rollout_contract()}
-
-    @app.post("/operations/drain/start")
-    def start_drain(request: DrainRequest) -> dict[str, Any]:
-        state = drain_state.start(request.reason)
-        event = events.append("runtime", "runtime_draining_started", state)
-        interrupted = []
-        if request.interrupt_active_sessions:
-            for snapshot in registry.snapshots():
-                call_id = snapshot["call_id"]
-                stopped = registry.stop(call_id)
-                interrupted_event = events.append(
-                    call_id,
-                    "session_interrupted",
-                    {
-                        "reason": "runtime_draining",
-                        "stopped": stopped,
-                        "drain": state,
-                        "workspace_id": (snapshot.get("route") or {}).get("workspace_id"),
-                        "voicebot_id": (snapshot.get("route") or {}).get("voicebot_id"),
-                    },
-                )
-                interrupted.append(event_to_dict(interrupted_event))
-        events.append("runtime", "metrics", {"name": "runtime_draining", "value": 1.0, "reason": state["reason"]})
-        return {"event_id": event.id, "drain": state, "interrupted": interrupted}
-
-    @app.post("/operations/drain/stop")
-    def stop_drain() -> dict[str, Any]:
-        state = drain_state.stop()
-        event = events.append("runtime", "runtime_draining_stopped", state)
-        events.append("runtime", "metrics", {"name": "runtime_draining", "value": 0.0})
-        return {"event_id": event.id, "drain": state}
-
-    @app.get("/storage/contracts")
-    def storage_contracts() -> dict[str, Any]:
-        return storage_contracts_payload()
-
-    @app.get("/storage/drivers")
-    def storage_drivers() -> dict[str, Any]:
-        return storage_drivers_payload(runtime_settings)
+    )
 
     @app.get("/security/contract")
     def security_contract() -> dict[str, Any]:

@@ -19,6 +19,7 @@ from .errors import (
     StorageValidationError,
 )
 from .health import storage_component_diagnostics, storage_component_health
+from .redis_agent_tasks import RedisAgentTaskTracker
 from .redis_leases import RedisSessionLeaseStore
 from .sqlite_events import SQLiteEventStore
 from .protocols import (
@@ -45,6 +46,7 @@ __all__ = [
     "EventStoreProtocol",
     "FilesystemArtifactStore",
     "ProviderConfigStoreProtocol",
+    "RedisAgentTaskTracker",
     "RedisSessionLeaseStore",
     "SessionLeaseStoreProtocol",
     "SipTrunkStoreProtocol",

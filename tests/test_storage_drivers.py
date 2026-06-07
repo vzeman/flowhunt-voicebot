@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import tempfile
+import time
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -33,6 +35,7 @@ class StorageDriverTests(unittest.TestCase):
         registry = default_storage_registry()
 
         event_definitions = {definition.driver: definition for definition in registry.definitions_for_family("events")}
+        agent_task_definitions = {definition.driver: definition for definition in registry.definitions_for_family("agent_tasks")}
         artifact_drivers = {definition.driver for definition in registry.definitions_for_family("audio_artifacts")}
         queue_drivers = {definition.driver for definition in registry.definitions_for_family("worker_queue")}
 
@@ -44,6 +47,7 @@ class StorageDriverTests(unittest.TestCase):
         self.assertTrue(event_definitions["sqlite"].implemented)
         self.assertFalse(event_definitions["postgres"].implemented)
         self.assertFalse(event_definitions["flowhunt_db"].implemented)
+        self.assertTrue(agent_task_definitions["redis"].implemented)
         self.assertIn("s3", artifact_drivers)
         self.assertIn("redis", {definition.driver for definition in registry.definitions_for_family("session_leases")})
         self.assertIn("redis_streams", queue_drivers)
@@ -67,11 +71,11 @@ class StorageDriverTests(unittest.TestCase):
         self.assertFalse(queues["redis_streams"]["implemented"])
 
     def test_planned_driver_selection_is_visible_but_not_buildable(self) -> None:
-        settings = Settings(agent_task_store_provider="redis")
+        settings = Settings(agent_task_store_provider="flowhunt_db")
 
         payload = storage_drivers_payload(settings)
 
-        self.assertEqual(payload["selected"]["agent_tasks"]["driver"], "redis")
+        self.assertEqual(payload["selected"]["agent_tasks"]["driver"], "flowhunt_db")
         self.assertFalse(payload["selected"]["agent_tasks"]["definition"]["implemented"])
         with self.assertRaisesRegex(ValueError, "Planned drivers not yet selectable"):
             build_agent_task_tracker(settings)
@@ -169,6 +173,15 @@ class StorageDriverTests(unittest.TestCase):
         self.assertEqual(payload["selected"]["events"]["options"]["database_url"]["redacted"], True)
         self.assertEqual(payload["selected"]["session_leases"]["options"]["redis_url"]["redacted"], True)
 
+    def test_agent_task_redis_driver_is_buildable(self) -> None:
+        with patch("voicebot.storage.redis_agent_tasks._redis_client_from_url", return_value=FakeRedis()):
+            tracker = build_agent_task_tracker(
+                Settings(agent_task_store_provider="redis", redis_url="redis://test")
+            )
+
+        self.assertEqual(attached_storage_driver(tracker).driver, "redis")
+        self.assertEqual(attached_storage_driver(tracker).options["redis_url"], "redis://test")
+
     def test_unknown_storage_driver_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported storage driver"):
             storage_drivers_payload(Settings(event_store_provider="unknown"))
@@ -194,27 +207,64 @@ class StorageDriverTests(unittest.TestCase):
 
 class FakeRedis:
     def __init__(self) -> None:
-        self.values: dict[str, str] = {}
+        self.values: dict[str, tuple[str, float | None]] = {}
 
     def ping(self) -> bool:
         return True
 
     def get(self, key: str) -> str | None:
-        return self.values.get(key)
+        self._expire()
+        item = self.values.get(key)
+        return item[0] if item is not None else None
 
-    def set(self, key: str, value: str, ex: int | None = None) -> bool:
-        _ = ex
-        self.values[key] = value
+    def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        px: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        self._expire()
+        if nx and key in self.values:
+            return False
+        if px is not None:
+            expires_at = time.monotonic() + (px / 1000)
+        elif ex is not None:
+            expires_at = time.monotonic() + ex
+        else:
+            expires_at = None
+        self.values[key] = (value, expires_at)
         return True
 
-    def delete(self, key: str) -> int:
-        existed = key in self.values
-        self.values.pop(key, None)
-        return 1 if existed else 0
+    def delete(self, *keys: str) -> int:
+        removed = 0
+        for key in keys:
+            if key in self.values:
+                removed += 1
+            self.values.pop(key, None)
+        return removed
 
     def keys(self, pattern: str) -> list[str]:
+        self._expire()
         prefix = pattern.rstrip("*")
         return [key for key in self.values if key.startswith(prefix)]
+
+    def ttl(self, key: str) -> int:
+        self._expire()
+        item = self.values.get(key)
+        if item is None:
+            return -2
+        expires_at = item[1]
+        if expires_at is None:
+            return -1
+        return max(0, int(expires_at - time.monotonic()))
+
+    def _expire(self) -> None:
+        now = time.monotonic()
+        expired = [key for key, (_value, expires_at) in self.values.items() if expires_at is not None and expires_at <= now]
+        for key in expired:
+            self.values.pop(key, None)
 
 
 if __name__ == "__main__":

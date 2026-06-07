@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import unittest
 
 from fastapi.testclient import TestClient
@@ -9,6 +10,7 @@ from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.runtime_config import VoicebotPromptConfig, VoicebotPromptConfigStore
+from voicebot.storage.redis_agent_tasks import RedisAgentTaskTracker
 from voicebot.transcripts import TranscriptStore
 
 
@@ -187,6 +189,49 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual([event.data["task_event_id"] for event in claim_events], [first.id, second.id])
         self.assertEqual([event.data["owner"] for event in claim_events], ["worker-1", "worker-1"])
 
+    def test_redis_agent_task_claim_is_shared_across_worker_clients(self) -> None:
+        events = EventStore(max_context_events=50)
+        redis = FakeRedis()
+        tracker_1 = RedisAgentTaskTracker("redis://test", client=redis)
+        tracker_2 = RedisAgentTaskTracker("redis://test", client=redis)
+        first_app = create_app(
+            events,
+            FakeCallRegistry(["call-1"]),
+            tracker_1,
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+        )
+        second_app = create_app(
+            events,
+            FakeCallRegistry(["call-1"]),
+            tracker_2,
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+        )
+        first_client = TestClient(first_app)
+        second_client = TestClient(second_app)
+        task = events.append("call-1", "agent_response_requested", {"text": "first"})
+
+        first_claim = first_client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [task.id], "owner": "worker-1", "ttl_seconds": 30},
+        )
+        second_claim = second_client.post(
+            "/agent/tasks/claim",
+            json={"event_ids": [task.id], "owner": "worker-2", "ttl_seconds": 30},
+        )
+        second_pending = second_client.get("/agent/tasks?call_id=call-1")
+        second_status = second_client.get("/agent/tasks/status")
+
+        self.assertEqual(first_claim.status_code, 200)
+        self.assertEqual(second_claim.status_code, 200)
+        self.assertEqual(first_claim.json()["claimed_event_ids"], [task.id])
+        self.assertEqual(second_claim.json()["claimed_event_ids"], [])
+        self.assertEqual(second_pending.json()["pending"], [])
+        self.assertEqual(second_status.json()["claims"][str(task.id)]["owner"], "worker-1")
+
     def test_agent_tasks_ignore_claim_events_when_listing_pending_tasks(self) -> None:
         client, events, _tracker = self.build_client()
         first = events.append("call-1", "agent_response_requested", {"text": "first"})
@@ -194,8 +239,6 @@ class AgentTasksTests(unittest.TestCase):
             "/agent/tasks/claim",
             json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 0.1},
         )
-
-        import time
 
         time.sleep(0.12)
         response = client.get("/agent/tasks?call_id=call-1")
@@ -239,8 +282,6 @@ class AgentTasksTests(unittest.TestCase):
             json={"event_ids": [first.id], "owner": "worker-1", "ttl_seconds": 0.1},
         )
         self.assertEqual(claim_response.json()["claimed_event_ids"], [first.id])
-
-        import time
 
         time.sleep(0.12)
         tasks_response = client.get("/agent/tasks?call_id=call-1")
@@ -441,6 +482,68 @@ class AgentTasksTests(unittest.TestCase):
         ]
         self.assertEqual([event.data["task_event_id"] for event in renew_events], [first.id])
         self.assertEqual([event.data["owner"] for event in renew_events], ["worker-1"])
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, tuple[str, float | None]] = {}
+
+    def ping(self) -> bool:
+        return True
+
+    def get(self, key: str) -> str | None:
+        self._expire()
+        item = self.values.get(key)
+        return item[0] if item is not None else None
+
+    def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        px: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        self._expire()
+        if nx and key in self.values:
+            return False
+        if px is not None:
+            expires_at = time.monotonic() + (px / 1000)
+        elif ex is not None:
+            expires_at = time.monotonic() + ex
+        else:
+            expires_at = None
+        self.values[key] = (value, expires_at)
+        return True
+
+    def delete(self, *keys: str) -> int:
+        removed = 0
+        for key in keys:
+            if key in self.values:
+                removed += 1
+            self.values.pop(key, None)
+        return removed
+
+    def keys(self, pattern: str) -> list[str]:
+        self._expire()
+        prefix = pattern.rstrip("*")
+        return [key for key in self.values if key.startswith(prefix)]
+
+    def ttl(self, key: str) -> int:
+        self._expire()
+        item = self.values.get(key)
+        if item is None:
+            return -2
+        expires_at = item[1]
+        if expires_at is None:
+            return -1
+        return max(0, int(expires_at - time.monotonic()))
+
+    def _expire(self) -> None:
+        now = time.monotonic()
+        expired = [key for key, (_value, expires_at) in self.values.items() if expires_at is not None and expires_at <= now]
+        for key in expired:
+            self.values.pop(key, None)
 
 
 if __name__ == "__main__":

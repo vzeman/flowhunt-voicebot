@@ -64,13 +64,13 @@ from .api_models import (
     WorkerQueueItemRequest,
     WebRTCOfferRequest,
 )
+from .api_events import EventsApiContext, create_events_router, events_payload, metrics_payload
+from .api_runtime import RuntimeApiContext, create_runtime_router
 from .asterisk_control import AsteriskAMI, ControlResult
 from .call_recording import recording_artifact_id
 from .calls import AgentResponse, CallRegistry
 from .config import Settings, redacted_settings
-from .api_runtime import RuntimeApiContext, create_runtime_router
 from .drain import DrainState
-from .event_catalog import event_catalog, event_catalog_integrity_issues
 from .events import EventStore, VoicebotEvent, event_to_dict
 from .execution_model import ExecutionScope
 from .flowhunt import (
@@ -94,7 +94,6 @@ from .internal_auth import (
     validate_internal_api_key,
 )
 from .language import detected_session_language, is_auto_language
-from .metrics import summarize_metrics
 from .multimodal import (
     ContentDirection,
     Modality,
@@ -620,6 +619,13 @@ def create_app(
             )
         )
     )
+    events_api_context = EventsApiContext(
+        events=events,
+        transcripts=transcripts,
+        durable_call_events=durable_call_events,
+        validated_limit=validated_limit,
+    )
+    app.include_router(create_events_router(events_api_context))
 
     @app.get("/security/contract")
     def security_contract() -> dict[str, Any]:
@@ -2425,24 +2431,6 @@ def create_app(
             "reload": control_result_dict(reload_result),
         }
 
-    @app.get("/events")
-    def list_events(after: int = 0, call_id: str | None = None, limit: int = 200) -> dict[str, Any]:
-        checked_limit = validated_limit(limit)
-        if call_id:
-            source_events = durable_call_events(events, transcripts, call_id, after=after, limit=checked_limit)
-        else:
-            source_events = events.list_events(after=after, limit=checked_limit)
-        result = [event_to_dict(event) for event in source_events]
-        return {"events": result}
-
-    @app.get("/events/catalog")
-    def list_event_catalog() -> dict[str, Any]:
-        return {"events": event_catalog(), "integrity_issues": event_catalog_integrity_issues()}
-
-    @app.get("/metrics")
-    def metrics(call_id: str | None = None) -> dict[str, Any]:
-        return summarize_metrics(events.list_events(call_id=call_id, limit=1000))
-
     @app.get("/observability/timeline")
     def observability_timeline(
         after: int = 0,
@@ -4117,14 +4105,15 @@ def create_app(
         )
 
     def tool_get_events(args: dict[str, Any]) -> dict[str, Any]:
-        return list_events(
+        return events_payload(
+            events_api_context,
             after=optional_int_arg(args, "after", 0),
             call_id=args.get("call_id"),
             limit=validated_limit(optional_int_arg(args, "limit", 200)),
         )
 
     def tool_get_metrics(args: dict[str, Any]) -> dict[str, Any]:
-        return metrics(call_id=args.get("call_id"))
+        return metrics_payload(events_api_context, call_id=args.get("call_id"))
 
     def tool_get_active_calls(args: dict[str, Any]) -> dict[str, Any]:
         return {"active_calls": registry.active_call_ids()}

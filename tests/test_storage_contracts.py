@@ -17,6 +17,7 @@ from voicebot.storage import (
     storage_component_health,
 )
 from voicebot.storage.redis_agent_tasks import RedisAgentTaskTracker
+from voicebot.storage.redis_call_state import RedisCallStateStore
 
 from storage_contract_cases import (
     assert_agent_task_store_contract,
@@ -42,6 +43,12 @@ class StorageContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "calls.json"
             assert_call_state_store_contract(self, lambda: JsonCallStateStore(path))
+
+    def test_redis_call_state_store_contract(self) -> None:
+        assert_call_state_store_contract(
+            self,
+            lambda: RedisCallStateStore("redis://test", client=FakeRedis()),
+        )
 
     def test_memory_agent_task_store_contract(self) -> None:
         assert_agent_task_store_contract(self, AgentTaskTracker)

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
+import time
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -13,6 +15,7 @@ from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.runtime_storage import build_call_state_store
 from voicebot.config import Settings
+from voicebot.storage.redis_call_state import RedisCallStateStore
 from voicebot.transcripts import TranscriptStore
 
 
@@ -76,9 +79,25 @@ class CallStateStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             json_store = build_call_state_store(Settings(call_state_store_provider="json", call_state_store_path=f"{tmp}/calls.json"))
             memory_store = build_call_state_store(Settings(call_state_store_provider="memory"))
+        with patch("voicebot.storage.redis_call_state._redis_client_from_url", return_value=FakeRedis()):
+            redis_store = build_call_state_store(Settings(call_state_store_provider="redis", redis_url="redis://test"))
 
         self.assertIsInstance(json_store, JsonCallStateStore)
         self.assertIsInstance(memory_store, CallStateStore)
+        self.assertIsInstance(redis_store, RedisCallStateStore)
+
+    def test_redis_store_shares_call_states_across_instances(self) -> None:
+        client = FakeRedis()
+        first = RedisCallStateStore("redis://test", client=client)
+        second = RedisCallStateStore("redis://test", client=client)
+
+        first.upsert({"call_id": "call-1", "playback_active": True})
+        second.upsert({"call_id": "call-2", "playback_active": False})
+        second.end("call-1")
+
+        self.assertEqual(first.get("call-1")["state"], "ended")
+        self.assertEqual([item["call_id"] for item in first.list()], ["call-1", "call-2"])
+        self.assertEqual([item["call_id"] for item in first.list(active_only=True)], ["call-2"])
 
 
 class CallStateApiTests(unittest.TestCase):
@@ -119,6 +138,58 @@ class _FakeSession:
             "stopped": False,
             "snapshot_count": self.snapshot_count,
         }
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, tuple[str, float | None]] = {}
+
+    def ping(self) -> bool:
+        return True
+
+    def get(self, key: str) -> str | None:
+        self._expire()
+        item = self.values.get(key)
+        return item[0] if item is not None else None
+
+    def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        px: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        self._expire()
+        if nx and key in self.values:
+            return False
+        if px is not None:
+            expires_at = time.monotonic() + (px / 1000)
+        elif ex is not None:
+            expires_at = time.monotonic() + ex
+        else:
+            expires_at = None
+        self.values[key] = (value, expires_at)
+        return True
+
+    def delete(self, *keys: str) -> int:
+        removed = 0
+        for key in keys:
+            if key in self.values:
+                removed += 1
+            self.values.pop(key, None)
+        return removed
+
+    def keys(self, pattern: str) -> list[str]:
+        self._expire()
+        prefix = pattern.rstrip("*")
+        return [key for key in self.values if key.startswith(prefix)]
+
+    def _expire(self) -> None:
+        now = time.monotonic()
+        expired = [key for key, (_value, expires_at) in self.values.items() if expires_at is not None and expires_at <= now]
+        for key in expired:
+            self.values.pop(key, None)
 
 
 if __name__ == "__main__":

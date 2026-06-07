@@ -11,6 +11,7 @@ from .sip_trunks import SipTrunkStore
 from .storage import (
     FilesystemArtifactStore,
     RedisAgentTaskTracker,
+    RedisCallStateStore,
     RedisSessionLeaseStore,
     SQLiteEventStore,
     StorageDriverDefinition,
@@ -61,7 +62,7 @@ def default_storage_registry() -> StorageRegistry:
             _definition("worker_registry", "flowhunt_db", "shared", True, False, True, "durable worker records", implemented=False),
             _definition("call_states", "memory", "process", False, True, False, "in-memory active call snapshots"),
             _definition("call_states", "json", "node", False, True, False, "local JSON active call snapshots"),
-            _definition("call_states", "redis", "shared", True, False, True, "shared active call snapshots", implemented=False),
+            _definition("call_states", "redis", "shared", True, False, True, "shared active call snapshots"),
             _definition("call_states", "flowhunt_db", "shared", True, False, True, "durable call state snapshots", implemented=False),
             _definition("provider_config", "memory", "process", False, True, False, "in-memory provider config"),
             _definition("provider_config", "json", "node", False, True, False, "local JSON provider config records"),
@@ -211,6 +212,17 @@ def build_call_state_store(settings: Settings) -> CallStateStore:
         return attach_storage_driver(JsonCallStateStore(settings.call_state_store_path), selection)
     if driver == "memory":
         return attach_storage_driver(CallStateStore(), selection)
+    if driver == "redis":
+        return attach_storage_driver(
+            RedisCallStateStore(settings.redis_url),
+            storage_driver_selection(
+                "call_states",
+                driver,
+                settings.call_state_store_provider,
+                None,
+                {"redis_url": settings.redis_url},
+            ),
+        )
     raise_unsupported_storage("VOICEBOT_CALL_STATE_STORE_PROVIDER", settings.call_state_store_provider, selection)
 
 
@@ -366,7 +378,8 @@ def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelec
             "call_states",
             json_object_driver(settings.call_state_store_provider),
             settings.call_state_store_provider,
-            settings.call_state_store_path,
+            settings.call_state_store_path if json_object_driver(settings.call_state_store_provider) != "redis" else None,
+            {"redis_url": settings.redis_url} if json_object_driver(settings.call_state_store_provider) == "redis" else None,
         ),
         "provider_config": storage_driver_selection(
             "provider_config",

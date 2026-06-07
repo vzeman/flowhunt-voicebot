@@ -187,6 +187,87 @@ class MediaTransport(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class TransportDefinition:
+    kind: TransportKind
+    capabilities: TransportCapabilities
+    implemented: bool
+    enabled: bool = True
+    transport: MediaTransport | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in get_args(TransportKind):
+            raise ValueError(f"unsupported transport kind: {self.kind}")
+        if self.implemented and self.transport is None:
+            raise ValueError(f"implemented transport requires adapter: {self.kind}")
+        if not self.implemented and self.transport is not None:
+            raise ValueError(f"planned transport must not provide adapter: {self.kind}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "capabilities": transport_capabilities_to_dict(self.capabilities),
+            "implemented": self.implemented,
+            "enabled": self.enabled,
+        }
+
+
+class TransportRegistry:
+    def __init__(self, definitions: list[TransportDefinition] | None = None) -> None:
+        self._definitions: dict[TransportKind, TransportDefinition] = {}
+        for definition in definitions or []:
+            self.register_definition(definition)
+
+    def register_definition(self, definition: TransportDefinition) -> None:
+        if definition.kind in self._definitions:
+            raise ValueError(f"transport is already registered: {definition.kind}")
+        self._definitions[definition.kind] = definition
+
+    def register(self, transport: MediaTransport, *, enabled: bool = True) -> None:
+        self.register_definition(
+            TransportDefinition(
+                kind=transport.kind,
+                capabilities=transport.capabilities,
+                implemented=True,
+                enabled=enabled,
+                transport=transport,
+            )
+        )
+
+    def register_planned(self, kind: TransportKind, capabilities: TransportCapabilities, *, enabled: bool = False) -> None:
+        self.register_definition(
+            TransportDefinition(
+                kind=kind,
+                capabilities=capabilities,
+                implemented=False,
+                enabled=enabled,
+                transport=None,
+            )
+        )
+
+    def get(self, kind: TransportKind, *, require_enabled: bool = True) -> MediaTransport:
+        definition = self._definitions.get(kind)
+        if definition is None:
+            raise KeyError(f"transport is not registered: {kind}")
+        if not definition.implemented or definition.transport is None:
+            raise ValueError(f"transport is not implemented: {kind}")
+        if require_enabled and not definition.enabled:
+            raise ValueError(f"transport is not enabled: {kind}")
+        return definition.transport
+
+    def implemented(self) -> tuple[TransportDefinition, ...]:
+        return tuple(definition for definition in self.definitions() if definition.implemented)
+
+    def enabled(self) -> tuple[MediaTransport, ...]:
+        return tuple(definition.transport for definition in self.implemented() if definition.enabled and definition.transport is not None)
+
+    def definitions(self) -> tuple[TransportDefinition, ...]:
+        return tuple(self._definitions[kind] for kind in sorted(self._definitions))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"transports": {definition.kind: definition.to_dict() for definition in self.definitions()}}
+
+
 class StaticMediaTransport:
     def __init__(
         self,
@@ -235,17 +316,23 @@ def transport_capabilities_to_dict(capabilities: TransportCapabilities) -> dict[
     }
 
 
+def default_transport_registry(enabled_kinds: set[TransportKind] | None = None) -> TransportRegistry:
+    implemented = {"asterisk_audiosocket", "webrtc", "local"}
+    enabled = implemented if enabled_kinds is None else enabled_kinds
+    registry = TransportRegistry()
+    for kind, capabilities in sorted(TRANSPORT_CAPABILITIES.items()):
+        if kind in implemented:
+            registry.register(
+                StaticMediaTransport(kind, capabilities),
+                enabled=kind in enabled,
+            )
+        else:
+            registry.register_planned(kind, capabilities, enabled=kind in enabled)
+    return registry
+
+
 def transport_catalog() -> dict[str, Any]:
-    return {
-        "transports": {
-            kind: {
-                "kind": kind,
-                "capabilities": transport_capabilities_to_dict(capabilities),
-                "implemented": kind in {"asterisk_audiosocket", "webrtc", "local"},
-            }
-            for kind, capabilities in sorted(TRANSPORT_CAPABILITIES.items())
-        }
-    }
+    return default_transport_registry().to_dict()
 
 
 def _optional_str(value: Any) -> str | None:

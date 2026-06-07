@@ -4,7 +4,9 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import json
 from pathlib import Path
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Callable, Literal, Protocol, runtime_checkable
+from urllib import request as urllib_request
+from urllib.error import URLError
 from uuid import uuid4
 
 from .events import EventStore, VoicebotEvent
@@ -129,6 +131,38 @@ class SubagentTaskResult:
             "content": self.content,
             "context": self.context,
         }
+
+
+@dataclass(frozen=True)
+class HttpSubagentProviderManifest:
+    submit_url: str
+    label: str = "HTTP subagent service"
+    poll_url: str | None = None
+    cancel_url: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
+    timeout_seconds: float = 10.0
+    required_metadata: tuple[str, ...] = ()
+    result_context: Literal["clean", "raw"] = "clean"
+
+    def __post_init__(self) -> None:
+        if not self.submit_url.strip():
+            raise ValueError("submit_url is required")
+        if not self.label.strip():
+            raise ValueError("label is required")
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        if any(not key.strip() for key in self.required_metadata):
+            raise ValueError("required metadata keys must not be blank")
+
+    def descriptor(self) -> SubagentProviderDescriptor:
+        return SubagentProviderDescriptor(
+            kind="http_service",
+            label=self.label,
+            supports_async_polling=self.poll_url is not None,
+            supports_cancel=self.cancel_url is not None,
+            required_metadata=self.required_metadata,
+            result_context=self.result_context,
+        )
 
 
 def _timestamp() -> str:
@@ -566,6 +600,56 @@ class SubagentCoordinator:
         )
 
 
+class HttpSubagentProvider:
+    kind: Literal["http_service"] = "http_service"
+
+    def __init__(
+        self,
+        manifest: HttpSubagentProviderManifest,
+        http_json: Callable[[str, str, dict[str, Any], dict[str, str], float], dict[str, Any]] | None = None,
+    ) -> None:
+        self.manifest = manifest
+        self.http_json = http_json or _http_json
+
+    @property
+    def descriptor(self) -> SubagentProviderDescriptor:
+        return self.manifest.descriptor()
+
+    def submit(self, request: SubagentTaskRequest) -> SubagentTask:
+        response = self.http_json(
+            "POST",
+            self.manifest.submit_url,
+            {"request": subagent_task_request_to_dict(request)},
+            self.manifest.headers,
+            self.manifest.timeout_seconds,
+        )
+        return _http_subagent_task_from_response(request, response)
+
+    def poll(self, task: SubagentTask) -> SubagentTask:
+        if self.manifest.poll_url is None:
+            return task
+        response = self.http_json(
+            "POST",
+            self.manifest.poll_url,
+            {"task": subagent_task_to_dict(task)},
+            self.manifest.headers,
+            self.manifest.timeout_seconds,
+        )
+        return _http_subagent_task_from_response(task, response)
+
+    def cancel(self, task: SubagentTask) -> SubagentTask:
+        if self.manifest.cancel_url is None:
+            return task.with_status("cancelled", progress_message="HTTP subagent provider does not support cancellation.")
+        response = self.http_json(
+            "POST",
+            self.manifest.cancel_url,
+            {"task": subagent_task_to_dict(task)},
+            self.manifest.headers,
+            self.manifest.timeout_seconds,
+        )
+        return _http_subagent_task_from_response(task, response, default_status="cancelled")
+
+
 class FlowHuntSubagentProvider:
     def __init__(self, kind: Literal["flowhunt_flow", "flowhunt_project"], client: Any, target_id: str) -> None:
         self.kind = kind
@@ -709,6 +793,19 @@ def subagent_task_to_dict(task: SubagentTask) -> dict[str, Any]:
     }
 
 
+def subagent_task_request_to_dict(request: SubagentTaskRequest) -> dict[str, Any]:
+    return {
+        "workspace_id": request.workspace_id,
+        "session_id": request.session_id,
+        "request_event_id": request.request_event_id,
+        "provider": request.provider,
+        "input_text": request.input_text,
+        "voicebot_id": request.voicebot_id,
+        "dedupe_key": request.effective_dedupe_key,
+        "metadata": request.metadata,
+    }
+
+
 def subagent_task_from_dict(data: dict[str, Any]) -> SubagentTask:
     result_data = data.get("result")
     return SubagentTask(
@@ -752,3 +849,72 @@ def subagent_result_from_dict(data: dict[str, Any]) -> SubagentTaskResult:
         context=dict(data.get("context") or {}),
         provider_payload=dict(data.get("provider_payload") or {}),
     )
+
+
+def _http_subagent_task_from_response(
+    source: SubagentTaskRequest | SubagentTask,
+    response: dict[str, Any],
+    *,
+    default_status: SubagentTaskStatus = "running",
+) -> SubagentTask:
+    task_data = response.get("task")
+    if isinstance(task_data, dict):
+        return subagent_task_from_dict(task_data)
+    if isinstance(source, SubagentTask):
+        base = source
+    else:
+        base = SubagentTask(
+            task_id=str(uuid4()),
+            workspace_id=source.workspace_id,
+            session_id=source.session_id,
+            request_event_id=source.request_event_id,
+            provider="http_service",
+            status="requested",
+            input_text=source.input_text,
+            voicebot_id=source.voicebot_id,
+            dedupe_key=source.effective_dedupe_key,
+            metadata=source.metadata,
+        )
+    status = str(response.get("status") or default_status)
+    if status not in {"requested", "accepted", "running", "completed", "failed", "timed_out", "cancelled"}:
+        raise ValueError(f"unsupported HTTP subagent task status: {status}")
+    result = None
+    result_data = response.get("result")
+    if isinstance(result_data, dict):
+        result = subagent_result_from_dict(result_data)
+    elif response.get("summary") is not None or response.get("content") is not None:
+        result = SubagentTaskResult(
+            summary=str(response.get("summary") or ""),
+            content=str(response.get("content") or ""),
+            context=dict(response.get("context") or {}),
+            provider_payload=dict(response.get("provider_payload") or {}),
+        )
+    updated = replace(
+        base,
+        status=status,  # type: ignore[arg-type]
+        external_task_id=str(response["external_task_id"]) if response.get("external_task_id") is not None else base.external_task_id,
+        result=result if result is not None else base.result,
+        error=str(response["error"]) if response.get("error") is not None else None,
+        progress_messages=tuple(str(item) for item in response.get("progress_messages", base.progress_messages)),
+        provider_references={**base.provider_references, **dict(response.get("provider_references") or {})},
+        updated_at=_timestamp(),
+    )
+    return updated
+
+
+def _http_json(method: str, url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float) -> dict[str, Any]:
+    body = json.dumps(payload).encode("utf-8")
+    request = urllib_request.Request(
+        url,
+        data=body,
+        method=method,
+        headers={"Content-Type": "application/json", **headers},
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (OSError, URLError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"HTTP subagent request failed: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("HTTP subagent response must be a JSON object")
+    return data

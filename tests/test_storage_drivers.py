@@ -15,6 +15,7 @@ from voicebot.events import EventStore
 from voicebot.runtime_storage import (
     build_agent_task_tracker,
     build_audio_artifact_store,
+    build_call_state_store,
     build_event_store,
     build_provider_config_store,
     build_subagent_task_store,
@@ -36,6 +37,7 @@ class StorageDriverTests(unittest.TestCase):
 
         event_definitions = {definition.driver: definition for definition in registry.definitions_for_family("events")}
         agent_task_definitions = {definition.driver: definition for definition in registry.definitions_for_family("agent_tasks")}
+        call_state_definitions = {definition.driver: definition for definition in registry.definitions_for_family("call_states")}
         artifact_drivers = {definition.driver for definition in registry.definitions_for_family("audio_artifacts")}
         queue_drivers = {definition.driver for definition in registry.definitions_for_family("worker_queue")}
 
@@ -48,6 +50,7 @@ class StorageDriverTests(unittest.TestCase):
         self.assertFalse(event_definitions["postgres"].implemented)
         self.assertFalse(event_definitions["flowhunt_db"].implemented)
         self.assertTrue(agent_task_definitions["redis"].implemented)
+        self.assertTrue(call_state_definitions["redis"].implemented)
         self.assertIn("s3", artifact_drivers)
         self.assertIn("redis", {definition.driver for definition in registry.definitions_for_family("session_leases")})
         self.assertIn("redis_streams", queue_drivers)
@@ -181,6 +184,15 @@ class StorageDriverTests(unittest.TestCase):
 
         self.assertEqual(attached_storage_driver(tracker).driver, "redis")
         self.assertEqual(attached_storage_driver(tracker).options["redis_url"], "redis://test")
+
+    def test_call_state_redis_driver_is_buildable(self) -> None:
+        with patch("voicebot.storage.redis_call_state._redis_client_from_url", return_value=FakeRedis()):
+            store = build_call_state_store(
+                Settings(call_state_store_provider="redis", redis_url="redis://test")
+            )
+
+        self.assertEqual(attached_storage_driver(store).driver, "redis")
+        self.assertEqual(attached_storage_driver(store).options["redis_url"], "redis://test")
 
     def test_unknown_storage_driver_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported storage driver"):

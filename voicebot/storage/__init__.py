@@ -20,6 +20,7 @@ from .errors import (
 )
 from .health import storage_component_diagnostics, storage_component_health
 from .redis_agent_tasks import RedisAgentTaskTracker
+from .redis_call_state import RedisCallStateStore
 from .redis_leases import RedisSessionLeaseStore
 from .sqlite_events import SQLiteEventStore
 from .protocols import (
@@ -47,6 +48,7 @@ __all__ = [
     "FilesystemArtifactStore",
     "ProviderConfigStoreProtocol",
     "RedisAgentTaskTracker",
+    "RedisCallStateStore",
     "RedisSessionLeaseStore",
     "SessionLeaseStoreProtocol",
     "SipTrunkStoreProtocol",

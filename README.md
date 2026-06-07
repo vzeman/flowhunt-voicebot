@@ -588,6 +588,28 @@ VOICEBOT_STT_PIPELINE='[
 ]'
 ```
 
+## Local Development
+
+Create a virtual environment and install the project in editable mode:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+Run the deterministic test suite from the repository root:
+
+```bash
+pytest -q
+```
+
+Start the voicebot runtime without Docker:
+
+```bash
+flowhunt-voicebot
+```
+
 ## Local Microphone Echo Demo
 
 The original local microphone/speaker test script is still available:

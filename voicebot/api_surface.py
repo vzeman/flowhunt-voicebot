@@ -103,6 +103,7 @@ FLOWHUNT_API_SURFACE: tuple[ApiEndpointSpec, ...] = (
     ApiEndpointSpec("GET", "/observability/slo", "runtime", "internal", workspace_scoped=True, scope_source="query", description="Evaluate operational SLOs for a filtered event slice."),
     ApiEndpointSpec("GET", "/observability/diagnostics", "runtime", "internal", workspace_scoped=True, scope_source="query", description="Return support-safe diagnostics and troubleshooting hints."),
     ApiEndpointSpec("GET", "/scaling/session-leases", "scaling", "internal", workspace_scoped=True, scope_source="query", description="Inspect active session leases."),
+    ApiEndpointSpec("GET", "/scaling/session-ownership", "scaling", "internal", workspace_scoped=False, scope_source="none", description="Audit active sessions against current owner leases."),
     ApiEndpointSpec("POST", "/scaling/session-leases/acquire", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Acquire active session lease."),
     ApiEndpointSpec("POST", "/scaling/session-leases/renew", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Renew active session lease."),
     ApiEndpointSpec("POST", "/scaling/session-leases/release", "scaling", "internal", workspace_scoped=True, scope_source="payload", description="Release active session lease."),

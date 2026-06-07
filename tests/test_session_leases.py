@@ -14,20 +14,30 @@ from voicebot.config import Settings
 from voicebot.events import EventStore
 from voicebot.runtime_storage import build_session_lease_store
 from voicebot.session_leases import JsonSessionLeaseStore, SessionLeaseStore
+from voicebot.session_ownership import audit_session_ownership
 from voicebot.transcripts import TranscriptStore
 
 
 class FakeSession:
-    def __init__(self, call_id: str = "call-1") -> None:
+    def __init__(
+        self,
+        call_id: str = "call-1",
+        session_id: str = "session-1",
+        workspace_id: str = "workspace-1",
+        voicebot_id: str = "voicebot-1",
+    ) -> None:
         self.call_id = call_id
+        self.session_id = session_id
+        self.workspace_id = workspace_id
+        self.voicebot_id = voicebot_id
         self.stopped = False
 
     def snapshot(self) -> dict:
         return {
             "call_id": self.call_id,
-            "session_id": "session-1",
+            "session_id": self.session_id,
             "transport": "webrtc",
-            "route": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"},
+            "route": {"workspace_id": self.workspace_id, "voicebot_id": self.voicebot_id},
         }
 
     def stop(self) -> None:
@@ -118,7 +128,57 @@ class SessionLeaseStoreTests(unittest.TestCase):
         self.assertIsInstance(memory_store, SessionLeaseStore)
 
 
+class SessionOwnershipAuditTests(unittest.TestCase):
+    def test_audit_session_ownership_classifies_owned_missing_and_mismatched_sessions(self) -> None:
+        leases = SessionLeaseStore()
+        leases.acquire("workspace-1", "voicebot-1", "session-1", "worker-1", 30, call_id="call-1")
+        leases.acquire("workspace-1", "voicebot-1", "session-2", "worker-2", 30, call_id="call-2")
+        snapshots = [
+            FakeSession("call-1", "session-1").snapshot(),
+            FakeSession("call-2", "session-2").snapshot(),
+            FakeSession("call-3", "session-3").snapshot(),
+            {"call_id": "call-4"},
+        ]
+
+        rows = audit_session_ownership(snapshots, leases, expected_owner="worker-1")
+
+        self.assertEqual([row["status"] for row in rows], ["owned", "owner_mismatch", "missing", "unscoped"])
+        self.assertEqual(rows[1]["current_owner"], "worker-2")
+        self.assertEqual(rows[2]["reason"], "lease_missing")
+
+
 class SessionLeaseApiTests(unittest.TestCase):
+    def test_session_ownership_api_reports_owner_drift_without_stopping_sessions(self) -> None:
+        registry = CallRegistry()
+        owned = FakeSession("call-1", "session-1")
+        mismatched = FakeSession("call-2", "session-2")
+        missing = FakeSession("call-3", "session-3")
+        registry.add(owned)
+        registry.add(mismatched)
+        registry.add(missing)
+        leases = SessionLeaseStore()
+        leases.acquire("workspace-1", "voicebot-1", "session-1", "worker-1", 30, call_id="call-1")
+        leases.acquire("workspace-1", "voicebot-1", "session-2", "worker-2", 30, call_id="call-2")
+        app = create_app(
+            EventStore(max_context_events=20),
+            registry,
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+            session_leases=leases,
+        )
+        client = TestClient(app)
+
+        response = client.get("/scaling/session-ownership?expected_owner=worker-1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["summary"], {"total": 3, "owned": 1, "missing": 1, "owner_mismatch": 1, "unscoped": 0})
+        self.assertEqual([session["status"] for session in response.json()["sessions"]], ["owned", "owner_mismatch", "missing"])
+        self.assertFalse(owned.stopped)
+        self.assertFalse(mismatched.stopped)
+        self.assertFalse(missing.stopped)
+
     def test_session_lease_api_acquires_renews_releases_and_lists(self) -> None:
         events = EventStore(max_context_events=20)
         app = create_app(

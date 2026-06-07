@@ -47,6 +47,7 @@ class Settings:
     api_port: int = env_int("VOICEBOT_API_PORT", 8080)
     audiosocket_host: str = os.getenv("VOICEBOT_AUDIOSOCKET_HOST", "0.0.0.0")
     audiosocket_port: int = env_int("VOICEBOT_AUDIOSOCKET_PORT", 9019)
+    enabled_transports: tuple[str, ...] = env_csv_tuple("VOICEBOT_ENABLED_TRANSPORTS", ("asterisk_audiosocket", "webrtc"))
     webrtc_stun_urls: tuple[str, ...] = env_csv_tuple("VOICEBOT_WEBRTC_STUN_URLS", ("stun:stun.l.google.com:19302",))
 
     stt_provider: str = os.getenv("VOICEBOT_STT_PROVIDER", "whisper")

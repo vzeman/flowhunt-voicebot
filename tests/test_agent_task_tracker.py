@@ -5,6 +5,7 @@ import time
 import unittest
 
 from voicebot.agent_tasks import AgentTaskTracker, JsonAgentTaskTracker
+from voicebot.storage.redis_agent_tasks import RedisAgentTaskTracker
 
 
 class AgentTaskTrackerTests(unittest.TestCase):
@@ -134,6 +135,105 @@ class AgentTaskTrackerTests(unittest.TestCase):
 
         self.assertTrue(reloaded.is_pending(1))
         self.assertEqual(reloaded.snapshot()["claims"], {})
+
+    def test_redis_tracker_claims_and_responded_ids_use_shared_client(self) -> None:
+        client = FakeRedis()
+        first = RedisAgentTaskTracker("redis://test", client=client, max_responded_event_ids=2)
+        second = RedisAgentTaskTracker("redis://test", client=client, max_responded_event_ids=2)
+
+        self.assertEqual(first.claim([1, 2], "worker-1", 30), [1, 2])
+        self.assertEqual(second.claim([1], "worker-2", 30), [])
+        self.assertEqual(second.release_many([1], owner="worker-2"), [])
+        self.assertEqual(second.release_many([1], owner="worker-1"), [1])
+        self.assertEqual(second.claim([1], "worker-2", 30), [1])
+
+        first.mark_responded(1)
+
+        self.assertEqual(second.claim([1], "worker-3", 30), [])
+        self.assertEqual(second.task_state(1), {"state": "responded"})
+        self.assertEqual(second.snapshot()["responded_event_ids"], [1])
+
+    def test_redis_tracker_claims_expire(self) -> None:
+        tracker = RedisAgentTaskTracker("redis://test", client=FakeRedis())
+
+        self.assertEqual(tracker.claim([1], "worker-1", 1), [1])
+        self.assertFalse(tracker.is_pending(1))
+        time.sleep(1.1)
+
+        self.assertTrue(tracker.is_pending(1))
+
+    def test_redis_tracker_prunes_responded_ids(self) -> None:
+        tracker = RedisAgentTaskTracker("redis://test", client=FakeRedis(), max_responded_event_ids=2)
+
+        tracker.mark_responded(1)
+        tracker.mark_responded(2)
+        tracker.mark_responded(3)
+
+        self.assertEqual(tracker.snapshot()["responded_event_ids"], [2, 3])
+        self.assertEqual(tracker.snapshot()["responded_event_id_floor"], 1)
+        self.assertFalse(tracker.is_pending(1))
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, tuple[str, float | None]] = {}
+
+    def ping(self) -> bool:
+        return True
+
+    def get(self, key: str) -> str | None:
+        self._expire()
+        item = self.values.get(key)
+        return item[0] if item is not None else None
+
+    def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        px: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        self._expire()
+        if nx and key in self.values:
+            return False
+        if px is not None:
+            expires_at = time.monotonic() + (px / 1000)
+        elif ex is not None:
+            expires_at = time.monotonic() + ex
+        else:
+            expires_at = None
+        self.values[key] = (value, expires_at)
+        return True
+
+    def delete(self, *keys: str) -> int:
+        removed = 0
+        for key in keys:
+            if key in self.values:
+                removed += 1
+            self.values.pop(key, None)
+        return removed
+
+    def keys(self, pattern: str) -> list[str]:
+        self._expire()
+        prefix = pattern.rstrip("*")
+        return [key for key in self.values if key.startswith(prefix)]
+
+    def ttl(self, key: str) -> int:
+        self._expire()
+        item = self.values.get(key)
+        if item is None:
+            return -2
+        expires_at = item[1]
+        if expires_at is None:
+            return -1
+        return max(0, int(expires_at - time.monotonic()))
+
+    def _expire(self) -> None:
+        now = time.monotonic()
+        expired = [key for key, (_value, expires_at) in self.values.items() if expires_at is not None and expires_at <= now]
+        for key in expired:
+            self.values.pop(key, None)
 
 
 if __name__ == "__main__":

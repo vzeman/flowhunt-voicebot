@@ -10,6 +10,9 @@ from voicebot.transports import (
     MediaSessionDescriptor,
     StaticMediaTransport,
     TransportCapabilities,
+    TransportDefinition,
+    TransportRegistry,
+    default_transport_registry,
     transport_catalog,
 )
 
@@ -142,6 +145,40 @@ class TransportContractTests(unittest.TestCase):
         self.assertIn("transfer", catalog["transports"]["asterisk_audiosocket"]["capabilities"]["call_control"])
         self.assertNotIn("transfer", catalog["transports"]["webrtc"]["capabilities"]["call_control"])
         self.assertTrue(catalog["transports"]["webrtc"]["implemented"])
+        self.assertTrue(catalog["transports"]["webrtc"]["enabled"])
+        self.assertFalse(catalog["transports"]["twilio"]["implemented"])
+
+    def test_default_transport_registry_selects_enabled_implemented_transports(self) -> None:
+        registry = default_transport_registry(enabled_kinds={"webrtc"})
+        disabled_registry = default_transport_registry(enabled_kinds=set())
+
+        selected = registry.get("webrtc")
+        disabled = registry.get("asterisk_audiosocket", require_enabled=False)
+
+        self.assertEqual(selected.kind, "webrtc")
+        self.assertEqual(disabled.kind, "asterisk_audiosocket")
+        self.assertEqual([transport.kind for transport in registry.enabled()], ["webrtc"])
+        self.assertEqual(disabled_registry.enabled(), ())
+        with self.assertRaisesRegex(ValueError, "not enabled"):
+            registry.get("asterisk_audiosocket")
+        with self.assertRaisesRegex(ValueError, "not implemented"):
+            registry.get("twilio", require_enabled=False)
+
+    def test_transport_registry_rejects_duplicate_and_invalid_definitions(self) -> None:
+        registry = TransportRegistry()
+        registry.register(StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES))
+
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            registry.register(StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES))
+        with self.assertRaisesRegex(ValueError, "requires adapter"):
+            TransportDefinition("webrtc", WEBRTC_CAPABILITIES, implemented=True)
+        with self.assertRaisesRegex(ValueError, "must not provide adapter"):
+            TransportDefinition(
+                "twilio",
+                TransportCapabilities(),
+                implemented=False,
+                transport=StaticMediaTransport("twilio", TransportCapabilities()),
+            )
 
 
 if __name__ == "__main__":

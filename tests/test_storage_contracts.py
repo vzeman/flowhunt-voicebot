@@ -10,6 +10,7 @@ from voicebot.call_state import CallStateStore, JsonCallStateStore
 from voicebot.events import EventStore, JsonEventStore
 from voicebot.storage import (
     FilesystemArtifactStore,
+    S3ArtifactStore,
     StorageConflict,
     StorageError,
     StorageNotFound,
@@ -115,6 +116,12 @@ class StorageContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             assert_artifact_store_contract(self, lambda: FilesystemArtifactStore(directory))
 
+    def test_s3_artifact_store_contract(self) -> None:
+        assert_artifact_store_contract(
+            self,
+            lambda: S3ArtifactStore("voicebot-audio", client=FakeS3()),
+        )
+
     def test_storage_health_reports_recovery_warnings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "calls.json"
@@ -203,6 +210,49 @@ class FakeRedis:
         expired = [key for key, (_value, expires_at) in self.values.items() if expires_at is not None and expires_at <= now]
         for key in expired:
             self.values.pop(key, None)
+
+
+class FakeBody:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+
+    def read(self) -> bytes:
+        return self.data
+
+
+class FakeS3:
+    def __init__(self) -> None:
+        self.objects: dict[tuple[str, str], tuple[bytes, dict[str, str]]] = {}
+
+    def put_object(self, *, Bucket: str, Key: str, Body: bytes, Metadata: dict[str, str]) -> dict:
+        self.objects[(Bucket, Key)] = (Body, Metadata)
+        return {}
+
+    def get_object(self, *, Bucket: str, Key: str) -> dict:
+        try:
+            data, metadata = self.objects[(Bucket, Key)]
+        except KeyError as exc:
+            raise FileNotFoundError(Key) from exc
+        return {"Body": FakeBody(data), "Metadata": metadata}
+
+    def delete_object(self, *, Bucket: str, Key: str) -> dict:
+        self.objects.pop((Bucket, Key), None)
+        return {}
+
+    def list_objects_v2(self, *, Bucket: str, Prefix: str) -> dict:
+        contents = [
+            {"Key": key}
+            for bucket, key in sorted(self.objects)
+            if bucket == Bucket and key.startswith(Prefix)
+        ]
+        return {"Contents": contents}
+
+    def head_object(self, *, Bucket: str, Key: str) -> dict:
+        try:
+            _data, metadata = self.objects[(Bucket, Key)]
+        except KeyError as exc:
+            raise FileNotFoundError(Key) from exc
+        return {"Metadata": metadata}
 
 
 if __name__ == "__main__":

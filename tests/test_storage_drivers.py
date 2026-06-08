@@ -22,6 +22,7 @@ from voicebot.runtime_storage import (
     build_subagent_task_store,
     build_transcript_store,
     build_voicebot_session_store,
+    build_worker_queue_store,
     build_worker_registry,
     default_storage_registry,
     selected_storage_drivers,
@@ -30,6 +31,7 @@ from voicebot.runtime_storage import (
 from voicebot.storage import attached_storage_driver, normalize_driver_name
 from voicebot.storage.redis_leases import RedisSessionLeaseStore
 from voicebot.storage.redis_subagent_tasks import RedisSubagentTaskStore
+from voicebot.storage.redis_worker_queue import RedisWorkerQueueStore
 from voicebot.storage.redis_worker_registry import RedisWorkerRegistry
 from voicebot.storage.sqlite_events import SQLiteEventStore
 from voicebot.storage.sqlite_provider_config import SQLiteProviderConfigStore
@@ -71,6 +73,7 @@ class StorageDriverTests(unittest.TestCase):
         self.assertFalse(event_definitions["flowhunt_db"].implemented)
         self.assertTrue(agent_task_definitions["redis"].implemented)
         self.assertTrue(call_state_definitions["redis"].implemented)
+        self.assertTrue({definition.driver: definition for definition in registry.definitions_for_family("worker_queue")}["redis"].implemented)
         self.assertTrue(worker_registry_definitions["redis"].implemented)
         self.assertFalse(worker_registry_definitions["flowhunt_db"].implemented)
         self.assertTrue(subagent_task_definitions["redis"].implemented)
@@ -243,6 +246,16 @@ class StorageDriverTests(unittest.TestCase):
         self.assertIsInstance(registry, RedisWorkerRegistry)
         self.assertEqual(attached_storage_driver(registry).driver, "redis")
         self.assertEqual(attached_storage_driver(registry).options["redis_url"], "redis://test")
+
+    def test_worker_queue_redis_driver_is_buildable(self) -> None:
+        with patch("voicebot.storage.redis_worker_queue._redis_client_from_url", return_value=FakeRedis()):
+            store = build_worker_queue_store(
+                Settings(worker_queue_store_provider="redis", redis_url="redis://test")
+            )
+
+        self.assertIsInstance(store, RedisWorkerQueueStore)
+        self.assertEqual(attached_storage_driver(store).driver, "redis")
+        self.assertEqual(attached_storage_driver(store).options["redis_url"], "redis://test")
 
     def test_subagent_task_redis_driver_is_buildable(self) -> None:
         with patch("voicebot.storage.redis_subagent_tasks._redis_client_from_url", return_value=FakeRedis()):

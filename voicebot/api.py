@@ -10,7 +10,7 @@ from time import perf_counter
 from typing import Any, get_args
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from .agent_tasks import AgentTaskTracker
 from .api_agent_tasks import (
@@ -29,16 +29,9 @@ from .api_observability import ObservabilityApiContext, create_observability_rou
 from .api_models import (
     AgentResponseRequest,
     CallControlRequest,
-    IncomingSessionAdmissionRequest,
     PlaybackInterruptRequest,
     PublicVoicebotRoutePatchRequest,
     PublicVoicebotRouteRequest,
-    ScalingAdmissionRequest,
-    ScalingBackpressureRequest,
-    ScalingWorkloadPlanRequest,
-    SessionLeaseEnforceRequest,
-    SessionLeaseReleaseRequest,
-    SessionLeaseRequest,
     SipTrunkRequest,
     VoicebotAdminPatchRequest,
     VoicebotAdminRequest,
@@ -47,15 +40,12 @@ from .api_models import (
     VoicebotPromptConfigPatchRequest,
     VoicebotPromptConfigRequest,
     VoicebotRuntimeConfigRequest,
-    WorkerQueueClaimRequest,
-    WorkerQueueEnqueueRequest,
-    WorkerHeartbeatRequest,
-    WorkerQueueItemRequest,
     WebRTCOfferRequest,
 )
 from .api_events import EventsApiContext, create_events_router, events_payload, metrics_payload
 from .api_providers import ProvidersApiContext, create_providers_router
 from .api_runtime import RuntimeApiContext, create_runtime_router
+from .api_scaling import ScalingApiContext, create_scaling_router
 from .api_security import SecurityApiContext, create_security_router
 from .api_subagents import SubagentsApiContext, create_subagents_router
 from .api_transcripts import (
@@ -103,29 +93,15 @@ from .provider_config import (
     ProviderConfigStore,
     SecretReference,
     VoicebotProviderConfig,
-    provider_config_to_dict,
     provider_selection_plan,
     selection_plan_to_dict,
     validate_provider_config,
     validation_issue_to_dict,
 )
 from .scaling import (
-    RoutingKey,
-    WorkerInstance,
-    WorkerQueueEnvelope,
     WorkerQueueStore,
     WorkerRegistry,
-    WorkerRole,
-    WorkloadProfile,
-    WarmCapacityPolicy,
     WorkspaceBackpressure,
-    admission_decision,
-    autoscaling_signals,
-    autoscaling_signals_prometheus,
-    build_workload_plan,
-    default_work_priority,
-    default_deployment_topology,
-    priority_routing_rules,
 )
 from .session_leases import SessionLeaseStore
 from .security_contract import redact_sensitive_data
@@ -145,8 +121,6 @@ from .runtime_config import (
     runtime_config_to_dict,
 )
 from .realtime_quality import metric_latency_budget_seconds
-from .routing_admission import IncomingSessionRequest, evaluate_incoming_session
-from .session_ownership import audit_session_ownership
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
 from .tool_executor import AgentToolExecutor
@@ -156,7 +130,6 @@ from .webrtc import WebRTCSessionManager
 from .webrtc_media_plane import webrtc_media_plane_payload
 from .workspace_access import WorkspaceAccessPolicy, workspace_access_policy_from_settings
 from .workspace_model import (
-    ChannelKind,
     ChannelResolver,
     PublicVoicebotRoute,
     PublicVoicebotRouteStore,
@@ -681,6 +654,23 @@ def create_app(
         validated_limit=validated_limit,
     )
     app.include_router(create_transcripts_router(transcripts_api_context))
+    app.include_router(
+        create_scaling_router(
+            ScalingApiContext(
+                events=events,
+                registry=registry,
+                worker_registry=scaling_workers,
+                worker_queue=scaling_queue,
+                backpressure=scaling_backpressure,
+                session_lease_store=session_lease_store,
+                channel_resolver=channel_resolver,
+                voicebot_store=voicebot_store,
+                provider_config_store=provider_config_store,
+                runtime_config_store=runtime_config_store,
+                workspace_access_policy=workspace_access_policy,
+            )
+        )
+    )
 
     @app.get("/workspaces/{workspace_id}/voicebots")
     def list_workspace_voicebots(workspace_id: str) -> dict[str, Any]:
@@ -1254,412 +1244,6 @@ def create_app(
             "event": event_to_dict(event),
         }
 
-    @app.get("/scaling/topology")
-    def scaling_topology() -> dict[str, Any]:
-        return default_deployment_topology().as_dict()
-
-    @app.post("/scaling/workload-plan")
-    def scaling_workload_plan(request: ScalingWorkloadPlanRequest) -> dict[str, Any]:
-        try:
-            profile = WorkloadProfile(
-                workspace_id=request.workspace_id,
-                voicebot_id=request.voicebot_id,
-                concurrent_sessions=request.concurrent_sessions,
-                session_id=request.session_id,
-                stt_provider=request.stt_provider,
-                tts_provider=request.tts_provider,
-                agent_provider=request.agent_provider,
-                baseline_sessions=request.baseline_sessions,
-                call_growth_per_minute=request.call_growth_per_minute,
-                worker_warmup_seconds=request.worker_warmup_seconds,
-                max_concurrent_sessions=request.max_concurrent_sessions,
-                burst_sessions=request.burst_sessions,
-                scale_to_zero_allowed=request.scale_to_zero_allowed,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        return build_workload_plan(profile)
-
-    @app.get("/scaling/signals")
-    def scaling_signals(
-        workspace_id: str | None = None,
-        voicebot_id: str | None = None,
-        format: str = "json",
-    ):
-        signals = autoscaling_signals(
-            active_session_snapshots=registry.snapshots(),
-            worker_registry=scaling_workers,
-            worker_queue=scaling_queue,
-            events=events.list_events(limit=1000),
-            workspace_id=workspace_id,
-            voicebot_id=voicebot_id,
-        )
-        if format == "prometheus":
-            return PlainTextResponse(autoscaling_signals_prometheus(signals), media_type="text/plain; version=0.0.4")
-        if format != "json":
-            raise HTTPException(status_code=400, detail="format must be json or prometheus")
-        return signals
-
-    @app.post("/scaling/admission")
-    def scaling_admission(request: ScalingAdmissionRequest) -> dict[str, Any]:
-        try:
-            policy = WarmCapacityPolicy(
-                max_concurrent_sessions=request.max_concurrent_sessions,
-                burst_sessions=request.burst_sessions,
-                scale_to_zero_allowed=request.scale_to_zero_allowed,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        decision = admission_decision(
-            active_session_snapshots=registry.snapshots(),
-            workspace_id=request.workspace_id,
-            voicebot_id=request.voicebot_id,
-            policy=policy,
-        )
-        if not decision["allowed"]:
-            events.append(
-                request.workspace_id,
-                "metrics",
-                {
-                    "name": "capacity_rejection",
-                    "value": 1.0,
-                    "workspace_id": request.workspace_id,
-                    "voicebot_id": request.voicebot_id,
-                    "reason": decision["reason"],
-                },
-            )
-        return decision
-
-    @app.post("/routing/admission")
-    def routing_admission(request: IncomingSessionAdmissionRequest) -> dict[str, Any]:
-        try:
-            admission_request = IncomingSessionRequest(
-                channel_kind=validated_channel_kind(request.channel_kind),
-                external_id=request.external_id,
-                session_id=request.session_id,
-                owner=request.owner,
-                transport=request.transport,
-                call_id=request.call_id,
-                acquire_lease=request.acquire_lease,
-                lease_ttl_seconds=request.lease_ttl_seconds,
-                max_concurrent_sessions=request.max_concurrent_sessions,
-                burst_sessions=request.burst_sessions,
-            )
-            decision = evaluate_incoming_session(
-                admission_request,
-                channel_resolver=channel_resolver,
-                voicebot_store=voicebot_store,
-                provider_config_store=provider_config_store,
-                runtime_config_store=runtime_config_store,
-                workspace_access_policy=workspace_access_policy,
-                session_lease_store=session_lease_store,
-                active_session_snapshots=registry.snapshots(),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        event = events.append(
-            decision.get("call_id") or decision.get("session_id") or request.external_id,
-            "session_admission_decided",
-            {
-                key: value
-                for key, value in decision.items()
-                if key not in {"lease"}
-            },
-        )
-        if not decision["allowed"]:
-            events.append(
-                decision.get("workspace_id") or request.external_id,
-                "metrics",
-                {
-                    "name": "capacity_rejection",
-                    "value": 1.0,
-                    "reason": decision["reason"],
-                    "workspace_id": decision.get("workspace_id"),
-                    "voicebot_id": decision.get("voicebot_id"),
-                    "transport": request.transport,
-                },
-            )
-        return {"event_id": event.id, **decision}
-
-    @app.post("/scaling/workers/heartbeat")
-    def scaling_worker_heartbeat(request: WorkerHeartbeatRequest) -> dict[str, Any]:
-        try:
-            worker = scaling_workers.heartbeat(
-                WorkerInstance(
-                    worker_id=request.worker_id,
-                    role=validated_worker_role(request.role),
-                    queue=request.queue,
-                    workspace_id=request.workspace_id,
-                    voicebot_id=request.voicebot_id,
-                    capacity=request.capacity,
-                    status=validated_worker_status(request.status),
-                )
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        return {"worker": worker.as_dict()}
-
-    @app.get("/scaling/workers")
-    def scaling_worker_list(
-        role: str | None = None,
-        workspace_id: str | None = None,
-        voicebot_id: str | None = None,
-    ) -> dict[str, Any]:
-        try:
-            worker_role = validated_worker_role(role) if role else None
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        workers = scaling_workers.active(role=worker_role, workspace_id=workspace_id, voicebot_id=voicebot_id)
-        return {"workers": [worker.as_dict() for worker in workers]}
-
-    @app.post("/scaling/workers/{worker_id}/drain")
-    def scaling_worker_drain(worker_id: str) -> dict[str, Any]:
-        try:
-            worker = scaling_workers.mark_draining(worker_id)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="worker not found") from None
-        return {"worker": worker.as_dict()}
-
-    @app.delete("/scaling/workers/{worker_id}")
-    def scaling_worker_remove(worker_id: str) -> dict[str, Any]:
-        return {"removed": scaling_workers.remove(worker_id)}
-
-    @app.get("/scaling/capacity")
-    def scaling_capacity(workspace_id: str | None = None, voicebot_id: str | None = None) -> dict[str, Any]:
-        return scaling_workers.capacity_summary(workspace_id=workspace_id, voicebot_id=voicebot_id)
-
-    @app.get("/scaling/backpressure")
-    def scaling_backpressure_snapshot() -> dict[str, Any]:
-        return scaling_backpressure.snapshot()
-
-    @app.get("/scaling/session-leases")
-    def scaling_session_lease_snapshot(workspace_id: str | None = None, voicebot_id: str | None = None) -> dict[str, Any]:
-        return {"leases": [lease.as_dict() for lease in session_lease_store.list(workspace_id=workspace_id, voicebot_id=voicebot_id)]}
-
-    @app.get("/scaling/session-ownership")
-    def scaling_session_ownership(expected_owner: str | None = None) -> dict[str, Any]:
-        rows = audit_session_ownership(registry.snapshots(), session_lease_store, expected_owner=expected_owner)
-        return {
-            "expected_owner": expected_owner,
-            "sessions": rows,
-            "summary": {
-                "total": len(rows),
-                "owned": sum(1 for row in rows if row["status"] == "owned"),
-                "missing": sum(1 for row in rows if row["status"] == "missing"),
-                "owner_mismatch": sum(1 for row in rows if row["status"] == "owner_mismatch"),
-                "unscoped": sum(1 for row in rows if row["status"] == "unscoped"),
-            },
-        }
-
-    @app.post("/scaling/session-leases/acquire")
-    def scaling_session_lease_acquire(request: SessionLeaseRequest) -> dict[str, Any]:
-        try:
-            lease = session_lease_store.acquire(
-                request.workspace_id,
-                request.voicebot_id,
-                request.session_id,
-                request.owner,
-                request.ttl_seconds,
-                call_id=request.call_id,
-                transport=request.transport,
-                metadata=request.metadata,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        if lease is not None:
-            events.append(lease.call_id or lease.session_id, "session_lease_acquired", lease.as_dict())
-        return {"acquired": lease is not None, "lease": lease.as_dict() if lease is not None else None}
-
-    @app.post("/scaling/session-leases/renew")
-    def scaling_session_lease_renew(request: SessionLeaseRequest) -> dict[str, Any]:
-        try:
-            lease = session_lease_store.renew(
-                request.workspace_id,
-                request.voicebot_id,
-                request.session_id,
-                request.owner,
-                request.ttl_seconds,
-                call_id=request.call_id,
-                transport=request.transport,
-                metadata=request.metadata,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        if lease is not None:
-            events.append(lease.call_id or lease.session_id, "session_lease_renewed", lease.as_dict())
-        return {"renewed": lease is not None, "lease": lease.as_dict() if lease is not None else None}
-
-    @app.post("/scaling/session-leases/release")
-    def scaling_session_lease_release(request: SessionLeaseReleaseRequest) -> dict[str, Any]:
-        lease = session_lease_store.release(
-            request.workspace_id,
-            request.voicebot_id,
-            request.session_id,
-            owner=request.owner,
-        )
-        if lease is not None:
-            events.append(lease.call_id or lease.session_id, "session_lease_released", lease.as_dict())
-        return {"released": lease is not None, "lease": lease.as_dict() if lease is not None else None}
-
-    @app.post("/scaling/session-leases/expire")
-    def scaling_session_lease_expire() -> dict[str, Any]:
-        expired = session_lease_store.expire()
-        for lease in expired:
-            events.append(lease.call_id or lease.session_id, "session_lease_expired", lease.as_dict())
-        return {"expired": [lease.as_dict() for lease in expired]}
-
-    @app.post("/scaling/session-leases/enforce")
-    def scaling_session_lease_enforce(request: SessionLeaseEnforceRequest) -> dict[str, Any]:
-        expired = session_lease_store.expire()
-        for lease in expired:
-            events.append(lease.call_id or lease.session_id, "session_lease_expired", lease.as_dict())
-        interrupted = []
-        recovered = []
-        for row in audit_session_ownership(registry.snapshots(), session_lease_store, expected_owner=request.owner):
-            if row["status"] in {"owned", "unscoped"}:
-                continue
-            loss_data = {
-                "workspace_id": row["workspace_id"],
-                "voicebot_id": row["voicebot_id"],
-                "session_id": row["session_id"],
-                "call_id": row["call_id"],
-                "transport": row["transport"],
-                "expected_owner": request.owner,
-                "current_owner": row["current_owner"],
-                "reason": row["reason"],
-            }
-            events.append(row["call_id"], "session_lease_lost", loss_data)
-            reacquired_lease = None
-            if request.reacquire_missing_leases and row["status"] == "missing":
-                reacquired_lease = session_lease_store.acquire(
-                    row["workspace_id"],
-                    row["voicebot_id"],
-                    row["session_id"],
-                    request.owner,
-                    request.lease_ttl_seconds,
-                    call_id=row["call_id"],
-                    transport=row["transport"],
-                    metadata={"recovered_from": row["reason"]},
-                )
-                if reacquired_lease is not None:
-                    events.append(row["call_id"], "session_lease_reacquired", reacquired_lease.as_dict())
-            if request.recover_non_media_work:
-                recovered_event = events.append(
-                    row["call_id"],
-                    "session_recovered",
-                    {
-                        **loss_data,
-                        "recovered_work": ["subagent_polling", "transcript_storage", "late_task_results"],
-                        "reacquired_lease": reacquired_lease.as_dict() if reacquired_lease is not None else None,
-                    },
-                )
-                recovered.append(event_to_dict(recovered_event))
-            if request.stop_unleased_sessions:
-                stopped = registry.stop(row["call_id"])
-                interrupted_event = events.append(row["call_id"], "session_interrupted", {**loss_data, "stopped": stopped})
-                interrupted.append(event_to_dict(interrupted_event))
-        return {
-            "expired": [lease.as_dict() for lease in expired],
-            "recovered": recovered,
-            "interrupted": interrupted,
-        }
-
-    @app.post("/scaling/backpressure/acquire")
-    def scaling_backpressure_acquire(request: ScalingBackpressureRequest) -> dict[str, Any]:
-        try:
-            key = backpressure_key_from_request(request)
-            acquired = scaling_backpressure.acquire(key)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        return {"acquired": acquired, "key": key, **scaling_backpressure.snapshot()}
-
-    @app.post("/scaling/backpressure/release")
-    def scaling_backpressure_release(request: ScalingBackpressureRequest) -> dict[str, Any]:
-        try:
-            key = backpressure_key_from_request(request)
-            scaling_backpressure.release(key)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        return {"released": True, "key": key, **scaling_backpressure.snapshot()}
-
-    @app.get("/scaling/queue")
-    def scaling_queue_snapshot() -> dict[str, Any]:
-        return scaling_queue.snapshot()
-
-    @app.post("/scaling/queue/enqueue")
-    def scaling_queue_enqueue(request: WorkerQueueEnqueueRequest) -> dict[str, Any]:
-        try:
-            envelope = scaling_queue.enqueue(
-                WorkerQueueEnvelope(
-                    item_id=request.item_id,
-                    kind=request.kind,  # type: ignore[arg-type]
-                    routing=RoutingKey(
-                        workspace_id=request.routing.workspace_id,
-                        voicebot_id=request.routing.voicebot_id,
-                        session_id=request.routing.session_id,
-                        provider=request.routing.provider,
-                    ),
-                    queue=request.queue,
-                    payload=request.payload,
-                    trace_id=request.trace_id,
-                    created_at=request.created_at or datetime.now().astimezone().isoformat(),
-                    attempt=request.attempt,
-                    idempotency_key=request.idempotency_key,
-                    max_attempts=request.max_attempts,
-                    priority=request.priority or default_work_priority(request.kind, request.payload),
-                )
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        return {"item": envelope.as_dict()}
-
-    @app.post("/scaling/queue/claim")
-    def scaling_queue_claim(request: WorkerQueueClaimRequest) -> dict[str, Any]:
-        try:
-            claimed = scaling_queue.claim(
-                request.queue,
-                request.owner,
-                limit=request.limit,
-                ttl_seconds=request.ttl_seconds,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        return {"items": [item.as_dict() for item in claimed]}
-
-    @app.get("/scaling/queue/priorities")
-    def scaling_queue_priorities() -> dict[str, Any]:
-        return priority_routing_rules()
-
-    @app.post("/scaling/queue/renew")
-    def scaling_queue_renew(request: WorkerQueueItemRequest) -> dict[str, Any]:
-        if request.owner is None:
-            raise HTTPException(status_code=400, detail="owner is required")
-        try:
-            item = scaling_queue.renew(request.item_id, request.owner, ttl_seconds=request.ttl_seconds)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        if item is None:
-            raise HTTPException(status_code=404, detail="work item claim not found")
-        return {"item": item.as_dict(), "renewed": True}
-
-    @app.post("/scaling/queue/ack")
-    def scaling_queue_ack(request: WorkerQueueItemRequest) -> dict[str, Any]:
-        item = scaling_queue.ack(request.item_id, owner=request.owner)
-        if item is None:
-            raise HTTPException(status_code=404, detail="work item claim not found")
-        return {"item": item.as_dict(), "acked": True}
-
-    @app.post("/scaling/queue/release")
-    def scaling_queue_release(request: WorkerQueueItemRequest) -> dict[str, Any]:
-        item = scaling_queue.release(request.item_id, owner=request.owner, error=request.error)
-        if item is None:
-            raise HTTPException(status_code=404, detail="work item claim not found")
-        return {"item": item.as_dict(), "released": item.failed_at is None, "dead_lettered": item.failed_at is not None}
-
-    @app.get("/scaling/queue/dead-letter")
-    def scaling_queue_dead_letter() -> dict[str, Any]:
-        return {"items": [item.as_dict() for item in scaling_queue.dead_lettered()]}
-
     def provider_choice_from_request(family: str, request, workspace_id: str) -> ProviderChoice:
         secret_ref = None
         if request.secret_ref is not None:
@@ -1683,15 +1267,6 @@ def create_app(
         if family == "tts":
             return _tts_capabilities()
         return _agent_capabilities()
-
-    def backpressure_key_from_request(request: ScalingBackpressureRequest) -> str:
-        routing = RoutingKey(
-            workspace_id=request.workspace_id,
-            voicebot_id=request.voicebot_id,
-            session_id=request.session_id,
-            provider=request.provider,
-        )
-        return routing.provider_key() if request.provider else routing.partition_key()
 
     def session_identity_from_snapshot(snapshot: dict[str, Any]) -> dict[str, str] | None:
         route = snapshot.get("route") if isinstance(snapshot.get("route"), dict) else {}
@@ -3694,24 +3269,6 @@ def transcript_event_to_voicebot_event(event: dict[str, Any]) -> VoicebotEvent |
         return None
     data = event.get("data") if isinstance(event.get("data"), dict) else {}
     return VoicebotEvent(event_id, call_id, event_type, timestamp, data)
-
-
-def validated_worker_role(value: str) -> WorkerRole:
-    if value not in get_args(WorkerRole):
-        raise ValueError(f"unsupported worker role: {value}")
-    return value  # type: ignore[return-value]
-
-
-def validated_worker_status(value: str):
-    if value not in {"active", "draining"}:
-        raise ValueError(f"unsupported worker status: {value}")
-    return value
-
-
-def validated_channel_kind(value: str) -> ChannelKind:
-    if value not in get_args(ChannelKind):
-        raise ValueError(f"unsupported channel kind: {value}")
-    return value  # type: ignore[return-value]
 
 
 def optional_int_arg(args: dict[str, Any], name: str, default: int) -> int:

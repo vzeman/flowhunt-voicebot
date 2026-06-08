@@ -16,6 +16,7 @@ from voicebot.runtime_storage import (
 )
 from voicebot.scaling import JsonWorkerQueueStore, RoutingKey, WorkerQueueEnvelope, WorkerQueueStore
 from voicebot.storage import SQLiteTranscriptStore, SQLiteVoicebotSessionStore
+from voicebot.storage.sqlite_events import SQLiteEventStore
 from voicebot.transcripts import TranscriptStore
 from voicebot.workspace_model import JsonVoicebotSessionStore, VoicebotSessionRecord, VoicebotSessionStore
 
@@ -50,6 +51,23 @@ class DurableEventTests(unittest.TestCase):
         self.assertEqual([first.id, second.id, third.id], [1, 2, 3])
         self.assertEqual([event.id for event in reloaded.list_events()], [1, 2, 3])
         self.assertEqual(reloaded.load_diagnostics["skipped_duplicate_event_ids"], 0)
+
+    def test_event_stores_report_id_allocation_strategy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            json_store = JsonEventStore(f"{directory}/events.jsonl", max_context_events=100)
+            sqlite_store = SQLiteEventStore(f"sqlite:///{directory}/events.sqlite3", max_context_events=100)
+            memory_strategy = EventStore(max_context_events=100).event_id_strategy()
+            json_strategy = json_store.event_id_strategy()
+            sqlite_strategy = sqlite_store.event_id_strategy()
+            sqlite_store.close()
+
+        self.assertEqual(memory_strategy["scope"], "process")
+        self.assertFalse(memory_strategy["collision_safe_across_processes"])
+        self.assertEqual(json_strategy["scope"], "node_file")
+        self.assertTrue(json_strategy["collision_safe_across_processes"])
+        self.assertEqual(sqlite_strategy["name"], "sqlite_autoincrement")
+        self.assertTrue(sqlite_strategy["collision_safe_across_processes"])
+        self.assertFalse(sqlite_strategy["collision_safe_across_nodes"])
 
     def test_json_event_store_reports_load_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

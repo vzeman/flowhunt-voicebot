@@ -303,7 +303,19 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
         self.assertTrue(has_colleague_tool_call([{"name": "delegate_to_subagent", "arguments": {}}]))
         self.assertFalse(has_colleague_tool_call([{"name": "say", "arguments": {}}]))
 
-    def test_preferred_colleague_recovery_tool_uses_flow_invoke(self) -> None:
+    def test_preferred_colleague_recovery_tool_uses_generic_delegate(self) -> None:
+        self.assertEqual(
+            preferred_colleague_tool_name(
+                [
+                    {"name": "create_flowhunt_project_issue"},
+                    {"name": "invoke_flowhunt_flow"},
+                    {"name": "delegate_to_subagent"},
+                ]
+            ),
+            "delegate_to_subagent",
+        )
+
+    def test_preferred_colleague_recovery_tool_falls_back_to_flow_invoke(self) -> None:
         self.assertEqual(
             preferred_colleague_tool_name(
                 [

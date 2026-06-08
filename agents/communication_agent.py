@@ -454,6 +454,8 @@ def recover_missing_colleague_tool_call(
 
 def preferred_colleague_tool_name(native_tools: list[dict]) -> str:
     available = {str(tool.get("name") or "") for tool in native_tools if isinstance(tool, dict)}
+    if "delegate_to_subagent" in available:
+        return "delegate_to_subagent"
     if "invoke_flowhunt_flow" in available:
         return "invoke_flowhunt_flow"
     if "create_flowhunt_project_issue" in available:

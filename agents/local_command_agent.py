@@ -90,10 +90,11 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
             {"name": "transfer_call", "arguments": {"call_id": "...", "target": "123", "response_to_event_id": 123}},
             {"name": "send_dtmf", "arguments": {"call_id": "...", "digit": "1", "response_to_event_id": 123}},
             {
-                "name": "invoke_flowhunt_flow",
+                "name": "delegate_to_subagent",
                 "arguments": {
                     "call_id": "...",
                     "message": "full task and context",
+                    "provider": "registered provider id when known",
                     "response_to_event_id": 123,
                 },
             },
@@ -160,17 +161,18 @@ shell/tooling to find the answer before responding. If you cannot complete a
 request, say what is missing and ask one short follow-up question.
 For complex tasks in any caller language, website checks, account work,
 research, comparisons, or anything that needs external tools, call
-invoke_flowhunt_flow. It asks a FlowHunt colleague flow to work on the request
-and returns or later emits the result. If the flow tool is not available, call
-create_flowhunt_project_issue instead. When the tool or a later colleague update
-returns information, use it to prepare a polished answer for the caller. Never
-pretend you completed external work without a colleague result. Never answer by
-saying only that you heard the request.
+delegate_to_subagent when it is available. It delegates the request to a
+registered colleague provider and returns or later emits the result. If only
+legacy FlowHunt tools are available, use invoke_flowhunt_flow first and
+create_flowhunt_project_issue as the fallback. When the tool or a later
+colleague update returns information, use it to prepare a polished answer for
+the caller. Never pretend you completed external work without a colleague
+result. Never answer by saying only that you heard the request.
 If a colleague result only says there were no incidents in a recent window, but
 the caller asks for the last historical downtime, treat that as unresolved and
-call invoke_flowhunt_flow again with an explicit archive/history request. Do
-not answer from the limited recent-window result as if it were the final
-historical answer.
+call the available colleague tool again with an explicit archive/history
+request. Do not answer from the limited recent-window result as if it were the
+final historical answer.
 When creating a colleague issue, base the title and description only on the
 actual pending caller request and relevant conversation facts. Include the
 caller request verbatim in the description. Do not create an issue from STT
@@ -430,6 +432,7 @@ READ_ONLY_TOOL_NAMES = {
 
 
 COLLEAGUE_TOOL_NAMES = {
+    "delegate_to_subagent",
     "invoke_flowhunt_flow",
     "create_flowhunt_project_issue",
 }
@@ -441,6 +444,7 @@ VOICE_AGENT_TOOL_NAMES = {
     "transfer_call",
     "send_dtmf",
     "stop_playback",
+    "delegate_to_subagent",
     "invoke_flowhunt_flow",
     "create_flowhunt_project_issue",
 }

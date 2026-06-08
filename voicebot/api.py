@@ -20,13 +20,13 @@ from .api_agent_tasks import (
 )
 from .api_audience import apply_route_audiences
 from .api_calls import CallsApiContext, call_state_payload, create_calls_router
+from .api_context import ContextApiContext, create_context_router
 from .api_contracts import ContractsApiContext, create_contracts_router
 from .api_discovery import DiscoveryApiContext, create_discovery_router
 from .api_models import (
     AgentResponseRequest,
     AgentToolRequest,
     CallControlRequest,
-    CompactContextRequest,
     ConversationEvaluationRequest,
     IncomingSessionAdmissionRequest,
     PlaybackInterruptRequest,
@@ -620,6 +620,7 @@ def create_app(
         )
     )
     app.include_router(create_contracts_router(ContractsApiContext(runtime_settings=runtime_settings)))
+    app.include_router(create_context_router(ContextApiContext(events=events, broadcast=hub.broadcast)))
     app.include_router(create_discovery_router(DiscoveryApiContext(app=app)))
     agent_tasks_api_context = AgentTasksApiContext(
         events=events,
@@ -2300,16 +2301,6 @@ def create_app(
                 limit=validated_limit(limit),
             )
         )
-
-    @app.get("/context")
-    def context(call_id: str | None = None) -> dict[str, Any]:
-        return events.context(call_id=call_id)
-
-    @app.post("/context/compact")
-    async def compact_context(request: CompactContextRequest) -> dict[str, Any]:
-        event = events.replace_summary(request.summary, call_id=request.call_id)
-        await hub.broadcast(event)
-        return {"event": event_to_dict(event)}
 
     @app.get("/agent/tools")
     def agent_tools() -> dict[str, Any]:

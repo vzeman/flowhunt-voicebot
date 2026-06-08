@@ -9,6 +9,7 @@ from voicebot.transports import (
     CallRoute,
     MediaSessionDescriptor,
     StaticMediaTransport,
+    TransportHealth,
     TransportCapabilities,
     TransportDefinition,
     TransportRegistry,
@@ -137,6 +138,29 @@ class TransportContractTests(unittest.TestCase):
             },
         )
 
+    def test_transport_health_and_shutdown_are_event_ready(self) -> None:
+        transport = StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES, sample_rate=16000)
+
+        ready = transport.health()
+        stopped = transport.shutdown()
+        result = transport.execute_call_control(CallControlRequest("call-1", "hangup"))
+
+        self.assertIsInstance(ready, TransportHealth)
+        self.assertEqual(ready.to_dict()["status"], "ready")
+        self.assertEqual(ready.to_dict()["details"]["sample_rate"], 16000)
+        self.assertFalse(stopped.ok)
+        self.assertEqual(stopped.status, "stopped")
+        self.assertFalse(result.ok)
+        self.assertIn("stopped", result.reason or "")
+
+    def test_transport_health_rejects_invalid_payloads(self) -> None:
+        with self.assertRaisesRegex(ValueError, "active_sessions"):
+            TransportHealth("webrtc", True, "ready", active_sessions=-1)
+        with self.assertRaisesRegex(ValueError, "unsupported transport kind"):
+            TransportHealth("unknown", True, "ready")
+        with self.assertRaisesRegex(ValueError, "unsupported transport health status"):
+            TransportHealth("webrtc", True, "missing")
+
     def test_transport_catalog_serializes_capabilities(self) -> None:
         catalog = transport_catalog()
 
@@ -147,6 +171,13 @@ class TransportContractTests(unittest.TestCase):
         self.assertTrue(catalog["transports"]["webrtc"]["implemented"])
         self.assertTrue(catalog["transports"]["webrtc"]["enabled"])
         self.assertFalse(catalog["transports"]["twilio"]["implemented"])
+
+    def test_transport_catalog_can_include_implemented_adapter_health(self) -> None:
+        catalog = transport_catalog(include_health=True)
+
+        self.assertEqual(catalog["transports"]["webrtc"]["health"]["status"], "ready")
+        self.assertEqual(catalog["transports"]["asterisk_audiosocket"]["health"]["status"], "ready")
+        self.assertNotIn("health", catalog["transports"]["twilio"])
 
     def test_default_transport_registry_selects_enabled_implemented_transports(self) -> None:
         registry = default_transport_registry(enabled_kinds={"webrtc"})

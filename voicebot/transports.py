@@ -18,6 +18,8 @@ TransportKind = Literal[
     "daily",
 ]
 
+TransportHealthStatus = Literal["ready", "disabled", "stopped", "degraded"]
+
 CallControlAction = Literal[
     "hangup",
     "transfer",
@@ -175,6 +177,32 @@ class CallControlResult:
         )
 
 
+@dataclass(frozen=True)
+class TransportHealth:
+    kind: TransportKind
+    ok: bool
+    status: TransportHealthStatus
+    active_sessions: int = 0
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.kind not in get_args(TransportKind):
+            raise ValueError(f"unsupported transport kind: {self.kind}")
+        if self.status not in get_args(TransportHealthStatus):
+            raise ValueError(f"unsupported transport health status: {self.status}")
+        if self.active_sessions < 0:
+            raise ValueError("active_sessions must not be negative")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "ok": self.ok,
+            "status": self.status,
+            "active_sessions": self.active_sessions,
+            "details": self.details,
+        }
+
+
 @runtime_checkable
 class MediaTransport(Protocol):
     kind: TransportKind
@@ -184,6 +212,12 @@ class MediaTransport(Protocol):
         ...
 
     def execute_call_control(self, request: CallControlRequest) -> CallControlResult:
+        ...
+
+    def health(self) -> TransportHealth:
+        ...
+
+    def shutdown(self) -> TransportHealth:
         ...
 
 
@@ -203,13 +237,16 @@ class TransportDefinition:
         if not self.implemented and self.transport is not None:
             raise ValueError(f"planned transport must not provide adapter: {self.kind}")
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def to_dict(self, *, include_health: bool = False) -> dict[str, Any]:
+        payload = {
             "kind": self.kind,
             "capabilities": transport_capabilities_to_dict(self.capabilities),
             "implemented": self.implemented,
             "enabled": self.enabled,
         }
+        if include_health and self.transport is not None:
+            payload["health"] = self.transport.health().to_dict()
+        return payload
 
 
 class TransportRegistry:
@@ -264,8 +301,13 @@ class TransportRegistry:
     def definitions(self) -> tuple[TransportDefinition, ...]:
         return tuple(self._definitions[kind] for kind in sorted(self._definitions))
 
-    def to_dict(self) -> dict[str, Any]:
-        return {"transports": {definition.kind: definition.to_dict() for definition in self.definitions()}}
+    def to_dict(self, *, include_health: bool = False) -> dict[str, Any]:
+        return {
+            "transports": {
+                definition.kind: definition.to_dict(include_health=include_health)
+                for definition in self.definitions()
+            }
+        }
 
 
 class StaticMediaTransport:
@@ -283,6 +325,7 @@ class StaticMediaTransport:
         self.kind = kind
         self.capabilities = capabilities
         self.sample_rate = sample_rate
+        self._shutdown = False
 
     def describe_session(self, call_id: str, metadata: dict[str, Any] | None = None) -> MediaSessionDescriptor:
         route = CallRoute.from_metadata(metadata)
@@ -295,6 +338,14 @@ class StaticMediaTransport:
         )
 
     def execute_call_control(self, request: CallControlRequest) -> CallControlResult:
+        if self._shutdown:
+            return CallControlResult(
+                call_id=request.call_id,
+                action=request.action,
+                ok=False,
+                reason=f"{self.kind} transport is stopped",
+                data={"transport": self.kind},
+            )
         if not self.capabilities.supports(request.action):
             return CallControlResult.unsupported(request, self.kind)
         return CallControlResult(
@@ -303,6 +354,19 @@ class StaticMediaTransport:
             ok=True,
             data={"transport": self.kind, **request.data},
         )
+
+    def health(self) -> TransportHealth:
+        return TransportHealth(
+            kind=self.kind,
+            ok=not self._shutdown,
+            status="stopped" if self._shutdown else "ready",
+            active_sessions=0,
+            details={"sample_rate": self.sample_rate},
+        )
+
+    def shutdown(self) -> TransportHealth:
+        self._shutdown = True
+        return self.health()
 
 
 def transport_capabilities_to_dict(capabilities: TransportCapabilities) -> dict[str, Any]:
@@ -331,8 +395,8 @@ def default_transport_registry(enabled_kinds: set[TransportKind] | None = None) 
     return registry
 
 
-def transport_catalog() -> dict[str, Any]:
-    return default_transport_registry().to_dict()
+def transport_catalog(*, include_health: bool = False) -> dict[str, Any]:
+    return default_transport_registry().to_dict(include_health=include_health)
 
 
 def _optional_str(value: Any) -> str | None:

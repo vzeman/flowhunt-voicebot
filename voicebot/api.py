@@ -57,6 +57,14 @@ from .api_providers import ProvidersApiContext, create_providers_router
 from .api_runtime import RuntimeApiContext, create_runtime_router
 from .api_security import SecurityApiContext, create_security_router
 from .api_subagents import SubagentsApiContext, create_subagents_router
+from .api_transcripts import (
+    TranscriptsApiContext,
+    call_transcript_payload,
+    create_transcripts_router,
+    list_transcripts_payload,
+    transcript_stats_payload,
+    transcript_summaries_payload,
+)
 from .asterisk_control import AsteriskAMI, ControlResult
 from .call_recording import recording_artifact_id
 from .calls import AgentResponse, CallRegistry
@@ -647,6 +655,12 @@ def create_app(
         multimodal_capabilities=_API_MULTIMODAL_CAPABILITIES,
     )
     app.include_router(create_calls_router(calls_api_context))
+    transcripts_api_context = TranscriptsApiContext(
+        transcripts=transcripts,
+        optional_int_value=optional_int_value,
+        validated_limit=validated_limit,
+    )
+    app.include_router(create_transcripts_router(transcripts_api_context))
 
     @app.get("/workspaces/{workspace_id}/voicebots")
     def list_workspace_voicebots(workspace_id: str) -> dict[str, Any]:
@@ -2351,37 +2365,6 @@ def create_app(
         await hub.broadcast(event)
         return {"event": event_to_dict(event), "ok": True}
 
-    @app.get("/calls/{call_id}/transcript")
-    def call_transcript(call_id: str, after: Any = 0, limit: Any = 200) -> dict[str, Any]:
-        return {
-            "call_id": call_id,
-            "events": transcripts.read(
-                call_id,
-                after=optional_int_value(after, "after", 0),
-                limit=validated_limit(optional_int_value(limit, "limit", 200)),
-            ),
-        }
-
-    @app.get("/transcripts")
-    def list_transcripts() -> dict[str, Any]:
-        return {"call_ids": transcripts.list_call_ids()}
-
-    @app.get("/transcripts/summary")
-    def transcript_summaries(after_call_id: str | None = None, limit: Any = 200) -> dict[str, Any]:
-        return {
-            "transcripts": transcripts.summaries(
-                after_call_id=after_call_id,
-                limit=validated_limit(optional_int_value(limit, "limit", 200)),
-            )
-        }
-
-    @app.get("/transcripts/stats")
-    def transcript_stats(after_call_id: str | None = None, limit: Any = 200) -> dict[str, Any]:
-        return transcripts.stats(
-            after_call_id=after_call_id,
-            limit=validated_limit(optional_int_value(limit, "limit", 200)),
-        )
-
     @app.post("/calls/{call_id}/control")
     async def call_control(call_id: str, request: CallControlRequest) -> dict[str, Any]:
         requested = events.append(call_id, "call_control_requested", request.model_dump())
@@ -3601,23 +3584,26 @@ def create_app(
 
     def tool_get_transcript(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
-        return call_transcript(
+        return call_transcript_payload(
+            transcripts_api_context,
             call_id,
             after=optional_int_arg(args, "after", 0),
             limit=validated_limit(optional_int_arg(args, "limit", 200)),
         )
 
     def tool_list_transcripts(args: dict[str, Any]) -> dict[str, Any]:
-        return list_transcripts()
+        return list_transcripts_payload(transcripts_api_context)
 
     def tool_list_transcript_summaries(args: dict[str, Any]) -> dict[str, Any]:
-        return transcript_summaries(
+        return transcript_summaries_payload(
+            transcripts_api_context,
             after_call_id=args.get("after_call_id"),
             limit=validated_limit(optional_int_arg(args, "limit", 200)),
         )
 
     def tool_get_transcript_stats(args: dict[str, Any]) -> dict[str, Any]:
-        return transcript_stats(
+        return transcript_stats_payload(
+            transcripts_api_context,
             after_call_id=args.get("after_call_id"),
             limit=validated_limit(optional_int_arg(args, "limit", 200)),
         )

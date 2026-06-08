@@ -27,7 +27,10 @@ Environment variables:
 - `VOICEBOT_E2E_TIMEOUT_SECONDS`: Optional. HTTP timeout per deployed request.
 
 The current smoke suite verifies readiness, the event catalog, configured
-storage drivers, workspace transport discovery, and event-stream readability.
+storage drivers, workspace transport discovery, event-stream readability,
+worker queue lifecycle behavior, and session lease events over HTTP. The queue
+and lease checks are deterministic process-boundary probes that do not require
+provider credentials.
 Provider-backed media scenarios should be added as separate `e2e` tests with
 explicit environment requirements for SIP, WebRTC, STT, TTS, and agent
 credentials.

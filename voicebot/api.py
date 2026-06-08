@@ -1017,12 +1017,16 @@ def create_app(
         }
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/transports")
-    def get_voicebot_transport_catalog(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
+    def get_voicebot_transport_catalog(
+        workspace_id: str,
+        voicebot_id: str,
+        include_health: bool = False,
+    ) -> dict[str, Any]:
         require_workspace_access(workspace_id)
         return {
             "workspace_id": workspace_id,
             "voicebot_id": voicebot_id,
-            **transport_catalog(),
+            **transport_catalog(include_health=include_health),
         }
 
     @app.put("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")

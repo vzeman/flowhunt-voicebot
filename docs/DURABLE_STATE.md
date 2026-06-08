@@ -31,7 +31,7 @@ The current contract families are:
 | `voicebot_sessions` | JSON or memory | FlowHunt DB | `session_id` |
 | `session_leases` | JSON or memory | Redis or equivalent lease-capable KV | `workspace_id + voicebot_id + session_id` |
 | `agent_tasks` | JSON or memory | Redis and/or FlowHunt DB | `event_id` |
-| `worker_queue` | JSON or memory | Redis Streams, NATS JetStream, RabbitMQ, or FlowHunt queue | `idempotency_key` or `item_id` |
+| `worker_queue` | JSON, memory, or Redis | Redis, Redis Streams, NATS JetStream, RabbitMQ, or FlowHunt queue | `idempotency_key` or `item_id` |
 | `worker_registry` | JSON or memory | Redis and/or FlowHunt DB | `worker_id` |
 | `call_states` | JSON or memory | Redis and/or FlowHunt DB | `call_id` |
 | `provider_config` | JSON or memory | FlowHunt DB plus FlowHunt/Kubernetes secret references | `workspace_id + voicebot_id + config_version` |
@@ -76,14 +76,14 @@ selected before their concrete adapter is added.
 | Family | Provider env var | Default | Path/config env var | Current drivers | Managed target |
 | --- | --- | --- | --- | --- | --- |
 | `events` | `VOICEBOT_EVENT_STORE_PROVIDER` | `json` | `VOICEBOT_EVENT_STORE_PATH` or `VOICEBOT_RELATIONAL_DATABASE_URL` | `json`, `jsonl`, `memory`, `sqlite` | `postgres`, `flowhunt_db`, `append_only_event_log` |
-| `transcripts` | `VOICEBOT_TRANSCRIPT_STORE_PROVIDER` | `jsonl` | `VOICEBOT_TRANSCRIPT_DIR` | `jsonl` | `postgres`, `flowhunt_db`, `object_storage` |
-| `voicebot_sessions` | `VOICEBOT_SESSION_STORE_PROVIDER` | `json` | `VOICEBOT_SESSION_STORE_PATH` | `json`, `memory` | `sqlite`, `postgres`, `flowhunt_db` |
+| `transcripts` | `VOICEBOT_TRANSCRIPT_STORE_PROVIDER` | `jsonl` | `VOICEBOT_TRANSCRIPT_DIR` or `VOICEBOT_RELATIONAL_DATABASE_URL` | `jsonl`, `sqlite` | `postgres`, `flowhunt_db`, `object_storage` |
+| `voicebot_sessions` | `VOICEBOT_SESSION_STORE_PROVIDER` | `json` | `VOICEBOT_SESSION_STORE_PATH` or `VOICEBOT_RELATIONAL_DATABASE_URL` | `json`, `memory`, `sqlite` | `postgres`, `flowhunt_db` |
 | `session_leases` | `VOICEBOT_SESSION_LEASE_STORE_PROVIDER` | `json` | `VOICEBOT_SESSION_LEASE_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `redis` |
 | `agent_tasks` | `VOICEBOT_AGENT_TASK_STORE_PROVIDER` | `json` | `VOICEBOT_AGENT_TASK_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `flowhunt_db` |
-| `worker_queue` | `VOICEBOT_WORKER_QUEUE_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_QUEUE_STORE_PATH` | `json`, `memory` | `redis_streams`, `nats_jetstream`, `rabbitmq`, `flowhunt_queue` |
+| `worker_queue` | `VOICEBOT_WORKER_QUEUE_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_QUEUE_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `redis_streams`, `nats_jetstream`, `rabbitmq`, `flowhunt_queue` |
 | `worker_registry` | `VOICEBOT_WORKER_REGISTRY_STORE_PROVIDER` | `json` | `VOICEBOT_WORKER_REGISTRY_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `flowhunt_db` |
 | `call_states` | `VOICEBOT_CALL_STATE_STORE_PROVIDER` | `json` | `VOICEBOT_CALL_STATE_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `flowhunt_db` |
-| `provider_config` | `VOICEBOT_PROVIDER_CONFIG_STORE_PROVIDER` | `json` | `VOICEBOT_PROVIDER_CONFIG_STORE_PATH` | `json`, `memory` | `flowhunt_db`, secret references |
+| `provider_config` | `VOICEBOT_PROVIDER_CONFIG_STORE_PROVIDER` | `json` | `VOICEBOT_PROVIDER_CONFIG_STORE_PATH` or `VOICEBOT_RELATIONAL_DATABASE_URL` | `json`, `memory`, `sqlite` | `flowhunt_db`, secret references |
 | `sip_trunks` | `VOICEBOT_SIP_TRUNK_STORE_PROVIDER` | `json` | `VOICEBOT_SIP_TRUNK_REGISTRY_PATH`, `VOICEBOT_SIP_TRUNK_PJSIP_INCLUDE_PATH` | `json` | `flowhunt_db`, secret references |
 | `subagent_tasks` | `VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER` | `json` | `VOICEBOT_SUBAGENT_TASK_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `flowhunt_db`, `flowhunt_queue` |
 | `audio_artifacts` | `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER` | `filesystem` | `VOICEBOT_TTS_CACHE_DIR`, `VOICEBOT_DEBUG_AUDIO_DIR`, object-storage env vars | `filesystem` | `object_storage`, `s3`, CDN/cache |
@@ -347,7 +347,8 @@ The runtime selects the worker registry store with:
 Docker defaults to `json`, so local worker presence and drain state can recover
 after service restart within the heartbeat TTL.
 
-`JsonWorkerQueueStore` persists the local worker queue lifecycle contract:
+`JsonWorkerQueueStore` and `RedisWorkerQueueStore` persist the worker queue
+lifecycle contract:
 
 - pending worker queue envelopes by queue name
 - active claims with owner and absolute expiration
@@ -360,14 +361,15 @@ after service restart within the heartbeat TTL.
 
 The runtime selects the worker queue store with:
 
-- `VOICEBOT_WORKER_QUEUE_STORE_PROVIDER=json|memory`
+- `VOICEBOT_WORKER_QUEUE_STORE_PROVIDER=json|memory|redis`
 - `VOICEBOT_WORKER_QUEUE_STORE_PATH=/data/worker_queue.json`
+- `VOICEBOT_REDIS_URL=redis://redis:6379/0`
 
 Docker defaults to `json`, so internal `/scaling/queue/*` work handoff survives
-local service restarts. Acknowledged items are removed from the local queue;
-pending, claimed, and dead-lettered items remain visible for diagnostics.
-local service restarts until production replaces it with Redis streams or
-FlowHunt shared queue infrastructure.
+local service restarts. Redis mode lets multiple runtime workers share pending,
+claimed, and dead-lettered queue state through the same idempotent queue
+contract while Redis Streams, NATS, RabbitMQ, and FlowHunt queue remain planned
+drivers in `/storage/drivers` until their concrete adapters exist.
 
 ## Production Direction
 

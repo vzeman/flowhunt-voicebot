@@ -23,6 +23,7 @@ from .redis_agent_tasks import RedisAgentTaskTracker
 from .redis_call_state import RedisCallStateStore
 from .redis_leases import RedisSessionLeaseStore
 from .redis_subagent_tasks import RedisSubagentTaskStore
+from .redis_worker_queue import RedisWorkerQueueStore
 from .redis_worker_registry import RedisWorkerRegistry
 from .sqlite_events import SQLiteEventStore
 from .sqlite_provider_config import SQLiteProviderConfigStore
@@ -56,6 +57,7 @@ __all__ = [
     "RedisCallStateStore",
     "RedisSessionLeaseStore",
     "RedisSubagentTaskStore",
+    "RedisWorkerQueueStore",
     "RedisWorkerRegistry",
     "SessionLeaseStoreProtocol",
     "SipTrunkStoreProtocol",

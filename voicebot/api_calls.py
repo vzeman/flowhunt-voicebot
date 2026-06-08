@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, get_args
 
 from fastapi import APIRouter, HTTPException
 
-from .api_models import MultimodalContentRequest
+from .api_models import CallMessageRequest, MultimodalContentRequest
 from .events import VoicebotEvent, event_to_dict
 from .multimodal import ContentDirection, Modality, ModalityCapabilities, MultimodalContent, validate_multimodal_content
 
@@ -37,6 +38,25 @@ def create_calls_router(context: CallsApiContext) -> APIRouter:
     @router.get("/calls/{call_id}/multimodal")
     def call_multimodal_context(call_id: str) -> dict[str, Any]:
         return context.multimodal_store.get(call_id).to_agent_context()
+
+    @router.post("/calls/{call_id}/messages")
+    async def submit_call_message(call_id: str, request: CallMessageRequest) -> dict[str, Any]:
+        session = context.registry.get(call_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Active call not found: {call_id}")
+        submit_user_text = getattr(session, "submit_user_text", None)
+        if submit_user_text is None:
+            raise HTTPException(status_code=400, detail="Call does not support text input")
+        try:
+            transcript, agent_request = await asyncio.to_thread(submit_user_text, request.text, request.metadata)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        await context.broadcast(transcript)
+        await context.broadcast(agent_request)
+        return {
+            "events": [event_to_dict(transcript), event_to_dict(agent_request)],
+            "ok": True,
+        }
 
     @router.post("/calls/{call_id}/multimodal/parts")
     async def add_call_multimodal_part(call_id: str, request: MultimodalContentRequest) -> dict[str, Any]:

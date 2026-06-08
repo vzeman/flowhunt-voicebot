@@ -16,7 +16,8 @@ class VoicebotChatPromptConfig:
     mode: str = "disabled"
     system_prompt: str = ""
     response_prompt: str = (
-        "When chat is enabled, provide a visitor-readable message that may include more detail than the spoken answer."
+        "When chat is enabled, write a visitor-readable chat message that is more detailed than the spoken answer. "
+        "Do not duplicate the spoken wording."
     )
     rich_content_prompt: str = ""
 

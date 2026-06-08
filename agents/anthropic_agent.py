@@ -61,6 +61,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(env_or_default("VOICEBOT_COMMUNICATION_AGENT_MAX_OUTPUT_TOKENS", "120")),
     )
+    parser.add_argument(
+        "--progress-ack-delay-seconds",
+        type=float,
+        default=float(env_or_default("VOICEBOT_COMMUNICATION_AGENT_PROGRESS_ACK_DELAY_SECONDS", "2.0")),
+    )
     return parser.parse_args()
 
 
@@ -87,6 +92,7 @@ def main() -> None:
             max_output_tokens=args.max_output_tokens,
             owner_prefix="communication-agent",
             echo_error_label="communication agent",
+            progress_ack_delay_seconds=args.progress_ack_delay_seconds,
         ),
     )
 

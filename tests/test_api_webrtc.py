@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 import unittest
 
 import numpy as np
@@ -85,6 +86,39 @@ class FakeSTT:
 class FakeTTS:
     def synthesize(self, text: str):
         raise AssertionError("TTS should not run in this test")
+
+
+class FakeTranscriptionResult:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.reason = None
+        self.metadata = {"provider": "fake-integration"}
+        self.is_final = True
+
+
+class RecordingSTT:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.calls: list[tuple[int, int]] = []
+
+    def transcribe(self, audio, sample_rate=8000):
+        self.calls.append((len(audio), sample_rate))
+        return FakeTranscriptionResult(self.text)
+
+    def transcribe_stream(self, audio, sample_rate=8000):
+        yield self.transcribe(audio, sample_rate)
+
+
+class RecordingTTS:
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    def synthesize(self, text: str):
+        self.texts.append(text)
+        return np.ones(160, dtype=np.float32) * 0.2, 0.01
+
+    def synthesize_stream(self, text: str):
+        yield self.synthesize(text)
 
 
 class ApiWebRTCTests(unittest.TestCase):
@@ -501,6 +535,9 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertIn('id=&quot;transcript-log&quot;', html)
         self.assertIn('id=&quot;subagent-log&quot;', html)
         self.assertIn('id=&quot;chat-log&quot;', html)
+        self.assertIn('id=&quot;chat-compose&quot;', html)
+        self.assertIn('id=&quot;chat-input&quot;', html)
+        self.assertIn('id=&quot;chat-send&quot;', html)
         self.assertIn('data-test-tab=&quot;client&quot;', html)
         self.assertIn('data-test-tab=&quot;chat&quot;', html)
         self.assertIn('id=&quot;test-tab-events&quot;', html)
@@ -509,6 +546,8 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertIn('id=&quot;recording&quot;', html)
         self.assertIn("loadCallRecording(finishedCallId)", html)
         self.assertIn('/recording.wav', html)
+        self.assertIn("lastFinishedCallId", html)
+        self.assertIn('backfillVoicebotEvents(callId || lastFinishedCallId, {replay: true})', html)
         self.assertIn('aria-label=&quot;Client log&quot;', html)
         self.assertIn('aria-label=&quot;Voicebot events&quot;', html)
         self.assertIn('aria-label=&quot;Call transcript&quot;', html)
@@ -544,13 +583,25 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertIn("logTranscriptEvent(event)", html)
         self.assertIn("logChatPreviewEvent(event)", html)
         self.assertIn("chatTextForEvent(event)", html)
-        self.assertIn("appendJsonDetailRow(chatLogNode, blocks, 2)", html)
+        self.assertIn("chatVisitorTextForEvent(event)", html)
+        self.assertIn("appendChatPreviewRow(chatLogNode", html)
+        self.assertIn("function escapeHtml(value)", html)
+        self.assertIn('return &quot;&quot;', html)
+        self.assertIn("/messages", html)
+        self.assertIn("Write a visitor message", html)
+        self.assertIn("Listening...", html)
+        self.assertIn("stt_no_text", html)
+        self.assertIn("stt_failed", html)
+        self.assertIn("Voice transcription failed.", html)
+        self.assertIn("&lt;th&gt;Message&lt;/th&gt;", html)
+        self.assertIn("return String(event.data?.text || &quot;&quot;)", html)
+        self.assertIn("appendJsonDetailRow(chatLogNode, blocks, 3)", html)
         self.assertIn("startEventPolling()", html)
-        self.assertIn("backfillVoicebotEvents(finishedCallId)", html)
+        self.assertIn("backfillVoicebotEvents(finishedCallId, {replay: true})", html)
         self.assertIn("&amp;after=", html)
         self.assertIn("&amp;limit=1000", html)
         self.assertIn("user_transcript_partial", html)
-        self.assertIn("kind !== &quot;stream_chunk&quot;", html)
+        self.assertIn("![&quot;progress_ack&quot;, &quot;call_control_ack&quot;, &quot;stream_chunk&quot;, &quot;stream_finalized&quot;].includes(kind)", html)
         self.assertIn("window.setInterval(() =&gt; backfillVoicebotEvents(), 1000)", html)
         self.assertIn("shouldSuppressClientLogMessage(message)", html)
         self.assertIn("appendEventRows(eventLogNode, event)", html)
@@ -646,6 +697,82 @@ class ApiWebRTCTests(unittest.TestCase):
         manager._persist_session_started(session)
 
         self.assertEqual(store.list(), ())
+
+    def test_webrtc_voice_turn_invokes_stt_tts_and_preserves_rich_chat_answer(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        transcripts = TranscriptStore(directory.name)
+        events = EventStore(max_context_events=50, transcript_store=transcripts)
+        registry = CallRegistry()
+        tracker = AgentTaskTracker()
+        stt = RecordingSTT("What are the delivery options?")
+        tts = RecordingTTS()
+        session = WebRTCCallSession(
+            call_id="webrtc-call-1",
+            session_id="session-1",
+            settings=Settings(
+                greet_on_connect=False,
+                call_recording_enabled=False,
+                start_threshold=0.1,
+                stop_threshold=0.05,
+                vad_start_ms=0,
+                silence_ms=20,
+                min_seconds=0.35,
+                webrtc_jitter_buffer_enabled=False,
+                turn_coalesce_window_ms=0,
+            ),
+            event_store=events,
+            stt=stt,
+            tts=tts,
+        )
+        self.addCleanup(session.stop)
+        registry.add(session)
+        app = create_app(
+            events,
+            registry,
+            tracker,
+            WebSocketHub(),
+            transcripts,
+            None,
+        )
+        client = TestClient(app)
+
+        for _ in range(45):
+            session.process_audio_block(np.full(160, 0.4, dtype=np.float32))
+        for _ in range(3):
+            session.process_audio_block(np.zeros(160, dtype=np.float32))
+        self._wait_for_event(events, "agent_response_requested")
+        request = [event for event in events.list_events(call_id="webrtc-call-1") if event.type == "agent_response_requested"][-1]
+
+        response = client.post(
+            "/calls/webrtc-call-1/responses",
+            json={
+                "text": "You can choose standard or express delivery.",
+                "response_to_event_id": request.id,
+                "chat": {
+                    "text": "Delivery options: standard takes 3-5 business days, express takes 1-2 business days. Orders over 50 include standard shipping.",
+                    "blocks": [
+                        {"type": "bullet", "text": "Standard: 3-5 business days"},
+                        {"type": "bullet", "text": "Express: 1-2 business days"},
+                    ],
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["event"]
+        self.assertEqual(payload["type"], "agent_response_received")
+        self.assertEqual(payload["data"]["text"], "You can choose standard or express delivery.")
+        self.assertNotEqual(payload["data"]["text"], payload["data"]["chat"]["text"])
+        self.assertEqual(len(payload["data"]["chat"]["blocks"]), 2)
+        self.assertEqual(tts.texts, ["You can choose standard or express delivery."])
+        self.assertEqual(stt.calls[0][1], STT_SAMPLE_RATE)
+
+        event_types = [event.type for event in events.list_events(call_id="webrtc-call-1")]
+        self.assertIn("user_transcript", event_types)
+        self.assertIn("tts_started", event_types)
+        self.assertIn("tts_finished", event_types)
+        self.assertIn(request.id, tracker.responded_event_ids)
 
     def _build_real_manager(self, events: EventStore, store: VoicebotSessionStore) -> WebRTCSessionManager:
         return WebRTCSessionManager(
@@ -790,6 +917,14 @@ class ApiWebRTCTests(unittest.TestCase):
         self.assertEqual([metric["decision"] for metric in vad_decisions], ["speech_started", "speech_too_short"])
         self.assertEqual(vad_decisions[0]["transport"], "webrtc")
         self.assertIn({"name": "silence_duration_seconds", "value": 0.01, "turn_id": 1}, metrics)
+
+    def _wait_for_event(self, events: EventStore, event_type: str, timeout: float = 2.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if any(event.type == event_type for event in events.list_events()):
+                return
+            time.sleep(0.02)
+        self.fail(f"Timed out waiting for {event_type}")
 
 
 if __name__ == "__main__":

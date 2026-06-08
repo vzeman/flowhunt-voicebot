@@ -18,12 +18,14 @@ from local_command_agent import (
     colleague_update_answer,
     customer_facing_colleague_text,
     ensure_action_acknowledgements,
+    ensure_expanded_chat_for_say_calls,
     execute_conversational_tool_calls,
     fast_tool_call,
     fast_tool_calls,
     filter_grounded_call_control_tools,
     needs_spoken_followup,
     parse_call_control_validation,
+    parse_agent_output_with_chat,
     remove_colleague_reentrant_tool_calls,
 )
 
@@ -126,6 +128,94 @@ class AgentCoordinationTests(unittest.TestCase):
         self.assertIn("Filler message: Chvíľku strpenia.", prompt)
         self.assertIn("Use concise Slovak.", prompt)
 
+    def test_build_prompt_separates_short_voice_from_detailed_chat(self) -> None:
+        prompt = build_prompt(
+            [{"id": 10, "call_id": "call-1", "data": {"text": "Explain pricing"}}],
+            {
+                "voicebot_prompts": {
+                    "language": "en",
+                    "chat": {
+                        "mode": "expanded_chat",
+                        "system_prompt": "Use helpful readable chat.",
+                        "response_prompt": "Add detail in chat.",
+                    },
+                }
+            },
+            [],
+        )
+
+        self.assertIn("Chat channel: expanded_chat", prompt)
+        self.assertIn("Voice answer must stay short", prompt)
+        self.assertIn("Chat answer must be a separate visitor-readable explanation", prompt)
+        self.assertIn("For every normal answer, return JSON with both say and chat.text.", prompt)
+        self.assertIn("Add detail in chat.", prompt)
+
+    def test_build_prompt_includes_conversation_memory_guidance(self) -> None:
+        prompt = build_prompt(
+            [{"id": 10, "call_id": "call-1", "data": {"text": "And pricing?"}}],
+            {
+                "conversation_memory": {
+                    "answered_items": [{"asked": "What are your hours?", "answered": "Nine to five."}],
+                    "open_items": [{"text": "And pricing?"}],
+                    "dropped_user_messages": [{"text": "Check LiveAgent website."}],
+                }
+            },
+            [],
+        )
+
+        self.assertIn("Conversation memory:", prompt)
+        self.assertIn("Nine to five.", prompt)
+        self.assertIn("Use conversation_memory.open_items", prompt)
+        self.assertIn("avoid repeating details", prompt)
+
+    def test_build_prompt_instructs_colleague_results_to_split_voice_and_chat(self) -> None:
+        prompt = build_prompt(
+            [
+                {
+                    "id": 10,
+                    "call_id": "call-1",
+                    "data": {
+                        "reason": "colleague_result",
+                        "text": '{"voice_summary":"The site has three plans.","chat_details":"The site lists Small, Medium, and Large plans."}',
+                    },
+                }
+            ],
+            {"voicebot_prompts": {"chat": {"mode": "expanded_chat"}}},
+            [],
+        )
+
+        self.assertIn("If the colleague result contains voice_summary, use that for say.", prompt)
+        self.assertIn("chat_details", prompt)
+        self.assertIn("chat.text", prompt)
+        self.assertIn("Do not read the detailed chat", prompt)
+
+    def test_duplicate_chat_payload_is_dropped(self) -> None:
+        answer, _tool_calls, chat = parse_agent_output_with_chat(
+            '{"say":"Short answer.","chat":{"text":"Short answer."}}'
+        )
+
+        self.assertEqual(answer, "Short answer.")
+        self.assertIsNone(chat)
+
+    def test_near_duplicate_chat_payload_is_dropped(self) -> None:
+        answer, _tool_calls, chat = parse_agent_output_with_chat(
+            '{"say":"The site has three plans.","chat":{"text":"The site has three plans available."}}'
+        )
+
+        self.assertEqual(answer, "The site has three plans.")
+        self.assertIsNone(chat)
+
+    def test_distinct_chat_payload_is_preserved(self) -> None:
+        answer, _tool_calls, chat = parse_agent_output_with_chat(
+            '{"say":"The site has three plans.","chat":{"text":"The site lists Small, Medium, and Large plans with different feature limits."}}'
+        )
+
+        self.assertEqual(answer, "The site has three plans.")
+        self.assertEqual(
+            chat,
+            {"text": "The site lists Small, Medium, and Large plans with different feature limits."},
+        )
+
     def test_build_prompt_auto_language_instructs_mirroring_caller_language(self) -> None:
         prompt = build_prompt(
             [{"id": 10, "call_id": "call-1", "data": {"text": "Dobrý deň"}}],
@@ -212,6 +302,50 @@ class AgentCoordinationTests(unittest.TestCase):
         self.assertEqual([call["name"] for call in calls], ["say", "hangup_call"])
         self.assertEqual(calls[0]["arguments"]["response_kind"], "call_control_ack")
         self.assertEqual(calls[0]["arguments"]["call_control_ack_wait_seconds"], 1.2)
+
+    def test_expanded_chat_adds_fallback_for_plain_say_tool(self) -> None:
+        calls = ensure_expanded_chat_for_say_calls(
+            [
+                {
+                    "name": "say",
+                    "arguments": {
+                        "call_id": "call-1",
+                        "text": "LiveAgent is a help desk software for customer support.",
+                        "response_to_event_id": 42,
+                        "response_kind": "short",
+                    },
+                }
+            ],
+            {
+                "id": 42,
+                "call_id": "call-1",
+                "data": {
+                    "text": "What is LiveAgent?",
+                    "prompt_config": {"chat": {"mode": "expanded_chat"}},
+                },
+            },
+        )
+
+        chat = calls[0]["arguments"]["chat"]
+        self.assertIn("What is LiveAgent?", chat["text"])
+        self.assertIn("LiveAgent is a help desk software", chat["text"])
+
+    def test_expanded_chat_does_not_add_chat_to_progress_ack(self) -> None:
+        calls = ensure_expanded_chat_for_say_calls(
+            [
+                {
+                    "name": "say",
+                    "arguments": {
+                        "call_id": "call-1",
+                        "text": "Give me a moment.",
+                        "response_kind": "progress_ack",
+                    },
+                }
+            ],
+            {"id": 42, "call_id": "call-1", "data": {"prompt_config": {"chat": {"mode": "expanded_chat"}}}},
+        )
+
+        self.assertNotIn("chat", calls[0]["arguments"])
 
     def test_execute_conversational_tool_calls_waits_after_say_before_control(self) -> None:
         calls = [
@@ -347,6 +481,71 @@ class AgentCoordinationTests(unittest.TestCase):
         answer = customer_facing_colleague_text(raw)
 
         self.assertEqual(answer, "LiveAgent has 1,950 sitemap pages. The sitemap index was counted directly.")
+
+    def test_colleague_result_fast_path_splits_voice_summary_and_chat_details(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {
+                "reason": "colleague_result",
+                "prompt_config": {"chat": {"mode": "expanded_chat"}},
+                "data": {
+                    "summary": """
+                    **voice_summary:**
+                    "LiveAgent offers four paid plans and a free trial."
+
+                    **chat_details:**
+                    LiveAgent pricing starts with Small Business at $19 per agent monthly.
+                    Medium is $35, Large is $59, and Enterprise is $85 per agent monthly.
+                    Annual billing lowers those prices.
+                    """
+                },
+            },
+        }
+
+        calls = fast_tool_calls(task)
+
+        self.assertEqual(calls[0]["arguments"]["text"], "LiveAgent offers four paid plans and a free trial.")
+        self.assertIn("Small Business", calls[0]["arguments"]["chat"]["text"])
+        self.assertIn("Enterprise", calls[0]["arguments"]["chat"]["text"])
+
+    def test_colleague_result_fast_path_accepts_markdown_heading_labels(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {
+                "reason": "colleague_result",
+                "prompt_config": {"chat": {"mode": "expanded_chat"}},
+                "data": {
+                    "summary": """
+                    ---
+
+                    ## **voice_summary**
+                    LiveAgent combines live chat, ticketing, email, phone, and AI chatbot in one dashboard.
+
+                    ## **chat_details**
+
+                    **What is LiveAgent?**
+
+                    LiveAgent is an AI-powered help desk and customer service platform.
+
+                    - **Omnichannel Support:** Manage email, chat, phone, and social channels.
+                    - **Automation:** Use chatbot and AI reply helpers.
+                    """
+                },
+            },
+        }
+
+        calls = fast_tool_calls(task)
+
+        self.assertEqual(
+            calls[0]["arguments"]["text"],
+            "LiveAgent combines live chat, ticketing, email, phone, and AI chatbot in one dashboard.",
+        )
+        self.assertNotIn("voice_summary", calls[0]["arguments"]["text"])
+        self.assertNotIn("chat_details", calls[0]["arguments"]["text"])
+        self.assertIn("**What is LiveAgent?**", calls[0]["arguments"]["chat"]["text"])
+        self.assertIn("- **Omnichannel Support:**", calls[0]["arguments"]["chat"]["text"])
 
     def test_colleague_result_strips_emoji_greeting_and_summarizes_status_page(self) -> None:
         raw = """

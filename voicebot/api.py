@@ -4,12 +4,13 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 import html
+import logging
 import threading
 from time import perf_counter
 from typing import Any, get_args
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
 from .agent_tasks import AgentTaskTracker
 from .api_agent_tasks import (
@@ -171,6 +172,7 @@ _API_MULTIMODAL_CAPABILITIES = ModalityCapabilities(
     input=frozenset(_MODALITIES),
     output=frozenset(_MODALITIES),
 )
+logger = logging.getLogger(__name__)
 
 
 class _SafeFormatDict(dict[str, Any]):
@@ -286,7 +288,10 @@ def create_app(
             return response
         finally:
             status_code = response.status_code if response is not None else 500
-            log_api_access(request, status_code, (perf_counter() - start) * 1000, request_id)
+            try:
+                log_api_access(request, status_code, (perf_counter() - start) * 1000, request_id)
+            except Exception:
+                logger.exception("api access log write failed")
 
     @app.middleware("http")
     async def internal_auth_middleware(request: Request, call_next):
@@ -392,6 +397,12 @@ def create_app(
             system_prompt="",
             stt_prompt=runtime_settings.stt_prompt,
             language=runtime_settings.language or "auto",
+            chat=VoicebotChatPromptConfig(
+                mode=runtime_settings.chat_mode,
+                system_prompt=runtime_settings.chat_system_prompt,
+                response_prompt=runtime_settings.chat_response_prompt,
+                rich_content_prompt=runtime_settings.chat_rich_content_prompt,
+            ),
         )
 
     def prompt_config_from_request(data: Any) -> VoicebotPromptConfig:
@@ -1697,13 +1708,19 @@ def create_app(
             headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"},
         )
 
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        return RedirectResponse(url="/dashboard")
+
     @app.get("/dashboard/state")
     def dashboard_state(request: Request, workspace_id: str | None = None) -> dict[str, Any]:
         dashboard_user = getattr(request.state, "dashboard_user", None)
         workspace_ids = dashboard_visible_workspace_ids(dashboard_user)
         selected_workspace = workspace_id or (workspace_ids[0] if workspace_ids else "")
         if selected_workspace and selected_workspace not in workspace_ids:
-            raise HTTPException(status_code=403, detail="dashboard_workspace_access_denied")
+            if runtime_settings.dashboard_auth_enabled:
+                raise HTTPException(status_code=403, detail="dashboard_workspace_access_denied")
+            selected_workspace = workspace_ids[0] if workspace_ids else ""
         voicebot_rows = []
         if selected_workspace:
             active_counts = active_session_counts_by_voicebot()
@@ -2968,13 +2985,18 @@ def create_app(
         return detected_session_language(events.list_events(call_id=call_id, limit=1000))
 
     def input_text_for_subagent(call_id: str, message: str) -> str:
+        detail_instruction = (
+            "When returning a result, include voice_summary for the short spoken answer and "
+            "chat_details for the more detailed widget chat answer. Do not make voice_summary "
+            "and chat_details the same text."
+        )
         session_language = session_language_for_call(call_id)
         language = str(session_language.get("language") or "").strip().lower()
         if not language:
-            return message
+            return f"{message}\n\n{detail_instruction}"
         return (
             f"Caller language: {language}. Answer in this language unless the caller explicitly asks "
-            f"for a different language.\n\nCaller request:\n{message}"
+            f"for a different language.\n\nCaller request:\n{message}\n\n{detail_instruction}"
         )
 
     def subagent_result_text(task: SubagentTask, message: str, *, ok: bool) -> tuple[str, dict[str, Any]]:
@@ -3810,6 +3832,13 @@ DASHBOARD_PAGE = """<!doctype html>
     .transcript-speaker.caller { color:#1a7f37; background:#dafbe1; }
     .transcript-speaker.voicebot { color:#8250df; background:#fbefff; }
     .transcript-text { line-height:1.4; }
+    .session-chat-text { line-height:1.5; }
+    .session-chat-text h2, .session-chat-text h3 { margin:.15rem 0 .4rem; font-size:.95rem; line-height:1.3; }
+    .session-chat-text p { margin:.2rem 0 .45rem; }
+    .session-chat-text ul { margin:.25rem 0 .55rem 1.15rem; padding:0; }
+    .session-chat-text li { margin:.15rem 0; }
+    .session-chat-text code { padding:.08rem .25rem; border-radius:4px; background:#eaeef2; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.75rem; }
+    .session-chat-text a { color:var(--accent); text-decoration:underline; overflow-wrap:anywhere; }
     .audio-row { display:flex; align-items:center; gap:.75rem; margin:.25rem 0 .75rem; }
     .audio-row audio { width:100%; }
     .gantt-wrap { border:1px solid var(--border); border-radius:8px; overflow:auto; background:#fff; margin:0 0 1rem; }
@@ -4024,6 +4053,7 @@ DASHBOARD_PAGE = """<!doctype html>
           <button type="button" class="active" data-session-tab="timeline">Timeline</button>
           <button type="button" data-session-tab="recording">Recording</button>
           <button type="button" data-session-tab="transcript">Transcript</button>
+          <button type="button" data-session-tab="chat">Chat Widget</button>
           <button type="button" data-session-tab="events">Events</button>
         </div>
         <div id="session-tab-timeline" class="panel session-tab-panel active">
@@ -4041,6 +4071,16 @@ DASHBOARD_PAGE = """<!doctype html>
             <table aria-label="Session transcript" class="transcript-table">
               <thead><tr><th style="width:7rem;">Time</th><th style="width:6rem;">Speaker</th><th>Text</th></tr></thead>
               <tbody id="session-transcript-rows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="session-tab-chat" class="panel session-tab-panel">
+          <div class="panel-title"><h3>Chat Widget Communication</h3><span class="muted" id="session-chat-count"></span></div>
+          <div class="table-filter"><input data-table-filter="session-chat-rows" placeholder="Filter chat widget communication"></div>
+          <div class="table-wrap">
+            <table aria-label="Session chat widget communication" class="transcript-table">
+              <thead><tr><th style="width:7rem;">Time</th><th style="width:8rem;">Sender</th><th>Message</th></tr></thead>
+              <tbody id="session-chat-rows"></tbody>
             </table>
           </div>
         </div>
@@ -4634,6 +4674,7 @@ DASHBOARD_PAGE = """<!doctype html>
       renderSessionGantt(timeline.events || []);
       renderSessionEvents(timeline.events || []);
       renderSessionTranscript(transcript.events || []);
+      renderSessionChat(timeline.events || []);
       renderRecording(item.external_session_id || item.session_id);
     }
 
@@ -4890,6 +4931,133 @@ DASHBOARD_PAGE = """<!doctype html>
       applyTableFilter("session-transcript-rows");
     }
 
+    function renderSessionChat(events) {
+      const tbody = document.getElementById("session-chat-rows");
+      tbody.innerHTML = "";
+      const rows = events
+        .filter((event) => isSessionChatEvent(event))
+        .map((event) => sessionChatRow(event))
+        .filter(Boolean);
+      document.getElementById("session-chat-count").textContent = `${rows.length} rows`;
+      for (const item of rows) {
+        const row = tbody.insertRow();
+        row.insertCell().textContent = formatTimeOnly(item.timestamp);
+        const speakerCell = row.insertCell();
+        const speaker = document.createElement("span");
+        speaker.className = `transcript-speaker ${item.kind}`;
+        speaker.textContent = item.sender;
+        speakerCell.appendChild(speaker);
+        const textCell = row.insertCell();
+        textCell.className = "session-chat-text";
+        if (item.markdown) textCell.innerHTML = renderSessionMarkdown(item.text);
+        else textCell.textContent = item.text;
+        if (item.blocks.length) {
+          const detailRow = tbody.insertRow();
+          const detailCell = detailRow.insertCell();
+          detailCell.colSpan = 3;
+          const json = renderJsonBlock(item.blocks);
+          json.classList.add("event-json");
+          detailCell.appendChild(json);
+        }
+      }
+      applyTableFilter("session-chat-rows");
+    }
+
+    function isSessionChatEvent(event) {
+      const kind = String(event.data?.response_kind || "");
+      if (event.type === "user_transcript" && event.data?.text) return true;
+      if (event.type === "user_transcript_partial" && event.data?.text) return true;
+      if (event.type === "stt_no_text" || event.type === "stt_failed") return true;
+      if (event.type === "agent_response_received" && !["progress_ack", "call_control_ack", "stream_chunk", "stream_finalized"].includes(kind)) {
+        return Boolean(sessionChatTextForEvent(event));
+      }
+      return false;
+    }
+
+    function sessionChatRow(event) {
+      const isCaller = event.type === "user_transcript" || event.type === "user_transcript_partial" || event.type === "stt_no_text" || event.type === "stt_failed";
+      const text = isCaller ? sessionVisitorTextForEvent(event) : sessionChatTextForEvent(event);
+      if (!text) return null;
+      const chat = event.data?.chat;
+      return {
+        timestamp: event.timestamp,
+        sender: isCaller ? "Visitor" : "Voicebot chat",
+        kind: isCaller ? "caller" : "voicebot",
+        text,
+        markdown: !isCaller,
+        blocks: !isCaller && Array.isArray(chat?.blocks) ? chat.blocks : [],
+      };
+    }
+
+    function sessionVisitorTextForEvent(event) {
+      if (event.type === "stt_no_text") return "No speech was recognized.";
+      if (event.type === "stt_failed") return `Voice transcription failed. ${event.data?.error || "unknown error"}`;
+      return String(event.data?.text || "");
+    }
+
+    function sessionChatTextForEvent(event) {
+      const chat = event.data?.chat;
+      if (chat && typeof chat === "object" && typeof chat.text === "string" && chat.text.trim()) {
+        return chat.text;
+      }
+      return String(event.data?.text || "");
+    }
+
+    function renderSessionMarkdown(text) {
+      const lines = String(text || "").split(/\\r?\\n/);
+      const html = [];
+      let listOpen = false;
+      let paragraph = [];
+      const flushParagraph = () => {
+        if (!paragraph.length) return;
+        html.push(`<p>${renderSessionInlineMarkdown(paragraph.join(" "))}</p>`);
+        paragraph = [];
+      };
+      const closeList = () => {
+        if (listOpen) html.push("</ul>");
+        listOpen = false;
+      };
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+          flushParagraph();
+          closeList();
+          continue;
+        }
+        if (line.startsWith("### ")) {
+          flushParagraph();
+          closeList();
+          html.push(`<h3>${renderSessionInlineMarkdown(line.slice(4))}</h3>`);
+        } else if (line.startsWith("## ")) {
+          flushParagraph();
+          closeList();
+          html.push(`<h2>${renderSessionInlineMarkdown(line.slice(3))}</h2>`);
+        } else if (/^[-*]\\s+/.test(line)) {
+          flushParagraph();
+          if (!listOpen) {
+            html.push("<ul>");
+            listOpen = true;
+          }
+          html.push(`<li>${renderSessionInlineMarkdown(line.replace(/^[-*]\\s+/, ""))}</li>`);
+        } else {
+          paragraph.push(line);
+        }
+      }
+      flushParagraph();
+      closeList();
+      return html.join("");
+    }
+
+    function renderSessionInlineMarkdown(text) {
+      let html = escapeHtml(text);
+      html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+      html = html.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^)\\s]+)\\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+      html = html.replace(/(https?:\\/\\/[^\\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+      html = html.replace(/\\*\\*([^*]+)\\*\\*/g, "<strong>$1</strong>");
+      html = html.replace(/\\*([^*]+)\\*/g, "<em>$1</em>");
+      return html;
+    }
+
     function applyAllTableFilters() {
       document.querySelectorAll("[data-table-filter]").forEach((input) => applyTableFilter(input.dataset.tableFilter));
     }
@@ -5066,7 +5234,7 @@ DASHBOARD_PAGE = """<!doctype html>
     }
 
     function showSessionTab(name, options = {}) {
-      const selected = ["timeline", "recording", "transcript", "events"].includes(name) ? name : "timeline";
+      const selected = ["timeline", "recording", "transcript", "chat", "events"].includes(name) ? name : "timeline";
       document.querySelectorAll("[data-session-tab]").forEach((button) => button.classList.toggle("active", button.dataset.sessionTab === selected));
       document.querySelectorAll(".session-tab-panel").forEach((panel) => panel.classList.remove("active"));
       document.getElementById(`session-tab-${selected}`).classList.add("active");
@@ -5484,11 +5652,15 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     </section>
     <section id="test-tab-chat" class="log-panel test-tab-panel">
       <h2>Widget Chat Preview</h2>
+      <form id="chat-compose" class="chat-compose">
+        <input id="chat-input" placeholder="Write a visitor message" autocomplete="off">
+        <button id="chat-send" type="submit" disabled>Send</button>
+      </form>
       <div class="table-filter"><input data-table-filter="chat-log" placeholder="Filter widget chat preview"></div>
       <div class="table-wrap">
         <table aria-label="Widget chat preview">
           <thead>
-            <tr><th class="time-col">Time</th><th class="type-col">Sender</th></tr>
+            <tr><th class="time-col">Time</th><th class="type-col">Sender</th><th>Message</th></tr>
           </thead>
           <tbody id="chat-log"></tbody>
         </table>
@@ -5506,9 +5678,13 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     const transcriptLogNode = document.getElementById("transcript-log");
     const subagentLogNode = document.getElementById("subagent-log");
     const chatLogNode = document.getElementById("chat-log");
+    const chatCompose = document.getElementById("chat-compose");
+    const chatInput = document.getElementById("chat-input");
+    const chatSend = document.getElementById("chat-send");
     let pc = null;
     let sessionId = null;
     let callId = null;
+    let lastFinishedCallId = null;
     let localStream = null;
     let eventSocket = null;
     let eventPollTimer = null;
@@ -5520,6 +5696,10 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     });
     document.querySelectorAll("[data-test-tab]").forEach((button) => {
       button.addEventListener("click", () => showTestTab(button.dataset.testTab));
+    });
+    chatCompose.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await submitChatMessage();
     });
 
     window.addEventListener("message", (message) => {
@@ -5540,6 +5720,9 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       });
       document.querySelectorAll(".test-tab-panel").forEach((panel) => panel.classList.remove("active"));
       document.getElementById(`test-tab-${selected}`).classList.add("active");
+      if (selected === "chat") {
+        backfillVoicebotEvents(callId || lastFinishedCallId, {replay: true});
+      }
     }
 
     function formatTime(timestamp) {
@@ -5729,24 +5912,35 @@ WEBRTC_TEST_PAGE = """<!doctype html>
 
     function isChatPreviewEvent(event) {
       const kind = String(event.data?.response_kind || "");
+      if (event.type === "user_speech_started") return true;
+      if (event.type === "user_transcript_partial" && event.data?.text) return true;
       if (event.type === "user_transcript" && event.data?.text) return true;
-      if (event.type === "agent_response_received" && kind !== "stream_chunk") {
+      if (event.type === "stt_no_text") return true;
+      if (event.type === "stt_failed") return true;
+      if (event.type === "agent_response_received" && !["progress_ack", "call_control_ack", "stream_chunk", "stream_finalized"].includes(kind)) {
         return Boolean(chatTextForEvent(event));
       }
       return false;
     }
 
     function logChatPreviewEvent(event) {
-      const isCaller = event.type === "user_transcript";
+      const isCaller = event.type === "user_speech_started" || event.type === "user_transcript" || event.type === "user_transcript_partial" || event.type === "stt_no_text" || event.type === "stt_failed";
       const sender = isCaller ? "Visitor" : "Voicebot chat";
       const kind = isCaller ? "caller" : "voicebot";
-      const text = isCaller ? event.data?.text || "" : chatTextForEvent(event);
-      appendTranscriptRows(chatLogNode, event.timestamp, sender, kind, text);
+      const text = isCaller ? chatVisitorTextForEvent(event) : chatTextForEvent(event);
+      appendChatPreviewRow(chatLogNode, event.timestamp, sender, kind, text, !isCaller);
       const blocks = !isCaller && Array.isArray(event.data?.chat?.blocks) ? event.data.chat.blocks : [];
-      if (blocks.length) appendJsonDetailRow(chatLogNode, blocks, 2);
+      if (blocks.length) appendJsonDetailRow(chatLogNode, blocks, 3);
       applyTableFilter("chat-log");
       trimRows(chatLogNode);
       scrollTableToBottom(chatLogNode);
+    }
+
+    function chatVisitorTextForEvent(event) {
+      if (event.type === "user_speech_started") return "Listening...";
+      if (event.type === "stt_no_text") return "No speech was recognized.";
+      if (event.type === "stt_failed") return `Voice transcription failed. ${event.data?.error || "unknown error"}`;
+      return String(event.data?.text || "");
     }
 
     function chatTextForEvent(event) {
@@ -5755,6 +5949,88 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         return chat.text;
       }
       return String(event.data?.text || "");
+    }
+
+    function appendChatPreviewRow(tableBody, timestamp, speaker, kind, text, markdown = false) {
+      const row = tableBody.insertRow();
+      row.className = "summary-row";
+      appendCell(row, formatTime(timestamp), "time-col", fullTimestamp(timestamp));
+      const typeCell = appendCell(row, "", "type-col");
+      const type = document.createElement("span");
+      type.className = `client-type ${kind}`;
+      type.textContent = speaker;
+      type.title = speaker;
+      typeCell.appendChild(type);
+      const textCell = document.createElement("td");
+      textCell.className = "summary-detail-cell";
+      if (markdown) textCell.innerHTML = renderMarkdown(text);
+      else textCell.textContent = text;
+      row.appendChild(textCell);
+    }
+
+    function renderMarkdown(text) {
+      const lines = String(text || "").split(/\\r?\\n/);
+      const html = [];
+      let listOpen = false;
+      let paragraph = [];
+      const flushParagraph = () => {
+        if (!paragraph.length) return;
+        html.push(`<p>${renderInlineMarkdown(paragraph.join(" "))}</p>`);
+        paragraph = [];
+      };
+      const closeList = () => {
+        if (listOpen) html.push("</ul>");
+        listOpen = false;
+      };
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+          flushParagraph();
+          closeList();
+          continue;
+        }
+        if (line.startsWith("### ")) {
+          flushParagraph();
+          closeList();
+          html.push(`<h3>${renderInlineMarkdown(line.slice(4))}</h3>`);
+        } else if (line.startsWith("## ")) {
+          flushParagraph();
+          closeList();
+          html.push(`<h2>${renderInlineMarkdown(line.slice(3))}</h2>`);
+        } else if (/^[-*]\\s+/.test(line)) {
+          flushParagraph();
+          if (!listOpen) {
+            html.push("<ul>");
+            listOpen = true;
+          }
+          html.push(`<li>${renderInlineMarkdown(line.replace(/^[-*]\\s+/, ""))}</li>`);
+        } else {
+          paragraph.push(line);
+        }
+      }
+      flushParagraph();
+      closeList();
+      return html.join("");
+    }
+
+    function renderInlineMarkdown(text) {
+      let html = escapeHtml(text);
+      html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+      html = html.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^)\\s]+)\\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+      html = html.replace(/(https?:\\/\\/[^\\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+      html = html.replace(/\\*\\*([^*]+)\\*\\*/g, "<strong>$1</strong>");
+      html = html.replace(/\\*([^*]+)\\*/g, "<em>$1</em>");
+      return html;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => {
+        if (char === "&") return "&amp;";
+        if (char === "<") return "&lt;";
+        if (char === ">") return "&gt;";
+        if (char === '"') return "&quot;";
+        return "&#39;";
+      });
     }
 
     function appendTranscriptRows(tableBody, timestamp, speaker, kind, text) {
@@ -5893,10 +6169,10 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       return ids.length ? Math.max(...ids) : 0;
     }
 
-    async function backfillVoicebotEvents(targetCallId = callId) {
+    async function backfillVoicebotEvents(targetCallId = callId, options = {}) {
       if (!targetCallId) return;
       try {
-        const after = latestSeenEventId();
+        const after = options.replay ? 0 : latestSeenEventId();
         const response = await fetch(`/events?call_id=${encodeURIComponent(targetCallId)}&after=${encodeURIComponent(after)}&limit=1000`);
         if (!response.ok) throw new Error(await response.text());
         const payload = await response.json();
@@ -5921,11 +6197,13 @@ WEBRTC_TEST_PAGE = """<!doctype html>
     function setIdleButtons() {
       startButton.disabled = false;
       stopButton.disabled = true;
+      chatSend.disabled = true;
     }
 
     function setActiveButtons() {
       startButton.disabled = true;
       stopButton.disabled = false;
+      chatSend.disabled = false;
     }
 
     function resetRecordingPlayback() {
@@ -5994,6 +6272,7 @@ WEBRTC_TEST_PAGE = """<!doctype html>
         const payload = await response.json();
         sessionId = payload.session_id;
         callId = payload.call_id;
+        lastFinishedCallId = null;
         seenEventIds = new Set();
         eventLogNode.innerHTML = "";
         transcriptLogNode.innerHTML = "";
@@ -6016,6 +6295,26 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       await stopCall();
       startButton.disabled = false;
     };
+
+    async function submitChatMessage() {
+      const text = chatInput.value.trim();
+      if (!text || !callId) return;
+      chatSend.disabled = true;
+      try {
+        const response = await fetch(`/calls/${encodeURIComponent(callId)}/messages`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({text, metadata: {source: "widget_chat_preview"}})
+        });
+        if (!response.ok) throw new Error(await response.text());
+        chatInput.value = "";
+        await backfillVoicebotEvents();
+      } catch (error) {
+        log(`chat send failed: ${error}`);
+      } finally {
+        chatSend.disabled = !callId;
+      }
+    }
 
     function connectEventSocket() {
       if (eventSocket) eventSocket.close();
@@ -6062,7 +6361,8 @@ WEBRTC_TEST_PAGE = """<!doctype html>
       }
       if (reason) log(reason);
       if (finishedCallId) {
-        backfillVoicebotEvents(finishedCallId);
+        lastFinishedCallId = finishedCallId;
+        backfillVoicebotEvents(finishedCallId, {replay: true});
         loadCallRecording(finishedCallId);
       }
     }

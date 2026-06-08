@@ -516,6 +516,27 @@ class PlaybackControlTests(unittest.TestCase):
         finally:
             session.stop()
 
+    def test_duplicate_active_progress_ack_is_not_replayed(self) -> None:
+        events = EventStore(max_context_events=30)
+        tts = RecordingTTS()
+        session = WebRTCCallSession(
+            "call-1",
+            "session-1",
+            Settings(),
+            events,
+            FakeSTT(),
+            tts,
+        )
+        try:
+            session.submit_agent_response(AgentResponse("call-1", "Give me a moment.", response_kind="progress_ack"))
+            session.submit_agent_response(AgentResponse("call-1", "Give me a moment.", response_kind="progress_ack"))
+
+            drops = [event for event in events.list_events(call_id="call-1") if event.type == "agent_response_dropped"]
+            self.assertEqual(drops[-1].data["reason"], "duplicate_active_progress_ack")
+            self.assertEqual(tts.texts, ["Give me a moment."])
+        finally:
+            session.stop()
+
     def test_call_session_call_control_ack_is_not_lost_after_newer_speech(self) -> None:
         events = EventStore(max_context_events=30)
         session, left, right = self.make_session("call-1", events)
@@ -1099,6 +1120,7 @@ class PlaybackControlTests(unittest.TestCase):
 
             self.assertIn("stt_started", event_types)
             self.assertIn("stt_failed", event_types)
+            self.assertEqual(event_types.count("stt_failed"), 1)
         finally:
             session.stop()
 
@@ -1120,6 +1142,7 @@ class PlaybackControlTests(unittest.TestCase):
 
             self.assertIn("stt_started", event_types)
             self.assertIn("stt_failed", event_types)
+            self.assertEqual(event_types.count("stt_failed"), 1)
         finally:
             session.stop_event.set()
             worker.join(timeout=1.0)

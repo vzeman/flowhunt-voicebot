@@ -25,6 +25,7 @@ import re
 import shlex
 import subprocess
 import tempfile
+import textwrap
 import threading
 import time
 import urllib.error
@@ -76,10 +77,11 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
     greeting_prompt = str(prompt_config.get("greeting") or "").strip()
     filler_message = str(prompt_config.get("filler_message") or "").strip()
     colleague_progress_message = str(prompt_config.get("colleague_progress_message") or "").strip()
+    chat_instructions = chat_response_instructions(prompt_config.get("chat") if isinstance(prompt_config, dict) else {})
     output_format = {
         "say": "text to speak, if any",
         "chat": {
-            "text": "optional visitor-readable chat message for website widget sessions",
+            "text": "visitor-readable chat message; more detailed than say and not the same wording",
             "blocks": [
                 {"type": "link", "label": "optional label", "url": "https://example.com"},
                 {"type": "image", "url": "https://example.com/image.png", "alt": "optional image description"},
@@ -93,7 +95,7 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
                 "name": "delegate_to_subagent",
                 "arguments": {
                     "call_id": "...",
-                    "message": "full task and context",
+                    "message": "full task and context; ask for voice_summary and chat_details",
                     "provider": "registered provider id when known",
                     "response_to_event_id": 123,
                 },
@@ -103,7 +105,7 @@ def build_prompt(tasks: list[dict], context: dict, tools: list[dict]) -> str:
                 "arguments": {
                     "call_id": "...",
                     "title": "short title",
-                    "description": "full task and context",
+                    "description": "full task and context; ask for voice_summary and chat_details",
                     "response_to_event_id": 123,
                 },
             },
@@ -117,6 +119,7 @@ Configured voicebot prompts:
 - Filler message: {filler_message or "(default)"}
 - Colleague progress message: {colleague_progress_message or "(default)"}
 - Additional system instructions: {custom_system_prompt or "(none)"}
+{chat_instructions}
 """ if prompt_config else ""
 
     return f"""You are an AI voicebot speaking with a customer on a phone call.
@@ -142,7 +145,11 @@ repeat the same waiting message. Never call invoke_flowhunt_flow or
 create_flowhunt_project_issue while handling a colleague update; use the
 colleague update as the result or status of the already-running work.
 If a colleague update includes consume_prompt, follow that prompt when turning
-the colleague result into a spoken answer.
+the colleague result into the customer answer. For colleague results, always
+produce JSON with a short say value and a richer chat.text value when chat is
+enabled. If the colleague result contains voice_summary, use that for say. If
+it contains chat_details, use that for chat.text. Do not read the detailed chat
+answer aloud.
 If the caller asks to end the call, call the hangup_call tool. If the caller
 asks to transfer the call, call transfer_call with the requested extension or
 target. If the caller asks you to press or send a keypad digit, call send_dtmf
@@ -183,6 +190,9 @@ one short clarification question instead.
 Conversation summary:
 {context.get("summary") or "(none)"}
 
+Conversation memory:
+{json.dumps(context.get("conversation_memory") or {}, ensure_ascii=False, indent=2)}
+
 Recent events:
 {json.dumps(context.get("events", []), ensure_ascii=False, indent=2)}
 
@@ -196,10 +206,46 @@ If you say that you will check, look up, verify, ask a colleague, investigate,
 or work on something that needs external tools, you must include the matching
 tool call in the same JSON response. A progress-only spoken answer without the
 tool call is invalid because no work will be started.
+Use conversation_memory.open_items and the pending user messages to answer all
+unresolved caller requests together. Use conversation_memory.answered_items to
+avoid repeating details that were already answered; briefly refer back only when
+the caller asks a follow-up. If dropped_user_messages contain useful caller
+intent that newer turns refer to, include that intent as context instead of
+ignoring it.
 
 Return either plain text to speak, or JSON in this form:
 {json.dumps(output_format, ensure_ascii=False, indent=2)}
 """
+
+
+def chat_response_instructions(chat_config: object) -> str:
+    if not isinstance(chat_config, dict):
+        return "- Chat channel: disabled"
+    mode = str(chat_config.get("mode") or "disabled").strip() or "disabled"
+    system_prompt = str(chat_config.get("system_prompt") or "").strip()
+    response_prompt = str(chat_config.get("response_prompt") or "").strip()
+    rich_content_prompt = str(chat_config.get("rich_content_prompt") or "").strip()
+    if mode == "disabled":
+        return "- Chat channel: disabled"
+    lines = [
+        f"- Chat channel: {mode}",
+        "- Voice answer must stay short: usually one brief sentence, suitable for audio.",
+        "- Chat answer must be a separate visitor-readable explanation in chat.text, not a copy of say.",
+        "- If both voice and chat are available, say the short conclusion aloud and put details, steps, links, or caveats in chat.text.",
+    ]
+    if mode == "mirror_voice":
+        lines.append("- Even in mirror_voice mode, use chat only for readable text; do not add a bot chat row unless chat.text is useful.")
+    elif mode == "expanded_chat":
+        lines.append("- For every normal answer, return JSON with both say and chat.text.")
+    elif mode == "chat_only_when_useful":
+        lines.append("- Include chat.text only when it adds useful detail beyond the spoken answer.")
+    if system_prompt:
+        lines.append(f"- Chat system instructions: {system_prompt}")
+    if response_prompt:
+        lines.append(f"- Chat response instructions: {response_prompt}")
+    if rich_content_prompt:
+        lines.append(f"- Chat rich content instructions: {rich_content_prompt}")
+    return "\n".join(lines)
 
 
 def response_language_instruction(language: str) -> str:
@@ -325,7 +371,40 @@ def parse_agent_output_with_chat(output: str) -> tuple[str, list[dict], dict | N
         tool_calls = []
     say = data.get("say") or data.get("text") or ""
     chat = data.get("chat")
-    return str(say).strip(), [call for call in tool_calls if isinstance(call, dict)], chat if isinstance(chat, dict) else None
+    answer = str(say).strip()
+    return answer, [call for call in tool_calls if isinstance(call, dict)], normalize_chat_payload(chat, answer)
+
+
+def normalize_chat_payload(chat: object, spoken_answer: str) -> dict | None:
+    if not isinstance(chat, dict):
+        return None
+    text = str(chat.get("text") or "").strip()
+    blocks = chat.get("blocks")
+    normalized: dict[str, object] = {}
+    if text and not is_duplicate_chat_text(text, spoken_answer):
+        normalized["text"] = text
+    if isinstance(blocks, list) and blocks:
+        normalized["blocks"] = [block for block in blocks if isinstance(block, dict)]
+    return normalized or None
+
+
+def is_duplicate_chat_text(chat_text: str, spoken_answer: str) -> bool:
+    chat_words = normalized_words(chat_text)
+    spoken_words = normalized_words(spoken_answer)
+    if not chat_words or not spoken_words:
+        return False
+    if chat_words == spoken_words:
+        return True
+    shorter = min(len(chat_words), len(spoken_words))
+    longer = max(len(chat_words), len(spoken_words))
+    if longer <= 0:
+        return False
+    overlap = sum(1 for left, right in zip(chat_words, spoken_words) if left == right)
+    return shorter >= 4 and shorter / longer >= 0.75 and overlap / shorter >= 0.85
+
+
+def normalized_words(text: str) -> list[str]:
+    return re.findall(r"[\w']+", text.casefold())
 
 
 def execute_tool_call(base_url: str, call: dict) -> dict:
@@ -531,6 +610,57 @@ def answer_as_say_call(answer: str, latest: dict, chat: dict | None = None) -> d
     }
 
 
+def ensure_expanded_chat_for_say_calls(tool_calls: list[dict], task: dict) -> list[dict]:
+    if chat_mode_for_task(task) != "expanded_chat":
+        return tool_calls
+    if str(task.get("data", {}).get("reason") or "") == "call_connected":
+        return tool_calls
+    enriched = []
+    for call in tool_calls:
+        if call.get("name") != "say":
+            enriched.append(call)
+            continue
+        arguments = call.setdefault("arguments", {})
+        if not isinstance(arguments, dict):
+            enriched.append(call)
+            continue
+        if response_kind_is_non_chat(arguments.get("response_kind")):
+            enriched.append(call)
+            continue
+        spoken = str(arguments.get("text") or "").strip()
+        if not spoken or normalize_chat_payload(arguments.get("chat"), spoken):
+            enriched.append(call)
+            continue
+        chat = expanded_chat_fallback(spoken, str(task.get("data", {}).get("text") or ""))
+        if chat:
+            arguments["chat"] = chat
+        enriched.append(call)
+    return enriched
+
+
+def chat_mode_for_task(task: dict) -> str:
+    prompt_config = task.get("data", {}).get("prompt_config")
+    chat_config = prompt_config.get("chat") if isinstance(prompt_config, dict) else {}
+    if not isinstance(chat_config, dict):
+        return "disabled"
+    return str(chat_config.get("mode") or "disabled").strip() or "disabled"
+
+
+def response_kind_is_non_chat(response_kind: object) -> bool:
+    return str(response_kind or "") in {"progress_ack", "call_control_ack", "stream_chunk", "stream_finalized"}
+
+
+def expanded_chat_fallback(spoken_answer: str, caller_text: str) -> dict | None:
+    if not spoken_answer:
+        return None
+    text = spoken_answer
+    if caller_text:
+        text = f"**Answer to:** {caller_text}\n\n{spoken_answer}"
+    if is_duplicate_chat_text(text, spoken_answer):
+        text = f"{spoken_answer} This written answer is shown here so the visitor can read the response in chat."
+    return {"text": text}
+
+
 def is_colleague_update_task(task: dict) -> bool:
     return str(task.get("data", {}).get("reason") or "") in {"colleague_result", "colleague_progress"}
 
@@ -700,14 +830,18 @@ def fast_tool_calls(task: dict) -> list[dict]:
         answer = colleague_update_answer(task)
         if not answer:
             return []
+        chat = colleague_update_chat(task, answer)
+        arguments = {
+            "call_id": call_id,
+            "text": answer,
+            "response_to_event_id": event_id,
+            "response_kind": "colleague_result",
+        }
+        if chat:
+            arguments["chat"] = chat
         return [{
             "name": "say",
-            "arguments": {
-                "call_id": call_id,
-                "text": answer,
-                "response_to_event_id": event_id,
-                "response_kind": "colleague_result",
-            },
+            "arguments": arguments,
         }]
 
     return []
@@ -738,9 +872,59 @@ def colleague_update_answer(task: dict) -> str:
     if not candidate:
         return ""
     spoken = customer_facing_colleague_text(candidate)
+    voice_summary = extract_labeled_colleague_section(candidate, "voice_summary")
+    if voice_summary:
+        spoken = voice_summary
     if not spoken:
         return "I do not have a clear customer-facing result yet."
     return _speech_limit(spoken, max_chars=COLLEAGUE_SPOKEN_MAX_CHARS)
+
+
+def colleague_update_chat(task: dict, spoken_answer: str) -> dict | None:
+    if not chat_enabled_for_task(task):
+        return None
+    data = task.get("data", {})
+    result = data.get("data") if isinstance(data.get("data"), dict) else {}
+    candidate = ""
+    if isinstance(result, dict):
+        candidate = str(result.get("content") or result.get("summary") or "")
+    if not candidate:
+        candidate = str(data.get("text") or "")
+        marker = "Result:"
+        if marker in candidate:
+            candidate = candidate.split(marker, 1)[1].strip()
+    chat_details = extract_labeled_colleague_section(candidate, "chat_details")
+    if not chat_details and len(candidate) > len(spoken_answer) + 80:
+        chat_details = strip_internal_colleague_text(candidate)
+    return normalize_chat_payload({"text": chat_details}, spoken_answer) if chat_details else None
+
+
+def chat_enabled_for_task(task: dict) -> bool:
+    prompt_config = task.get("data", {}).get("prompt_config")
+    chat_config = prompt_config.get("chat") if isinstance(prompt_config, dict) else {}
+    if not isinstance(chat_config, dict):
+        return False
+    return str(chat_config.get("mode") or "disabled").strip() != "disabled"
+
+
+def extract_labeled_colleague_section(text: str, label: str) -> str:
+    labels = "voice_summary|chat_details"
+    pattern = (
+        rf"(?:^|\n)\s*(?:#+\s*)?(?:\*\*)?{re.escape(label)}(?:\*\*)?"
+        rf"[ \t]*:?[ \t]*(?:\*\*)?[ \t]*(?:\r?\n)?(.*?)"
+        rf"(?=\n\s*(?:#+\s*)?(?:\*\*)?(?:{labels})(?:\*\*)?[ \t]*:?[ \t]*(?:\*\*)?[ \t]*(?:\r?\n)?|\Z)"
+    )
+    match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    return strip_wrapping_quotes(textwrap.dedent(match.group(1)).strip())
+
+
+def strip_wrapping_quotes(text: str) -> str:
+    text = text.strip().strip("- \t").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        return text[1:-1].strip()
+    return text
 
 
 def customer_facing_colleague_text(text: str) -> str:
@@ -1070,6 +1254,7 @@ def main() -> None:
                 if say_call:
                     calls_to_execute.append(say_call)
                 calls_to_execute.extend(tool_calls)
+                calls_to_execute = ensure_expanded_chat_for_say_calls(calls_to_execute, latest)
                 execute_conversational_tool_calls(args.base_url, ensure_action_acknowledgements(calls_to_execute))
             for task in pending:
                 seen.add(task["id"])

@@ -6,3 +6,4 @@ __pycache__/
 asterisk/pjsip.conf
 asterisk/extensions.conf
 .env
+.local-data/

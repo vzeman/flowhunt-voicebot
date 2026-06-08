@@ -60,6 +60,14 @@ class Settings:
     openai_stt_model: str = os.getenv("VOICEBOT_OPENAI_STT_MODEL", "whisper-1")
     language: str | None = os.getenv("VOICEBOT_LANGUAGE", "auto") or None
     stt_prompt: str = os.getenv("VOICEBOT_STT_PROMPT", "")
+    chat_mode: str = os.getenv("VOICEBOT_CHAT_MODE", "disabled")
+    chat_system_prompt: str = os.getenv("VOICEBOT_CHAT_SYSTEM_PROMPT", "")
+    chat_response_prompt: str = os.getenv(
+        "VOICEBOT_CHAT_RESPONSE_PROMPT",
+        "When chat is enabled, write a visitor-readable Markdown chat message that is more detailed than the spoken answer. "
+        "Use headings, bullets, and links when helpful. Do not duplicate the spoken wording.",
+    )
+    chat_rich_content_prompt: str = os.getenv("VOICEBOT_CHAT_RICH_CONTENT_PROMPT", "")
     stt_no_speech_threshold: float = env_float("VOICEBOT_STT_NO_SPEECH_THRESHOLD", 0.60)
     stt_logprob_threshold: float = env_float("VOICEBOT_STT_LOGPROB_THRESHOLD", -1.0)
     stt_min_chars: int = env_int("VOICEBOT_STT_MIN_CHARS", 2)

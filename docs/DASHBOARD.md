@@ -63,13 +63,20 @@ workspace admin APIs or FlowHunt control plane instead of relying on this seed.
   visible for diagnostics.
 - Running sessions are shown in `Sessions History` with a status filter.
 - Finished session history table with the same operational columns.
-- Session detail view with event timeline, transcript, and call recording
-  playback when a recording artifact exists.
+- Session detail view with event timeline, transcript, widget-chat
+  communication, and call recording playback when a recording artifact exists.
+  The chat tab reconstructs visitor text input, caller transcripts, and
+  voicebot `chat.text` payloads from the persisted event timeline so operators
+  can audit exactly what the widget would have shown.
 - Embedded WebRTC voicebot test console. The dashboard-level test selector
   chooses workspace and voicebot, and that target is passed into the WebRTC
   session metadata. The console includes a widget chat preview tab that renders
   caller transcripts and voicebot chat payloads from the same event stream the
-  public widget will use. There is no standalone `/webrtc/test` route.
+  public widget will use. The preview replays the current or just-finished
+  call when the tab opens so late-arriving chat payloads are not missed. It
+  intentionally excludes operational response kinds such as `progress_ack`,
+  `call_control_ack`, and streaming bookkeeping events; those remain visible
+  in the Events and Timeline tabs. There is no standalone `/webrtc/test` route.
 
 ## Management Model
 

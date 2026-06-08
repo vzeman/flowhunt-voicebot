@@ -12,15 +12,18 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
 from .agent_tasks import AgentTaskTracker
+from .api_agent_tasks import (
+    AgentTasksApiContext,
+    agent_task_status_payload,
+    agent_task_summary_payload,
+    create_agent_tasks_router,
+)
 from .api_audience import apply_route_audiences
 from .api_calls import CallsApiContext, call_state_payload, create_calls_router
 from .api_contracts import ContractsApiContext, create_contracts_router
 from .api_discovery import DiscoveryApiContext, create_discovery_router
 from .api_models import (
     AgentResponseRequest,
-    AgentTaskClaimRequest,
-    AgentTaskReleaseRequest,
-    AgentTaskRenewRequest,
     AgentToolRequest,
     CallControlRequest,
     CompactContextRequest,
@@ -622,6 +625,15 @@ def create_app(
     )
     app.include_router(create_contracts_router(ContractsApiContext(runtime_settings=runtime_settings)))
     app.include_router(create_discovery_router(DiscoveryApiContext(app=app)))
+    agent_tasks_api_context = AgentTasksApiContext(
+        events=events,
+        registry=registry,
+        tracker=tracker,
+        validated_limit=validated_limit,
+        prompt_context_for_pending=prompt_context_for_pending,
+        agent_task_event_to_dict=agent_task_event_to_dict,
+    )
+    app.include_router(create_agent_tasks_router(agent_tasks_api_context))
     app.include_router(
         create_providers_router(
             ProvidersApiContext(
@@ -2303,134 +2315,6 @@ def create_app(
         await hub.broadcast(event)
         return {"event": event_to_dict(event)}
 
-    @app.get("/agent/tasks")
-    def agent_tasks(after: int = 0, call_id: str | None = None, limit: int = 200) -> dict[str, Any]:
-        limit = validated_limit(limit)
-        all_events = [
-            event
-            for event in events.list_events(after=after, limit=1000)
-            if event.type == "agent_response_requested"
-        ]
-        active_call_ids = set(registry.active_call_ids())
-        pending = [
-            event
-            for event in all_events
-            if event.type == "agent_response_requested"
-            and tracker.is_pending(event.id)
-            and event.call_id in active_call_ids
-            and (call_id is None or event.call_id == call_id)
-        ]
-        task_context = events.context(call_id=call_id)
-        task_context.update(prompt_context_for_pending(pending[:limit]))
-        context_slice = pending[:limit]
-        task_context = events.context(call_id=call_id)
-        task_context.update(prompt_context_for_pending(context_slice))
-        return {
-            "pending": [agent_task_event_to_dict(event, task_context) for event in context_slice],
-            "context": task_context,
-        }
-
-    @app.post("/agent/tasks/claim")
-    def claim_agent_tasks(request: AgentTaskClaimRequest) -> dict[str, Any]:
-        active_call_ids = set(registry.active_call_ids())
-        eligible_event_ids = []
-        for event_id in request.event_ids:
-            source_event = events.get_event(event_id)
-            if (
-                source_event is not None
-                and source_event.type == "agent_response_requested"
-                and source_event.call_id in active_call_ids
-            ):
-                eligible_event_ids.append(event_id)
-
-        claimed_event_ids = tracker.claim(eligible_event_ids, request.owner, request.ttl_seconds)
-        for event_id in claimed_event_ids:
-            source_event = events.get_event(event_id)
-            if source_event is None:
-                continue
-            events.append(
-                source_event.call_id,
-                "agent_task_claimed",
-                {
-                    "task_event_id": event_id,
-                    "owner": request.owner,
-                    "ttl_seconds": request.ttl_seconds,
-                },
-            )
-        return {
-            "claimed_event_ids": claimed_event_ids,
-            "owner": request.owner,
-        }
-
-    @app.post("/agent/tasks/release")
-    def release_agent_tasks(request: AgentTaskReleaseRequest) -> dict[str, Any]:
-        released_event_ids = tracker.release_many(request.event_ids, owner=request.owner)
-        for event_id in released_event_ids:
-            source_event = events.get_event(event_id)
-            if source_event is None:
-                continue
-            events.append(
-                source_event.call_id,
-                "agent_task_released",
-                {"task_event_id": event_id, "owner": request.owner},
-            )
-        return {"released_event_ids": released_event_ids}
-
-    @app.post("/agent/tasks/renew")
-    def renew_agent_tasks(request: AgentTaskRenewRequest) -> dict[str, Any]:
-        renewed_event_ids = tracker.renew_many(request.event_ids, request.owner, request.ttl_seconds)
-        for event_id in renewed_event_ids:
-            source_event = events.get_event(event_id)
-            if source_event is None:
-                continue
-            events.append(
-                source_event.call_id,
-                "agent_task_renewed",
-                {
-                    "task_event_id": event_id,
-                    "owner": request.owner,
-                    "ttl_seconds": request.ttl_seconds,
-                },
-            )
-        return {"renewed_event_ids": renewed_event_ids, "owner": request.owner}
-
-    @app.get("/agent/tasks/status")
-    def agent_task_status(owner: str | None = None) -> dict[str, Any]:
-        return tracker.snapshot(owner=owner)
-
-    @app.get("/agent/tasks/summary")
-    def agent_task_summary(
-        after: int = 0,
-        call_id: str | None = None,
-        owner: str | None = None,
-        limit: int = 200,
-    ) -> dict[str, Any]:
-        limit = validated_limit(limit)
-        active_call_ids = set(registry.active_call_ids())
-        task_events = [
-            event
-            for event in events.list_events(after=after, limit=1000, call_id=call_id)
-            if event.type == "agent_response_requested"
-        ]
-        tasks = []
-        counts: dict[str, int] = {}
-        for event in task_events:
-            state = tracker.task_state(event.id, active=event.call_id in active_call_ids)
-            if owner is not None and state.get("state") == "claimed" and state.get("owner") != owner:
-                continue
-            entry = {
-                "event": event_to_dict(event),
-                **state,
-            }
-            tasks.append(entry)
-            state_name = str(state["state"])
-            counts[state_name] = counts.get(state_name, 0) + 1
-        return {
-            "tasks": tasks[:limit],
-            "counts": counts,
-            "active_calls": sorted(active_call_ids),
-        }
-
     @app.get("/subagent/tasks")
     def subagent_tasks(workspace_id: str | None = None, session_id: str | None = None) -> dict[str, Any]:
         if subagent_coordinator is None:
@@ -3910,10 +3794,11 @@ def create_app(
         return config()
 
     def tool_get_agent_task_status(args: dict[str, Any]) -> dict[str, Any]:
-        return agent_task_status(owner=args.get("owner"))
+        return agent_task_status_payload(agent_tasks_api_context, owner=args.get("owner"))
 
     def tool_get_agent_task_summary(args: dict[str, Any]) -> dict[str, Any]:
-        return agent_task_summary(
+        return agent_task_summary_payload(
+            agent_tasks_api_context,
             after=optional_int_arg(args, "after", 0),
             call_id=args.get("call_id"),
             owner=args.get("owner"),

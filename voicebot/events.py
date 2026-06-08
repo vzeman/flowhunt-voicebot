@@ -136,6 +136,15 @@ class EventStore:
         self._record_event(event)
         return event
 
+    def event_id_strategy(self) -> dict[str, Any]:
+        return {
+            "name": "process_local_counter",
+            "scope": "process",
+            "monotonic": True,
+            "collision_safe_across_processes": False,
+            "collision_safe_across_nodes": False,
+        }
+
     def _record_event(self, event: VoicebotEvent) -> None:
         with self._lock:
             self._events.append(event)
@@ -267,6 +276,15 @@ class JsonEventStore(EventStore):
         event = self._append_to_log(call_id, event_type, data or {})
         self._record_event(event)
         return event
+
+    def event_id_strategy(self) -> dict[str, Any]:
+        return {
+            "name": "jsonl_locked_max_plus_one",
+            "scope": "node_file",
+            "monotonic": True,
+            "collision_safe_across_processes": True,
+            "collision_safe_across_nodes": False,
+        }
 
     def _load_events(self) -> list[VoicebotEvent]:
         if not self.path.exists():

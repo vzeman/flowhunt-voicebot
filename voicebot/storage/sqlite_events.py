@@ -62,6 +62,15 @@ class SQLiteEventStore(EventStore):
             self._compact_locked()
         return event
 
+    def event_id_strategy(self) -> dict[str, Any]:
+        return {
+            "name": "sqlite_autoincrement",
+            "scope": "node_database",
+            "monotonic": True,
+            "collision_safe_across_processes": True,
+            "collision_safe_across_nodes": False,
+        }
+
     def list_events(
         self,
         after: int = 0,

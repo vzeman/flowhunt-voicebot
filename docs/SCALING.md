@@ -167,6 +167,14 @@ Production shared state:
 The JSON stores in this repository define the protocol; they are not the final
 cloud storage implementation.
 
+`GET /health/readiness` reports each event store's `event_id_strategy` under
+`checks.durable_storage.stores.events`. `process_local_counter` is safe only
+inside one runtime process. `jsonl_locked_max_plus_one` and
+`sqlite_autoincrement` avoid collisions between local processes sharing the
+same node-level store, but they are still not a multi-node event stream. A
+production FlowHunt deployment must use a shared event backend with globally
+collision-safe IDs before multiple runtime nodes write the same event family.
+
 ## Backpressure
 
 Backpressure must exist at multiple levels:

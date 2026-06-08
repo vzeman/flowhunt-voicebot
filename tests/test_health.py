@@ -258,6 +258,14 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(store["warning_count"], 3)
         self.assertEqual(store["snapshot"], {"pending_count": 1, "claimed_count": 1})
 
+    def test_durable_storage_check_reports_event_id_strategy(self) -> None:
+        check = durable_storage_check({"events": EventStore(max_context_events=20)}).to_dict()
+
+        strategy = check["stores"]["events"]["event_id_strategy"]
+        self.assertEqual(strategy["name"], "process_local_counter")
+        self.assertEqual(strategy["scope"], "process")
+        self.assertFalse(strategy["collision_safe_across_processes"])
+
     def test_existing_health_endpoint_remains_lightweight(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             app = create_app(

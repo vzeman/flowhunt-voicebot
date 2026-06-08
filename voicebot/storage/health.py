@@ -36,6 +36,9 @@ def storage_component_diagnostics(component: Any) -> dict[str, Any]:
         "warning_count": recovery_warning_count(diagnostics),
         "snapshot": compact_snapshot(component_snapshot(component)),
     }
+    event_id_strategy = getattr(component, "event_id_strategy", None)
+    if callable(event_id_strategy):
+        details["event_id_strategy"] = event_id_strategy()
     if path is not None:
         writable, error = path_is_writable(Path(path))
         details["writable"] = writable

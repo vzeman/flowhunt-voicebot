@@ -205,6 +205,13 @@ rows include non-positive event ids and blank call id, event type, or timestamp
 fields. When duplicate event ids are found during reload, the first row wins and
 later duplicates are skipped.
 
+Event stores expose `event_id_strategy` in durable-storage readiness
+diagnostics. The in-memory store reports `process_local_counter`, JSONL reports
+`jsonl_locked_max_plus_one`, and SQLite reports `sqlite_autoincrement`. Local
+file and SQLite strategies are collision-safe across processes sharing that
+same node-level store, but they are not a globally shared multi-node event
+stream.
+
 The runtime selects the event store with:
 
 - `VOICEBOT_EVENT_STORE_PROVIDER=json|memory`

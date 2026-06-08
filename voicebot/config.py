@@ -34,6 +34,14 @@ def env_json_list(name: str, default: list[dict[str, Any]]) -> tuple[dict[str, A
     return tuple(parsed)
 
 
+def env_json_list_any(names: tuple[str, ...], default: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and value.strip():
+            return env_json_list(name, default)
+    return tuple(default)
+
+
 def env_csv_tuple(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
     value = os.getenv(name)
     if value is None or not value.strip():
@@ -214,6 +222,10 @@ class Settings:
     subagent_task_max_poll_seconds: float = env_float("VOICEBOT_SUBAGENT_TASK_MAX_POLL_SECONDS", 30.0)
     subagent_task_timeout_seconds: float = env_float("VOICEBOT_SUBAGENT_TASK_TIMEOUT_SECONDS", 600.0)
     subagent_task_max_attempts: int = env_int("VOICEBOT_SUBAGENT_TASK_MAX_ATTEMPTS", 100)
+    subagent_providers: tuple[dict[str, Any], ...] = env_json_list_any(
+        ("VOICEBOT_SUBAGENT_PROVIDERS", "VOICEBOT_HTTP_SUBAGENT_PROVIDERS"),
+        [],
+    )
     http_subagent_providers: tuple[dict[str, Any], ...] = env_json_list("VOICEBOT_HTTP_SUBAGENT_PROVIDERS", [])
 
     stt_pipeline: tuple[dict[str, Any], ...] = env_json_list(
@@ -238,7 +250,7 @@ def redacted_settings(settings: Settings) -> dict[str, Any]:
                 "configured": bool(value),
                 "redacted": True,
             }
-        elif field.name == "http_subagent_providers":
+        elif field.name in {"subagent_providers", "http_subagent_providers"}:
             result[field.name] = [redact_http_subagent_provider(item) for item in value]
         else:
             result[field.name] = json_safe_value(value)

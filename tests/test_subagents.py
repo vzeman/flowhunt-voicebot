@@ -414,6 +414,7 @@ class SubagentTests(unittest.TestCase):
     def test_http_subagent_provider_submits_polls_and_cancels_generic_service_tasks(self) -> None:
         service = FakeHttpSubagentService()
         manifest = HttpSubagentProviderManifest(
+            kind="langgraph_agent",
             submit_url="https://agent.example/submit",
             poll_url="https://agent.example/poll",
             cancel_url="https://agent.example/cancel",
@@ -428,7 +429,7 @@ class SubagentTests(unittest.TestCase):
             workspace_id="workspace-1",
             session_id="call-1",
             request_event_id=10,
-            provider="http_service",
+            provider="langgraph_agent",
             input_text="Count pages",
             metadata={"skill": "research"},
         )
@@ -442,11 +443,33 @@ class SubagentTests(unittest.TestCase):
         self.assertEqual(completed.status, "completed")
         self.assertEqual(completed.result.summary, "The HTTP worker found the answer.")
         self.assertEqual(cancelled.status, "cancelled")
-        self.assertEqual(coordinator.provider_catalog()["providers"]["http_service"]["label"], "Research HTTP service")
+        self.assertEqual(coordinator.provider_catalog()["providers"]["langgraph_agent"]["label"], "Research HTTP service")
         self.assertEqual(service.calls[0][2]["request"]["input_text"], "Count pages")
+        self.assertEqual(service.calls[0][2]["request"]["provider"], "langgraph_agent")
         self.assertEqual(service.calls[0][3]["Authorization"], "Bearer token")
 
+    def test_multiple_http_subagent_manifests_can_register_distinct_chatbot_frameworks(self) -> None:
+        coordinator = SubagentCoordinator()
+        for kind in ("langgraph_agent", "rasa_bot"):
+            provider = HttpSubagentProvider(
+                HttpSubagentProviderManifest(
+                    kind=kind,
+                    submit_url=f"https://agent.example/{kind}/submit",
+                    label=f"{kind} adapter",
+                ),
+                http_json=FakeHttpSubagentService(),
+            )
+            coordinator.register(provider, provider.descriptor)
+
+        catalog = coordinator.provider_catalog()["providers"]
+
+        self.assertTrue(catalog["langgraph_agent"]["registered"])
+        self.assertTrue(catalog["rasa_bot"]["registered"])
+        self.assertFalse(catalog["flowhunt_flow"]["registered"])
+
     def test_http_subagent_manifest_rejects_invalid_configuration(self) -> None:
+        with self.assertRaisesRegex(ValueError, "kind"):
+            HttpSubagentProviderManifest(kind="", submit_url="https://agent.example/submit")
         with self.assertRaisesRegex(ValueError, "submit_url"):
             HttpSubagentProviderManifest(submit_url="")
         with self.assertRaisesRegex(ValueError, "timeout_seconds"):

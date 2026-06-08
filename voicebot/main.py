@@ -156,8 +156,10 @@ def build_subagent_coordinator(settings: Settings, events: EventStore) -> Subage
         coordinator.register(FlowHuntSubagentProvider("flowhunt_flow", client, settings.flowhunt_flow_id))
     if settings.flowhunt_project_id:
         coordinator.register(FlowHuntSubagentProvider("flowhunt_project", client, settings.flowhunt_project_id))
-    for provider_config in settings.http_subagent_providers:
+    provider_configs = settings.subagent_providers or settings.http_subagent_providers
+    for provider_config in provider_configs:
         manifest = HttpSubagentProviderManifest(
+            kind=str(provider_config.get("kind") or provider_config.get("provider") or "http_service"),
             submit_url=str(provider_config.get("submit_url") or ""),
             label=str(provider_config.get("label") or "HTTP subagent service"),
             poll_url=str(provider_config["poll_url"]) if provider_config.get("poll_url") else None,

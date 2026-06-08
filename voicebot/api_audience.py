@@ -31,6 +31,10 @@ PUBLIC_ROUTE_KEYS = {
 
 LOCAL_DEV_ROUTE_KEYS: set[tuple[str, str]] = set()
 
+INTERNAL_ROUTE_KEYS = {
+    ("GET", "/"),
+}
+
 INTERNAL_ROUTE_PREFIXES = (
     "/agent",
     "/api/surface",
@@ -68,6 +72,8 @@ def classify_route(method: str, path: str) -> RouteAudience | None:
         return RouteAudience("public", "caller-safe public runtime endpoint")
     if key in LOCAL_DEV_ROUTE_KEYS:
         return RouteAudience("local_dev", "local browser test page")
+    if key in INTERNAL_ROUTE_KEYS:
+        return RouteAudience("internal", "internal dashboard redirect")
     if any(path == prefix or path.startswith(f"{prefix}/") for prefix in INTERNAL_ROUTE_PREFIXES):
         return RouteAudience("internal", "internal control-plane or operations endpoint")
     return None

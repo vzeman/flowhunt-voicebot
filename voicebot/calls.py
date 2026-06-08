@@ -21,6 +21,7 @@ from .audio import (
     float32_to_pcm16_bytes,
     pcm16_bytes_to_float32,
     read_audiosocket_message,
+    rms,
     write_audiosocket_message,
 )
 from .call_actor import CallActorCoordinator
@@ -289,6 +290,16 @@ class CallSession:
         persistent_response = self._is_persistent_response(response)
         bypass_speaking_deferral = self._bypasses_speaking_deferral(response)
         self._interrupt_progress_for_priority_response(response)
+        if response.response_kind == "progress_ack" and "progress_ack" in self.playback.active_response_kinds():
+            self.events.append(
+                self.call_id,
+                "agent_response_dropped",
+                {
+                    "reason": "duplicate_active_progress_ack",
+                    "response_to_event_id": response.response_to_event_id,
+                },
+            )
+            return event
         if not startup_response and not persistent_response and self._has_active_persistent_response():
             self.events.append(
                 self.call_id,
@@ -458,6 +469,35 @@ class CallSession:
         )
         self._unprotect_startup_response(response.response_to_event_id)
         return event
+
+    def submit_user_text(self, text: str, metadata: dict[str, object] | None = None) -> tuple[VoicebotEvent, VoicebotEvent]:
+        normalized = text.strip()
+        if not normalized:
+            raise ValueError("text is required")
+        turn_id = self._new_turn()
+        self._mark_interrupted("text_input")
+        if self.playback.interrupt():
+            self.events.append(self.call_id, "bot_playback_interrupted", {"reason": "text_input", "turn_id": turn_id})
+        transcript = self.events.append(
+            self.call_id,
+            "user_transcript",
+            {
+                "turn_id": turn_id,
+                "text": normalized,
+                "source": "text_input",
+                "stale": False,
+                **(metadata or {}),
+            },
+        )
+        request = self._emit_agent_request(
+            {
+                "turn_id": turn_id,
+                "text": normalized,
+                "trigger_event_id": transcript.id,
+                "reason": "text_input",
+            }
+        )
+        return transcript, request
 
     def _tts_audio_chunks(self, text: str):
         synthesize_stream = getattr(self.tts, "synthesize_stream", None)
@@ -726,9 +766,12 @@ class CallSession:
                 continue
             transcript_event_ids: dict[str, int] = {}
             stale_turn = turn_generation != self._current_interrupt_generation()
+            transcription_frame_seen = False
+            error_frame_seen = False
             for frame in frames:
                 if not isinstance(frame, TranscriptionFrame):
                     if isinstance(frame, ErrorFrame):
+                        error_frame_seen = True
                         self.events.append(
                             self.call_id,
                             "stt_failed",
@@ -747,6 +790,7 @@ class CallSession:
                             min_chars=self.settings.agent_min_transcript_chars,
                             min_tokens=self.settings.agent_min_transcript_tokens,
                             audio_duration_seconds=len(audio) / CALL_SAMPLE_RATE,
+                            audio_rms=rms(audio),
                         )
                         if drop_decision.should_drop:
                             self.events.append(
@@ -775,6 +819,7 @@ class CallSession:
                         )
                     continue
 
+                transcription_frame_seen = True
                 if frame.kind == "transcription_started" and not stt_started_recorded:
                     self.events.append(self.call_id, "stt_started", {"turn_id": frame.turn_id})
                 elif frame.kind == "transcription_partial":
@@ -832,6 +877,12 @@ class CallSession:
                         },
                     )
                     transcript_event_ids[frame.frame_id] = transcript.id
+            if not transcription_frame_seen and not error_frame_seen:
+                self.events.append(
+                    self.call_id,
+                    "stt_failed",
+                    {"turn_id": turn_id, "error": "STT pipeline produced no transcription frames"},
+                )
             self.actors.completed("stt", correlation_id=str(turn_id), reason="stt_done")
 
     def _send_loop(self) -> None:

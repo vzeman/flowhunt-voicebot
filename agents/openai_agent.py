@@ -73,6 +73,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(env_or_default("VOICEBOT_COMMUNICATION_AGENT_STREAMING_CHUNK_CHARS", "90")),
     )
+    parser.add_argument(
+        "--progress-ack-delay-seconds",
+        type=float,
+        default=float(env_or_default("VOICEBOT_COMMUNICATION_AGENT_PROGRESS_ACK_DELAY_SECONDS", "2.0")),
+    )
     return parser.parse_args()
 
 
@@ -106,6 +111,7 @@ def main() -> None:
             echo_error_label="communication agent",
             streaming_enabled=args.streaming,
             streaming_chunk_chars=args.streaming_chunk_chars,
+            progress_ack_delay_seconds=args.progress_ack_delay_seconds,
         ),
     )
 

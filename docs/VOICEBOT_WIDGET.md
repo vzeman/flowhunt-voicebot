@@ -58,6 +58,15 @@ The internal dashboard WebRTC test console includes a `Widget Chat Preview` tab
 for administrator testing. It reads caller transcript events and voicebot chat
 payloads from the same event stream shape planned for the public widget, so
 admins can verify voice plus parallel readable chat before publishing an embed.
+The preview shows visitor messages and final voicebot chat payloads only. It
+filters operational response kinds such as `progress_ack`, `call_control_ack`,
+`stream_chunk`, and `stream_finalized` because those are voice/runtime status
+events, not visitor-facing chat answers.
+
+Finished sessions can also be inspected from the dashboard session detail
+`Chat Widget` tab. That view rebuilds widget chat communication from persisted
+session events, including typed chat input, caller transcripts, Markdown
+`chat.text`, and optional rich chat blocks.
 
 ## Route Configuration
 
@@ -82,6 +91,11 @@ agent should behave when chat is enabled:
 - `expanded_chat`: keep voice concise and put extra detail in chat.
 - `chat_only_when_useful`: send chat messages only for useful supplements such
   as links, images, summaries, or cards.
+
+If `expanded_chat` is enabled and the primary agent returns only a spoken
+answer, the communication agent performs a no-tool follow-up pass asking for a
+visitor-readable Markdown `chat.text`. If the provider still omits chat, the
+runtime falls back to a readable written version of the spoken answer.
 
 Public widget sessions must treat chat as optional. Voice-only sessions should
 continue without chat events, while voice+chat sessions should render the same

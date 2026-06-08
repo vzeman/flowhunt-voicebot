@@ -11,6 +11,7 @@ from agent_provider_registry import AgentProviderRegistry
 from communication_agent import (
     CommunicationAgentConfig,
     DelayedProgressAcknowledgement,
+    deterministic_colleague_tool_recovery,
     finalize_streamed_response,
     colleague_progress_ack_text_for_task,
     colleague_progress_ack_tool_call,
@@ -116,6 +117,48 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
         self.assertEqual(chat["text"], "Longer readable answer.")
         self.assertEqual(chat["blocks"][0]["type"], "image")
 
+    def test_model_turn_expands_chat_when_provider_returns_voice_only(self) -> None:
+        prompts: list[str] = []
+
+        def provider(client, model, prompt, timeout, max_output_tokens, tools):
+            prompts.append(prompt)
+            if len(prompts) == 1:
+                return "LiveAgent is a customer service platform.", []
+            return (
+                '{"chat":{"text":"**LiveAgent overview**\\n\\n'
+                'LiveAgent brings live chat, ticketing, email, and other support channels into one customer service workspace."}}',
+                [],
+            )
+
+        registry = AgentProviderRegistry()
+        registry.register("test", provider)
+
+        answer, tool_calls, chat = run_model_turn(
+            object(),
+            registry,
+            self.make_config(),
+            "original prompt with context",
+            [
+                {
+                    "id": 42,
+                    "call_id": "call-1",
+                    "data": {
+                        "text": "What is LiveAgent?",
+                        "prompt_config": {"chat": {"mode": "expanded_chat"}},
+                    },
+                }
+            ],
+            [],
+        )
+
+        self.assertEqual(answer, "LiveAgent is a customer service platform.")
+        self.assertEqual(tool_calls, [])
+        self.assertEqual(len(prompts), 2)
+        self.assertIn("expanded chat enabled", prompts[1])
+        self.assertIn("What is LiveAgent?", prompts[1])
+        self.assertIn("LiveAgent overview", chat["text"])
+        self.assertIn("ticketing", chat["text"])
+
     def test_stable_stream_text_splits_on_sentence_or_size(self) -> None:
         ready, pending = split_stable_stream_text("Hello caller. I can help", 90)
 
@@ -194,6 +237,11 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
         self.assertFalse(
             should_send_delayed_acknowledgement({"data": {"reason": "colleague_result", "text": "done"}})
         )
+
+    def test_delayed_ack_default_waits_for_longer_turns(self) -> None:
+        ack = DelayedProgressAcknowledgement("http://voicebot", {"call_id": "call-1"})
+
+        self.assertEqual(ack.delay_seconds, 2.0)
 
     def test_delayed_ack_is_later_and_tagged_as_progress(self) -> None:
         ack = DelayedProgressAcknowledgement("http://voicebot", {"call_id": "call-1"}, delay_seconds=0.0)
@@ -353,6 +401,28 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
         self.assertEqual(calls[0]["arguments"]["call_id"], "call-1")
         self.assertEqual(calls[0]["arguments"]["response_to_event_id"], 42)
         self.assertIn("LiveAgent status archive", calls[0]["arguments"]["message"])
+
+    def test_promised_external_check_recovers_flow_tool_from_recent_stale_context(self) -> None:
+        calls = deterministic_colleague_tool_recovery(
+            {"id": 773321, "call_id": "call-1", "data": {"text": "Give me main idea."}},
+            {
+                "events": [
+                    {
+                        "type": "stt_result_dropped",
+                        "data": {"text": "Check LiveAgent website.", "reason": "stale_transcript"},
+                    },
+                    {"type": "user_transcript", "data": {"text": "What's written on it?"}},
+                    {"type": "user_transcript", "data": {"text": "Give me main idea."}},
+                ]
+            },
+            "I'll check what is written on it for you.",
+            "invoke_flowhunt_flow",
+        )
+
+        self.assertEqual(calls[0]["name"], "invoke_flowhunt_flow")
+        self.assertEqual(calls[0]["arguments"]["response_to_event_id"], 773321)
+        self.assertIn("Check LiveAgent website.", calls[0]["arguments"]["message"])
+        self.assertIn("Give me main idea.", calls[0]["arguments"]["message"])
 
 
 if __name__ == "__main__":

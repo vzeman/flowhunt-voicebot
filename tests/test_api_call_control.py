@@ -85,6 +85,28 @@ class RecordingResponseSession:
         )
 
 
+class RecordingTextSession:
+    def __init__(self, call_id: str, events: EventStore) -> None:
+        self.call_id = call_id
+        self.events = events
+
+    def snapshot(self):
+        return {"call_id": self.call_id, "transport": "webrtc", "session_id": "session-1"}
+
+    def submit_user_text(self, text, metadata=None):
+        transcript = self.events.append(
+            self.call_id,
+            "user_transcript",
+            {"turn_id": 1, "text": text.strip(), "source": "text_input", **(metadata or {})},
+        )
+        request = self.events.append(
+            self.call_id,
+            "agent_response_requested",
+            {"turn_id": 1, "text": text.strip(), "trigger_event_id": transcript.id, "reason": "text_input"},
+        )
+        return transcript, request
+
+
 class FakeWebRTCManager:
     def __init__(self) -> None:
         self.closed_calls = []
@@ -261,6 +283,25 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertTrue(session.responses[0].partial)
         persisted = events.list_events(call_id="call-1")
         self.assertEqual(persisted[-1].data["stream_finalized"], True)
+
+    def test_call_message_submits_text_turn_and_agent_request(self) -> None:
+        registry = CallRegistry()
+        client, events, _tracker = self.build_client(registry=registry)
+        registry.add(RecordingTextSession("call-1", events))
+
+        response = client.post(
+            "/calls/call-1/messages",
+            json={"text": "Can you help me?", "metadata": {"client": "webrtc_test_console"}},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual([event["type"] for event in payload["events"]], ["user_transcript", "agent_response_requested"])
+        self.assertEqual(payload["events"][0]["data"]["text"], "Can you help me?")
+        self.assertEqual(payload["events"][0]["data"]["source"], "text_input")
+        self.assertEqual(payload["events"][0]["data"]["client"], "webrtc_test_console")
+        self.assertEqual(payload["events"][1]["data"]["trigger_event_id"], payload["events"][0]["id"])
 
     def test_agent_response_accepts_optional_chat_payload(self) -> None:
         registry = CallRegistry()
@@ -831,7 +872,10 @@ class ApiCallControlTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertLess(elapsed, 0.3)
-        self.assertEqual(provider.requests[0].input_text, "Review the caller website.")
+        self.assertIn("Review the caller website.", provider.requests[0].input_text)
+        self.assertIn("voice_summary", provider.requests[0].input_text)
+        self.assertIn("chat_details", provider.requests[0].input_text)
+        self.assertIn("Do not make voice_summary and chat_details the same text.", provider.requests[0].input_text)
         self.assertIn(54, tracker.snapshot()["responded_event_ids"])
 
 

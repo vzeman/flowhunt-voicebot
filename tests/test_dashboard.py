@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+import re
 import tempfile
 import unittest
 
@@ -34,6 +36,14 @@ class FakeWebRTCManager:
 
 
 class DashboardTests(unittest.TestCase):
+    def test_root_redirects_to_dashboard(self) -> None:
+        client = self.client()
+
+        response = client.get("/", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers["location"], "/dashboard")
+
     def test_dashboard_page_and_state_are_internal_workspace_scoped(self) -> None:
         client = self.client()
 
@@ -53,6 +63,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("renderHistoryStatusOptions(items)", page.text)
         self.assertIn('data-table-filter="session-event-rows"', page.text)
         self.assertIn('data-table-filter="session-transcript-rows"', page.text)
+        self.assertIn('data-table-filter="session-chat-rows"', page.text)
         self.assertIn('id="prompt-filler"', page.text)
         self.assertIn('id="prompt-colleague-progress"', page.text)
         self.assertIn('id="prompt-chat-mode"', page.text)
@@ -84,7 +95,9 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('id="session-gantt-dialog"', page.text)
         self.assertIn('id="session-gantt-dialog-close"', page.text)
         self.assertIn('data-session-tab="timeline"', page.text)
+        self.assertIn('data-session-tab="chat"', page.text)
         self.assertIn('id="session-tab-recording"', page.text)
+        self.assertIn('id="session-tab-chat"', page.text)
         self.assertIn("showSessionTab(button.dataset.sessionTab)", page.text)
         self.assertIn("session_tab: sessionTab", page.text)
         self.assertIn("session_tab: params.get(\"session_tab\")", page.text)
@@ -94,7 +107,12 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('for (const item of items)', page.text)
         self.assertIn(".showModal()", page.text)
         self.assertIn('aria-label="Session transcript"', page.text)
+        self.assertIn('aria-label="Session chat widget communication"', page.text)
         self.assertIn("renderSessionTranscript(transcript.events || [])", page.text)
+        self.assertIn("renderSessionChat(timeline.events || [])", page.text)
+        self.assertIn("isSessionChatEvent(event)", page.text)
+        self.assertIn("renderSessionMarkdown(item.text)", page.text)
+        self.assertIn('["timeline", "recording", "transcript", "chat", "events"]', page.text)
         self.assertIn("eventSummary(event)", page.text)
         self.assertIn("formatTimeOnly(event.timestamp)", page.text)
         self.assertIn("appendJsonBlockValue(pre, value, 0)", page.text)
@@ -126,6 +144,11 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("prompts: subagentPrompts", page.text)
         self.assertIn("srcdoc=", page.text)
         self.assertNotIn('src="/webrtc/test"', page.text)
+        srcdoc = self.embedded_webrtc_srcdoc(page.text)
+        self.assertIn('startButton.onclick = async () => {', srcdoc)
+        self.assertIn('fetch("/webrtc/sessions"', srcdoc)
+        self.assertIn('split(/\\r?\\n/)', srcdoc)
+        self.assertNotIn('split(/\r?\n/)', srcdoc)
         self.assertEqual(state.status_code, 200)
         payload = state.json()
         self.assertEqual(payload["selected_workspace_id"], "workspace-1")
@@ -138,6 +161,19 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(payload["session_history"][0]["status"], "active")
         self.assertEqual(payload["voicebots"][0]["channels"][0]["channel_id"], "channel-1")
         self.assertEqual(payload["voicebots"][0]["public_routes"][0]["route_id"], "route-1")
+
+    def test_local_dashboard_state_recovers_from_stale_workspace_selection(self) -> None:
+        client = self.client()
+
+        response = client.get("/dashboard/state?workspace_id=missing-workspace")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["selected_workspace_id"], "workspace-1")
+
+    def embedded_webrtc_srcdoc(self, page_text: str) -> str:
+        match = re.search(r'srcdoc="(.*?)"', page_text, flags=re.DOTALL)
+        self.assertIsNotNone(match)
+        return html.unescape(match.group(1))
 
     def test_dashboard_requires_internal_auth_when_enabled(self) -> None:
         client = self.client(

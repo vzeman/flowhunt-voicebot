@@ -14,6 +14,11 @@ class AgentResponseRequest(BaseModel):
     chat: dict[str, Any] | None = None
 
 
+class CallMessageRequest(BaseModel):
+    text: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class SpeculativeSubagentTaskRequest(BaseModel):
     workspace_id: str
     session_id: str
@@ -223,7 +228,8 @@ class VoicebotChatPromptConfigRequest(BaseModel):
     mode: str = "disabled"
     system_prompt: str = ""
     response_prompt: str = (
-        "When chat is enabled, provide a visitor-readable message that may include more detail than the spoken answer."
+        "When chat is enabled, write a visitor-readable chat message that is more detailed than the spoken answer. "
+        "Do not duplicate the spoken wording."
     )
     rich_content_prompt: str = ""
 

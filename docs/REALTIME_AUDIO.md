@@ -167,6 +167,11 @@ call-control acknowledgement can interrupt it instead of waiting behind filler
 audio. When the model later invokes a colleague/subagent tool, the wrapper
 suppresses the tool's default progress phrase so the caller does not hear
 duplicate waiting messages.
+If a progress acknowledgement is already queued or playing, later overlapping
+`progress_ack` responses are logged as `agent_response_dropped` with
+`reason=duplicate_active_progress_ack` and are not synthesized again. Dashboard
+widget-chat views also hide progress acknowledgements because they are voice
+status updates rather than chat answers.
 
 Colleague/subagent progress speech is intentionally scheduled in parallel with
 the background work. The tool handler queues the spoken progress update as a

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -17,6 +18,7 @@ from local_command_agent import (
     ClaimRenewer,
     claim_tasks,
     answer_as_say_call,
+    chat_mode_for_task,
     ensure_action_acknowledgements,
     execute_conversational_tool_calls,
     execute_tool_call,
@@ -28,6 +30,7 @@ from local_command_agent import (
     needs_spoken_followup,
     parse_agent_output,
     parse_agent_output_with_chat,
+    ensure_expanded_chat_for_say_calls,
     remove_colleague_reentrant_tool_calls,
     release_tasks,
 )
@@ -45,6 +48,7 @@ class CommunicationAgentConfig:
     echo_error_label: str = "communication agent"
     streaming_enabled: bool = False
     streaming_chunk_chars: int = 90
+    progress_ack_delay_seconds: float = 2.0
 
 
 def run_communication_agent(
@@ -96,8 +100,6 @@ def run_communication_agent(
                     http_json("GET", f"{config.base_url}/agent/tools/schema").get("tools", [])
                 )
                 prompt = build_prompt(pending, response.get("context", {}), legacy_tools)
-                delayed_ack = DelayedProgressAcknowledgement(config.base_url, latest)
-                delayed_ack.start()
                 streamed_response = False
                 chat = None
                 try:
@@ -118,8 +120,6 @@ def run_communication_agent(
                     tool_calls = []
                     chat = None
                     print(f"provider turn failed for event {latest['id']}: {exc}", flush=True)
-                finally:
-                    delayed_ack.stop()
 
                 model_requested_tools = bool(tool_calls)
                 tool_calls = attach_task_context(tool_calls, latest)
@@ -142,8 +142,6 @@ def run_communication_agent(
                     )
                     if tool_calls:
                         print(f"recovered missing colleague tool call for event {latest['id']}", flush=True)
-                if delayed_ack.delivered:
-                    tool_calls = suppress_colleague_tool_progress(tool_calls)
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
                 tool_calls = ensure_action_acknowledgements(tool_calls)
                 initial_say = None if streamed_response else answer_as_say_call(answer, latest, chat=chat)
@@ -151,21 +149,18 @@ def run_communication_agent(
                     latest,
                     tool_calls,
                     initial_say=initial_say,
-                    delayed_ack_delivered=delayed_ack.delivered,
+                    delayed_ack_delivered=False,
                     streamed_response=streamed_response,
                 ):
                     tool_calls = suppress_colleague_tool_progress(tool_calls)
                     calls_for_initial_execution = [colleague_progress_ack_tool_call(latest), *tool_calls]
-                elif delayed_ack.delivered and has_colleague_tool_call(tool_calls):
-                    initial_say = None
-                    answer = ""
-                    tool_calls = suppress_colleague_tool_progress(tool_calls)
-                    calls_for_initial_execution = list(tool_calls)
                 else:
                     calls_for_initial_execution = list(tool_calls)
+                calls_for_initial_execution = ensure_expanded_chat_for_say_calls(calls_for_initial_execution, latest)
                 if initial_say and tool_calls and not needs_spoken_followup(tool_calls):
                     calls_for_initial_execution = [initial_say, *tool_calls]
                     answer = ""
+                    calls_for_initial_execution = ensure_expanded_chat_for_say_calls(calls_for_initial_execution, latest)
                 tool_results = execute_conversational_tool_calls(config.base_url, calls_for_initial_execution)
                 if tool_calls and needs_spoken_followup(tool_calls):
                     follow_up_prompt = build_tool_result_prompt(prompt, tool_results)
@@ -183,8 +178,9 @@ def run_communication_agent(
                         chat = None
                         print(f"provider follow-up failed for event {latest['id']}: {exc}", flush=True)
                 if answer and not streamed_response:
+                    final_say = ensure_expanded_chat_for_say_calls([answer_as_say_call(answer, latest, chat=chat)], latest)
                     tool_results.extend(
-                        execute_conversational_tool_calls(config.base_url, [answer_as_say_call(answer, latest, chat=chat)])
+                        execute_conversational_tool_calls(config.base_url, final_say)
                     )
                 elif streamed_response and not tool_calls:
                     finalize_streamed_response(config.base_url, latest)
@@ -242,7 +238,38 @@ def run_model_turn(
         tool_calls = [*native_tool_calls, *parsed_tool_calls]
         if answer and is_echo_answer(answer, pending):
             raise RuntimeError(f"{config.echo_error_label} returned echo response twice: {answer}")
+    if answer and not chat and not tool_calls and chat_mode_for_task(pending[-1]) == "expanded_chat":
+        chat = generate_expanded_chat_reply(client, providers, config, prompt, pending[-1], answer)
     return answer, tool_calls, chat
+
+
+def generate_expanded_chat_reply(
+    client: Any,
+    providers: AgentProviderRegistry,
+    config: CommunicationAgentConfig,
+    prompt: str,
+    task: dict,
+    spoken_answer: str,
+) -> dict | None:
+    caller_text = str(task.get("data", {}).get("text") or "").strip()
+    chat_prompt = (
+        f"{prompt}\n\n"
+        "The previous provider response contained only a short spoken answer, but this voicebot has "
+        "expanded chat enabled. Create the written visitor chat answer now.\n\n"
+        f"Caller question: {caller_text or '(not provided)'}\n"
+        f"Spoken answer already sent to TTS: {spoken_answer}\n\n"
+        "Return only JSON in this exact shape:\n"
+        '{"chat":{"text":"visitor-readable Markdown explanation that is clearly more detailed than the spoken answer"}}\n\n'
+        "Do not include tool_calls. Do not include say. Do not copy the spoken answer as the whole chat text. "
+        "Use concise headings or bullets when helpful."
+    )
+    try:
+        raw_chat, _native_tool_calls = run_provider_with_retry(client, providers, config, chat_prompt, None)
+    except Exception as exc:
+        print(f"provider chat expansion failed for event {task.get('id')}: {exc}", flush=True)
+        return None
+    _answer, _tool_calls, chat = parse_agent_output_with_chat(raw_chat)
+    return chat
 
 
 def run_model_turn_streaming(
@@ -430,10 +457,10 @@ def recover_missing_colleague_tool_call(
         )
     except Exception as exc:
         print(f"colleague tool recovery failed for event {task['id']}: {exc}", flush=True)
-        return []
+        return deterministic_colleague_tool_recovery(task, context, draft_answer, tool_name)
     recovery = parse_colleague_tool_recovery(raw_answer)
     if not recovery.get("delegate"):
-        return []
+        return deterministic_colleague_tool_recovery(task, context, draft_answer, tool_name)
     message = str(recovery.get("message") or task.get("data", {}).get("text") or "").strip()
     if not message:
         return []
@@ -450,6 +477,60 @@ def recover_missing_colleague_tool_call(
             "response_to_event_id": task["id"],
         }
     return [{"name": tool_name, "arguments": arguments}]
+
+
+EXTERNAL_WORK_PROMISE_RE = re.compile(
+    r"\b(i(?:'|’)ll|i will|let me|i can|i(?:'|’)m going to)\s+"
+    r"(check|look up|verify|investigate|research|ask|find out|review|inspect)\b",
+    re.IGNORECASE,
+)
+
+
+def deterministic_colleague_tool_recovery(task: dict, context: dict, draft_answer: str, tool_name: str) -> list[dict]:
+    if not EXTERNAL_WORK_PROMISE_RE.search(draft_answer):
+        return []
+    message = colleague_recovery_message_from_context(task, context)
+    if not message:
+        return []
+    arguments: dict[str, Any] = {
+        "call_id": task["call_id"],
+        "message": message,
+        "response_to_event_id": task["id"],
+    }
+    if tool_name == "create_flowhunt_project_issue":
+        arguments = {
+            "call_id": task["call_id"],
+            "title": "Caller external check",
+            "description": message,
+            "response_to_event_id": task["id"],
+        }
+    return [{"name": tool_name, "arguments": arguments}]
+
+
+def colleague_recovery_message_from_context(task: dict, context: dict) -> str:
+    latest_text = str((task.get("data") or {}).get("text") or "").strip()
+    recent_texts: list[str] = []
+    events = context.get("events")
+    if isinstance(events, list):
+        for event in events[-20:]:
+            if not isinstance(event, dict):
+                continue
+            event_type = str(event.get("type") or "")
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            text = str(data.get("text") or "").strip()
+            if not text:
+                continue
+            if event_type in {"user_transcript", "stt_result_dropped"}:
+                recent_texts.append(text)
+    parts: list[str] = []
+    for text in [*recent_texts, latest_text]:
+        if text and text.casefold() not in {part.casefold() for part in parts}:
+            parts.append(text)
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    return "Use the recent caller context to complete the external check: " + " / ".join(parts[-4:])
 
 
 def preferred_colleague_tool_name(native_tools: list[dict]) -> str:
@@ -533,7 +614,7 @@ def has_http_failed_say(results: list[dict]) -> bool:
 
 
 class DelayedProgressAcknowledgement:
-    def __init__(self, base_url: str, task: dict, delay_seconds: float = 0.8) -> None:
+    def __init__(self, base_url: str, task: dict, delay_seconds: float = 2.0) -> None:
         self.base_url = base_url
         self.task = task
         self.delay_seconds = delay_seconds

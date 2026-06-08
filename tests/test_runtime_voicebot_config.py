@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
+from voicebot.config import Settings
 from voicebot.events import EventStore
 from voicebot.provider_config import ProviderChoice, SecretReference, VoicebotProviderConfig
 from voicebot.runtime_config import (
@@ -84,6 +85,36 @@ class RuntimeVoicebotConfigTests(unittest.TestCase):
 
         self.assertEqual(saved_first.config_version, 1)
         self.assertEqual(saved_second.config_version, 2)
+
+    def test_default_prompt_config_uses_chat_settings(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        events = EventStore(max_context_events=50)
+        voicebots = VoicebotStore()
+        voicebots.create(VoicebotDefinition("workspace-1", "voicebot-1"))
+        app = create_app(
+            events,
+            CallRegistry(),
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore(self.directory.name),
+            None,
+            settings=Settings(
+                chat_mode="expanded_chat",
+                chat_response_prompt="Add useful chat detail.",
+                chat_rich_content_prompt="Use bullets when useful.",
+            ),
+            voicebots=voicebots,
+            prompt_configs=VoicebotPromptConfigStore(),
+        )
+        client = TestClient(app)
+
+        response = client.get("/workspaces/workspace-1/voicebots/voicebot-1/prompts")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["source"], "default")
+        self.assertEqual(response.json()["prompts"]["chat"]["mode"], "expanded_chat")
+        self.assertEqual(response.json()["prompts"]["chat"]["response_prompt"], "Add useful chat detail.")
+        self.assertEqual(response.json()["prompts"]["chat"]["rich_content_prompt"], "Use bullets when useful.")
 
     def test_runtime_config_endpoint_validates_saves_redacts_and_emits_version_event(self) -> None:
         client, events = self.build_client()

@@ -136,6 +136,7 @@ class SubagentTaskResult:
 @dataclass(frozen=True)
 class HttpSubagentProviderManifest:
     submit_url: str
+    kind: SubagentProviderKind = "http_service"
     label: str = "HTTP subagent service"
     poll_url: str | None = None
     cancel_url: str | None = None
@@ -145,6 +146,10 @@ class HttpSubagentProviderManifest:
     result_context: Literal["clean", "raw"] = "clean"
 
     def __post_init__(self) -> None:
+        if not self.kind.strip():
+            raise ValueError("kind is required")
+        if self.kind != self.kind.strip():
+            raise ValueError("kind must not contain leading or trailing whitespace")
         if not self.submit_url.strip():
             raise ValueError("submit_url is required")
         if not self.label.strip():
@@ -158,7 +163,7 @@ class HttpSubagentProviderManifest:
 
     def descriptor(self) -> SubagentProviderDescriptor:
         return SubagentProviderDescriptor(
-            kind="http_service",
+            kind=self.kind,
             label=self.label,
             supports_async_polling=self.poll_url is not None,
             supports_cancel=self.cancel_url is not None,
@@ -610,14 +615,13 @@ class SubagentCoordinator:
 
 
 class HttpSubagentProvider:
-    kind: Literal["http_service"] = "http_service"
-
     def __init__(
         self,
         manifest: HttpSubagentProviderManifest,
         http_json: Callable[[str, str, dict[str, Any], dict[str, str], float], dict[str, Any]] | None = None,
     ) -> None:
         self.manifest = manifest
+        self.kind = manifest.kind
         self.http_json = http_json or _http_json
 
     @property
@@ -877,7 +881,7 @@ def _http_subagent_task_from_response(
             workspace_id=source.workspace_id,
             session_id=source.session_id,
             request_event_id=source.request_event_id,
-            provider="http_service",
+            provider=source.provider,
             status="requested",
             input_text=source.input_text,
             voicebot_id=source.voicebot_id,

@@ -161,6 +161,34 @@ For FlowHunt flow execution, the adapter uses the invoke task protocol:
 3. poll the task by configured `flow_id + task_id`
 4. complete only when the provider task returns a final result/status
 
+Custom HTTP/chatbot adapters are configured with `VOICEBOT_SUBAGENT_PROVIDERS`,
+a JSON list of provider manifests. Each manifest registers one provider kind in
+the same catalog used by FlowHunt providers:
+
+```json
+[
+  {
+    "kind": "langgraph_agent",
+    "label": "LangGraph research agent",
+    "submit_url": "https://agent.example/submit",
+    "poll_url": "https://agent.example/poll",
+    "cancel_url": "https://agent.example/cancel",
+    "headers": {"Authorization": "Bearer token"},
+    "required_metadata": ["skill"],
+    "timeout_seconds": 10
+  }
+]
+```
+
+`kind` is the provider name agents pass to `delegate_to_subagent`. `submit_url`
+is required. `poll_url` and `cancel_url` opt the provider into async polling and
+cancellation. `required_metadata` declares provider-specific routing fields that
+must be supplied with a task before the provider is called. The legacy
+`VOICEBOT_HTTP_SUBAGENT_PROVIDERS` setting is still accepted for one
+`http_service`-style provider, but new deployments should use
+`VOICEBOT_SUBAGENT_PROVIDERS` so multiple chatbot frameworks can be registered
+without editing core runtime code.
+
 ## Runtime Integration
 
 The current implementation is intentionally independent from HTTP routes and

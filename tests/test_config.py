@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from voicebot.config import Settings, env_json_list, redacted_settings
+from voicebot.config import Settings, env_json_list, env_json_list_any, redacted_settings
 
 
 class ConfigTests(unittest.TestCase):
@@ -24,6 +24,21 @@ class ConfigTests(unittest.TestCase):
         with patch.dict(os.environ, {"VOICEBOT_TEST_PIPELINE": '{"name":"stt"}'}):
             with self.assertRaisesRegex(ValueError, "VOICEBOT_TEST_PIPELINE must be a JSON list"):
                 env_json_list("VOICEBOT_TEST_PIPELINE", [])
+
+    def test_env_json_list_any_uses_first_configured_name(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "VOICEBOT_SUBAGENT_PROVIDERS": '[{"kind":"langgraph_agent"}]',
+                "VOICEBOT_HTTP_SUBAGENT_PROVIDERS": '[{"kind":"legacy_http"}]',
+            },
+        ):
+            value = env_json_list_any(
+                ("VOICEBOT_SUBAGENT_PROVIDERS", "VOICEBOT_HTTP_SUBAGENT_PROVIDERS"),
+                [],
+            )
+
+        self.assertEqual(value, ({"kind": "langgraph_agent"},))
 
     def test_redacted_settings_hides_sensitive_values(self) -> None:
         settings = Settings(
@@ -59,6 +74,13 @@ class ConfigTests(unittest.TestCase):
 
     def test_http_subagent_provider_headers_are_redacted(self) -> None:
         settings = Settings(
+            subagent_providers=(
+                {
+                    "kind": "langgraph_agent",
+                    "submit_url": "https://agent.example/submit",
+                    "headers": {"Authorization": "Bearer neutral-secret"},
+                },
+            ),
             http_subagent_providers=(
                 {
                     "submit_url": "https://agent.example/submit",
@@ -69,6 +91,10 @@ class ConfigTests(unittest.TestCase):
 
         result = redacted_settings(settings)
 
+        self.assertEqual(
+            result["subagent_providers"][0]["headers"],
+            {"configured": True, "redacted": True},
+        )
         self.assertEqual(
             result["http_subagent_providers"][0]["headers"],
             {"configured": True, "redacted": True},

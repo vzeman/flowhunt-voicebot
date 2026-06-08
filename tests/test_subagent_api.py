@@ -10,12 +10,20 @@ from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
 from voicebot.config import Settings
 from voicebot.events import EventStore
-from voicebot.subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, SubagentTaskResult, SubagentTaskStore
+from voicebot.subagents import (
+    SubagentCoordinator,
+    SubagentProviderDescriptor,
+    SubagentTask,
+    SubagentTaskRequest,
+    SubagentTaskResult,
+    SubagentTaskStore,
+)
 from voicebot.transcripts import TranscriptStore
 
 
 class FakeProvider:
-    kind = "internal_worker"
+    def __init__(self, kind: str = "internal_worker") -> None:
+        self.kind = kind
 
     def submit(self, request: SubagentTaskRequest) -> SubagentTask:
         task, _created = SubagentTaskStore().get_or_create_requested(request)
@@ -167,6 +175,42 @@ class SubagentApiTests(unittest.TestCase):
         event_types = [event.type for event in events.list_events(call_id="call-1")]
         self.assertIn("subagent_task_requested", event_types)
         self.assertIn("subagent_task_updated", event_types)
+
+    def test_delegate_to_subagent_tool_uses_custom_provider_kind(self) -> None:
+        events = EventStore(max_context_events=50)
+        coordinator = SubagentCoordinator(events=events)
+        coordinator.register(
+            FakeProvider("langgraph_agent"),
+            SubagentProviderDescriptor(kind="langgraph_agent", label="LangGraph agent"),
+        )
+        app = create_app(
+            events,
+            CallRegistry(),
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore(tempfile.mkdtemp()),
+            None,
+            settings=Settings(flowhunt_workspace_id="workspace-1"),
+            subagent_coordinator=coordinator,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/agent/tools/delegate_to_subagent",
+            json={
+                "arguments": {
+                    "call_id": "call-1",
+                    "provider": "langgraph_agent",
+                    "message": "Ask the LangGraph worker.",
+                    "response_to_event_id": 12,
+                }
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["task"]["provider"], "langgraph_agent")
+        self.assertIn("langgraph_agent", client.get("/subagent/providers").json()["providers"])
 
 
 if __name__ == "__main__":

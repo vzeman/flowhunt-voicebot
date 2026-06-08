@@ -24,10 +24,10 @@ from .api_calls import CallsApiContext, call_state_payload, create_calls_router
 from .api_context import ContextApiContext, create_context_router
 from .api_contracts import ContractsApiContext, create_contracts_router
 from .api_discovery import DiscoveryApiContext, create_discovery_router
+from .api_observability import ObservabilityApiContext, create_observability_router
 from .api_models import (
     AgentResponseRequest,
     CallControlRequest,
-    ConversationEvaluationRequest,
     IncomingSessionAdmissionRequest,
     PlaybackInterruptRequest,
     PublicVoicebotRoutePatchRequest,
@@ -94,7 +94,6 @@ from .internal_auth import (
 )
 from .language import detected_session_language, is_auto_language
 from .multimodal import Modality, ModalityCapabilities, MultimodalContextStore
-from .observability import ConversationExpectation, build_timeline, diagnostics_summary, evaluate_conversation, evaluate_slos
 from .progress import ProgressCadenceMemory, normalize_progress_message
 from .public_access import FixedWindowPublicRateLimiter, origin_allowed
 from .provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities
@@ -615,6 +614,16 @@ def create_app(
         validated_limit=validated_limit,
     )
     app.include_router(create_events_router(events_api_context))
+    app.include_router(
+        create_observability_router(
+            ObservabilityApiContext(
+                events=events,
+                transcripts=transcripts,
+                durable_call_events=durable_call_events,
+                validated_limit=validated_limit,
+            )
+        )
+    )
     app.include_router(
         create_security_router(
             SecurityApiContext(
@@ -2236,84 +2245,6 @@ def create_app(
             "unregister": control_result_dict(unregister_result),
             "reload": control_result_dict(reload_result),
         }
-
-    @app.get("/observability/timeline")
-    def observability_timeline(
-        after: int = 0,
-        call_id: str | None = None,
-        workspace_id: str | None = None,
-        voicebot_id: str | None = None,
-        session_id: str | None = None,
-        limit: int = 1000,
-    ) -> dict[str, Any]:
-        if call_id:
-            return build_timeline(
-                durable_call_events(events, transcripts, call_id, after=after, limit=validated_limit(limit))
-            )
-        return build_timeline(
-            events.list_events(
-                after=after,
-                call_id=call_id,
-                workspace_id=workspace_id,
-                voicebot_id=voicebot_id,
-                session_id=session_id,
-                limit=validated_limit(limit),
-            )
-        )
-
-    @app.post("/observability/evaluate")
-    def observability_evaluate(request: ConversationEvaluationRequest) -> dict[str, Any]:
-        return evaluate_conversation(
-            events.list_events(
-                after=request.after,
-                call_id=request.call_id,
-                workspace_id=request.workspace_id,
-                voicebot_id=request.voicebot_id,
-                session_id=request.session_id,
-                limit=validated_limit(request.limit),
-            ),
-            ConversationExpectation(
-                must_include_event_types=tuple(request.must_include_event_types),
-                max_duplicate_agent_responses=request.max_duplicate_agent_responses,
-                require_final_agent_response=request.require_final_agent_response,
-            ),
-        )
-
-    @app.get("/observability/slo")
-    def observability_slo(
-        call_id: str | None = None,
-        workspace_id: str | None = None,
-        voicebot_id: str | None = None,
-        session_id: str | None = None,
-        limit: int = 1000,
-    ) -> dict[str, Any]:
-        return evaluate_slos(
-            events.list_events(
-                call_id=call_id,
-                workspace_id=workspace_id,
-                voicebot_id=voicebot_id,
-                session_id=session_id,
-                limit=validated_limit(limit),
-            )
-        )
-
-    @app.get("/observability/diagnostics")
-    def observability_diagnostics(
-        call_id: str | None = None,
-        workspace_id: str | None = None,
-        voicebot_id: str | None = None,
-        session_id: str | None = None,
-        limit: int = 1000,
-    ) -> dict[str, Any]:
-        return diagnostics_summary(
-            events.list_events(
-                call_id=call_id,
-                workspace_id=workspace_id,
-                voicebot_id=voicebot_id,
-                session_id=session_id,
-                limit=validated_limit(limit),
-            )
-        )
 
     @app.post("/calls/{call_id}/responses")
     async def submit_response(call_id: str, request: AgentResponseRequest) -> dict[str, Any]:

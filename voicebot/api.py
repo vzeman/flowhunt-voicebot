@@ -56,6 +56,7 @@ from .api_transcripts import (
     transcript_stats_payload,
     transcript_summaries_payload,
 )
+from .api_voicebot_sessions import VoicebotSessionsApiContext, create_voicebot_sessions_router
 from .asterisk_control import AsteriskAMI, ControlResult
 from .call_recording import recording_artifact_id
 from .calls import AgentResponse, CallRegistry
@@ -125,7 +126,6 @@ from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, s
 from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLifecycleEventType
 from .tool_executor import AgentToolExecutor
 from .transcripts import TranscriptStore
-from .transports import transport_catalog
 from .webrtc import WebRTCSessionManager
 from .webrtc_media_plane import webrtc_media_plane_payload
 from .workspace_access import WorkspaceAccessPolicy, workspace_access_policy_from_settings
@@ -655,6 +655,21 @@ def create_app(
     )
     app.include_router(create_transcripts_router(transcripts_api_context))
     app.include_router(
+        create_voicebot_sessions_router(
+            VoicebotSessionsApiContext(
+                voicebot_session_store=voicebot_session_store,
+                events=events,
+                transcripts=transcripts,
+                subagent_coordinator=subagent_coordinator,
+                require_workspace_access=require_workspace_access,
+                durable_call_events=durable_call_events,
+                validated_limit=validated_limit,
+                append_security_audit=append_security_audit,
+                broadcast=hub.broadcast,
+            )
+        )
+    )
+    app.include_router(
         create_scaling_router(
             ScalingApiContext(
                 events=events,
@@ -927,131 +942,6 @@ def create_app(
             "enabled_channel_count": len([channel for channel in channels if channel.enabled]),
             "selection_plan": selection_plan,
             "issues": issues,
-        }
-
-    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions")
-    def list_voicebot_sessions(
-        workspace_id: str,
-        voicebot_id: str,
-        active_only: bool = False,
-    ) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        sessions = voicebot_session_store.list(
-            workspace_id=workspace_id,
-            voicebot_id=voicebot_id,
-            active_only=active_only,
-        )
-        return {
-            "workspace_id": workspace_id,
-            "voicebot_id": voicebot_id,
-            "sessions": [session.as_dict() for session in sessions],
-        }
-
-    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}")
-    def get_voicebot_session(workspace_id: str, voicebot_id: str, session_id: str) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        session = voicebot_session_store.get(session_id, workspace_id=workspace_id)
-        if session is None or session.voicebot_id != voicebot_id:
-            raise HTTPException(status_code=404, detail="Session not found")
-        return {"session": session.as_dict()}
-
-    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/timeline")
-    def get_voicebot_session_timeline(
-        workspace_id: str,
-        voicebot_id: str,
-        session_id: str,
-        after: int = 0,
-        limit: int = 200,
-    ) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        session = voicebot_session_store.get(session_id, workspace_id=workspace_id)
-        if session is None or session.voicebot_id != voicebot_id:
-            raise HTTPException(status_code=404, detail="Session not found")
-        call_id = session.external_session_id or session.session_id
-        timeline = durable_call_events(
-            events,
-            transcripts,
-            call_id,
-            after=after,
-            limit=validated_limit(limit),
-        )
-        return {
-            "workspace_id": workspace_id,
-            "voicebot_id": voicebot_id,
-            "session_id": session_id,
-            "call_id": call_id,
-            "events": [event_to_dict(event) for event in timeline],
-        }
-
-    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/sessions/{session_id}/transcript")
-    async def get_voicebot_session_transcript(
-        workspace_id: str,
-        voicebot_id: str,
-        session_id: str,
-        after: int = 0,
-        limit: int = 200,
-    ) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        session = voicebot_session_store.get(session_id, workspace_id=workspace_id)
-        if session is None or session.voicebot_id != voicebot_id:
-            raise HTTPException(status_code=404, detail="Session not found")
-        call_id = session.external_session_id or session.session_id
-        transcript = transcripts.read(call_id, after=after, limit=validated_limit(limit))
-        audit_event = append_security_audit(
-            workspace_id=workspace_id,
-            voicebot_id=voicebot_id,
-            session_id=session_id,
-            call_id=call_id,
-            action="transcript_read",
-            actor="api",
-            resource_type="transcript",
-            resource_id=session_id,
-            outcome="read",
-            metadata={"after": after, "limit": limit, "event_count": len(transcript)},
-        )
-        await hub.broadcast(audit_event)
-        return {
-            "workspace_id": workspace_id,
-            "voicebot_id": voicebot_id,
-            "session_id": session_id,
-            "call_id": call_id,
-            "events": transcript,
-        }
-
-    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/tasks")
-    def list_voicebot_external_tasks(
-        workspace_id: str,
-        voicebot_id: str,
-        session_id: str | None = None,
-        status: str | None = None,
-    ) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        if subagent_coordinator is None:
-            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
-        tasks = [
-            task
-            for task in subagent_coordinator.store.list(workspace_id=workspace_id, session_id=session_id)
-            if task.voicebot_id == voicebot_id and (status is None or task.status == status)
-        ]
-        return {
-            "workspace_id": workspace_id,
-            "voicebot_id": voicebot_id,
-            "session_id": session_id,
-            "status": status,
-            "tasks": [subagent_task_to_dict(task) for task in tasks],
-        }
-
-    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/transports")
-    def get_voicebot_transport_catalog(
-        workspace_id: str,
-        voicebot_id: str,
-        include_health: bool = False,
-    ) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        return {
-            "workspace_id": workspace_id,
-            "voicebot_id": voicebot_id,
-            **transport_catalog(include_health=include_health),
         }
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/runtime-config")

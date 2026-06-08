@@ -19,6 +19,7 @@ from voicebot.provider_config import (
     validate_provider_config,
 )
 from voicebot.provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities
+from voicebot.storage import SQLiteProviderConfigStore
 from voicebot.transcripts import TranscriptStore
 
 
@@ -200,6 +201,21 @@ class ProviderConfigTests(unittest.TestCase):
 
         self.assertEqual(loaded.load_diagnostics["loaded_configs"], 1)
         self.assertEqual(loaded.get("workspace-1", "voicebot-1"), self.config())
+
+    def test_sqlite_provider_config_store_persists_configs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database_url = f"sqlite:///{directory}/provider_config.sqlite3"
+            store = SQLiteProviderConfigStore(database_url)
+            store.save(self.config())
+            store.close()
+
+            loaded = SQLiteProviderConfigStore(database_url)
+
+            try:
+                self.assertEqual(loaded.get("workspace-1", "voicebot-1"), self.config())
+                self.assertEqual([config.voicebot_id for config in loaded.list(workspace_id="workspace-1")], ["voicebot-1"])
+            finally:
+                loaded.close()
 
     def test_provider_config_api_validates_saves_and_reads_config(self) -> None:
         client = self.build_client()

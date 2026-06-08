@@ -30,6 +30,7 @@ from voicebot.storage.redis_leases import RedisSessionLeaseStore
 from voicebot.storage.redis_subagent_tasks import RedisSubagentTaskStore
 from voicebot.storage.redis_worker_registry import RedisWorkerRegistry
 from voicebot.storage.sqlite_events import SQLiteEventStore
+from voicebot.storage.sqlite_provider_config import SQLiteProviderConfigStore
 from voicebot.transcripts import TranscriptStore
 from storage_contract_cases import assert_event_store_contract
 
@@ -68,6 +69,10 @@ class StorageDriverTests(unittest.TestCase):
         self.assertIn("redis", {definition.driver for definition in registry.definitions_for_family("session_leases")})
         self.assertIn("redis_streams", queue_drivers)
         self.assertIn("flowhunt_queue", queue_drivers)
+        provider_config_definitions = {
+            definition.driver: definition for definition in registry.definitions_for_family("provider_config")
+        }
+        self.assertTrue(provider_config_definitions["sqlite"].implemented)
 
     def test_registry_payload_marks_planned_drivers_as_not_implemented(self) -> None:
         payload = storage_drivers_payload(Settings())
@@ -226,6 +231,20 @@ class StorageDriverTests(unittest.TestCase):
         self.assertIsInstance(store, RedisSubagentTaskStore)
         self.assertEqual(attached_storage_driver(store).driver, "redis")
         self.assertEqual(attached_storage_driver(store).options["redis_url"], "redis://test")
+
+    def test_provider_config_sqlite_driver_is_buildable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = build_provider_config_store(
+                Settings(
+                    provider_config_store_provider="sqlite",
+                    relational_database_url=f"sqlite:///{directory}/provider_config.sqlite3",
+                )
+            )
+
+            self.assertIsInstance(store, SQLiteProviderConfigStore)
+            self.assertEqual(attached_storage_driver(store).driver, "sqlite")
+            self.assertEqual(attached_storage_driver(store).options["database_url"].startswith("sqlite:///"), True)
+            store.close()
 
     def test_unknown_storage_driver_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported storage driver"):

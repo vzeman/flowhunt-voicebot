@@ -15,6 +15,7 @@ from voicebot.workspace_model import (
     WorkspaceScope,
     require_same_workspace,
 )
+from voicebot.storage import SQLiteVoicebotSessionStore
 
 
 class WorkspaceModelTests(unittest.TestCase):
@@ -343,6 +344,37 @@ class WorkspaceModelTests(unittest.TestCase):
         self.assertEqual(reloaded.load_diagnostics["loaded_sessions"], 1)
         self.assertEqual(reloaded.get("session-1", "workspace-1").status, "ended")
         self.assertEqual(reloaded.get("session-1").channel_id, "channel-1")
+
+    def test_sqlite_session_store_persists_sessions_and_filters_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database_url = f"sqlite:///{directory}/sessions.sqlite3"
+            first = SQLiteVoicebotSessionStore(database_url)
+            first.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1", channel_id="channel-1"))
+            first.save(VoicebotSessionRecord("session-2", "workspace-1", "voicebot-2"))
+            ended = first.end("session-1", "workspace-1")
+            first.close()
+
+            reloaded = SQLiteVoicebotSessionStore(database_url)
+            try:
+                self.assertEqual(ended.status, "ended")
+                self.assertEqual(reloaded.get("session-1", "workspace-1").status, "ended")
+                self.assertEqual(reloaded.get("session-1").channel_id, "channel-1")
+                self.assertEqual([session.session_id for session in reloaded.list("workspace-1")], ["session-1", "session-2"])
+                self.assertEqual(reloaded.list("workspace-1", "voicebot-1", active_only=True), ())
+            finally:
+                reloaded.close()
+
+    def test_sqlite_session_store_rejects_scope_moves(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SQLiteVoicebotSessionStore(f"sqlite:///{directory}/sessions.sqlite3")
+            try:
+                store.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1"))
+                with self.assertRaisesRegex(ValueError, "across workspaces"):
+                    store.save(VoicebotSessionRecord("session-1", "workspace-2", "voicebot-1"))
+                with self.assertRaisesRegex(ValueError, "across voicebots"):
+                    store.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-2"))
+            finally:
+                store.close()
 
     def test_json_session_store_skips_invalid_and_duplicate_rows(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

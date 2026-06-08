@@ -14,6 +14,7 @@ from voicebot.runtime_storage import (
     build_worker_queue_store,
 )
 from voicebot.scaling import JsonWorkerQueueStore, RoutingKey, WorkerQueueEnvelope, WorkerQueueStore
+from voicebot.storage import SQLiteVoicebotSessionStore
 from voicebot.transcripts import TranscriptStore
 from voicebot.workspace_model import JsonVoicebotSessionStore, VoicebotSessionRecord, VoicebotSessionStore
 
@@ -229,6 +230,24 @@ class DurableEventTests(unittest.TestCase):
 
         self.assertIsInstance(store, VoicebotSessionStore)
         self.assertNotIsInstance(store, JsonVoicebotSessionStore)
+
+    def test_runtime_builder_selects_sqlite_voicebot_session_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = Settings(
+                voicebot_session_store_provider="sqlite",
+                relational_database_url=f"sqlite:///{directory}/sessions.sqlite3",
+            )
+
+            store = build_voicebot_session_store(settings)
+            store.save(VoicebotSessionRecord("session-1", "workspace-1", "voicebot-1"))
+            store.close()
+            reloaded = build_voicebot_session_store(settings)
+
+            try:
+                self.assertIsInstance(reloaded, SQLiteVoicebotSessionStore)
+                self.assertEqual([session.session_id for session in reloaded.list()], ["session-1"])
+            finally:
+                reloaded.close()
 
     def test_runtime_builder_selects_json_agent_task_tracker(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

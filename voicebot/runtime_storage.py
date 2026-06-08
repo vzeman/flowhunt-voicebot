@@ -17,6 +17,7 @@ from .storage import (
     RedisWorkerRegistry,
     SQLiteEventStore,
     SQLiteProviderConfigStore,
+    SQLiteVoicebotSessionStore,
     StorageDriverDefinition,
     StorageDriverSelection,
     StorageRegistry,
@@ -43,7 +44,7 @@ def default_storage_registry() -> StorageRegistry:
             _definition("transcripts", "flowhunt_db", "shared", True, False, True, "workspace-scoped transcript rows", implemented=False),
             _definition("voicebot_sessions", "memory", "process", False, True, False, "in-memory routed session records"),
             _definition("voicebot_sessions", "json", "node", False, True, False, "local JSON session records"),
-            _definition("voicebot_sessions", "sqlite", "node", False, True, False, "SQLite session records", implemented=False),
+            _definition("voicebot_sessions", "sqlite", "node", False, True, False, "SQLite session records"),
             _definition("voicebot_sessions", "postgres", "shared", True, False, True, "PostgreSQL session records", implemented=False),
             _definition("voicebot_sessions", "flowhunt_db", "shared", True, False, True, "workspace-scoped session table", implemented=False),
             _definition("session_leases", "memory", "process", False, True, False, "best-effort in-memory leases"),
@@ -149,6 +150,17 @@ def build_voicebot_session_store(settings: Settings) -> VoicebotSessionStore:
         return attach_storage_driver(JsonVoicebotSessionStore(settings.voicebot_session_store_path), selection)
     if driver == "memory":
         return attach_storage_driver(VoicebotSessionStore(), selection)
+    if driver == "sqlite":
+        return attach_storage_driver(
+            SQLiteVoicebotSessionStore(settings.relational_database_url),
+            storage_driver_selection(
+                "voicebot_sessions",
+                driver,
+                settings.voicebot_session_store_provider,
+                None,
+                {"database_url": settings.relational_database_url},
+            ),
+        )
     raise_unsupported_storage("VOICEBOT_SESSION_STORE_PROVIDER", settings.voicebot_session_store_provider, selection)
 
 
@@ -385,7 +397,12 @@ def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelec
             "voicebot_sessions",
             json_object_driver(settings.voicebot_session_store_provider),
             settings.voicebot_session_store_provider,
-            settings.voicebot_session_store_path,
+            settings.voicebot_session_store_path
+            if json_object_driver(settings.voicebot_session_store_provider) not in {"sqlite", "postgres"}
+            else None,
+            {"database_url": settings.relational_database_url}
+            if json_object_driver(settings.voicebot_session_store_provider) in {"sqlite", "postgres"}
+            else None,
         ),
         "session_leases": storage_driver_selection(
             "session_leases",

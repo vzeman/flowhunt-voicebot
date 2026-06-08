@@ -37,9 +37,6 @@ from .api_models import (
     VoicebotAdminRequest,
     VoicebotChannelPatchRequest,
     VoicebotChannelRequest,
-    VoicebotPromptConfigPatchRequest,
-    VoicebotPromptConfigRequest,
-    VoicebotRuntimeConfigRequest,
     WebRTCOfferRequest,
 )
 from .api_events import EventsApiContext, create_events_router, events_payload, metrics_payload
@@ -56,6 +53,7 @@ from .api_transcripts import (
     transcript_stats_payload,
     transcript_summaries_payload,
 )
+from .api_voicebot_runtime_config import VoicebotRuntimeConfigApiContext, create_voicebot_runtime_config_router
 from .api_voicebot_sessions import VoicebotSessionsApiContext, create_voicebot_sessions_router
 from .asterisk_control import AsteriskAMI, ControlResult
 from .call_recording import recording_artifact_id
@@ -90,10 +88,7 @@ from .progress import ProgressCadenceMemory, normalize_progress_message
 from .public_access import FixedWindowPublicRateLimiter, origin_allowed
 from .provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities
 from .provider_config import (
-    ProviderChoice,
     ProviderConfigStore,
-    SecretReference,
-    VoicebotProviderConfig,
     provider_selection_plan,
     selection_plan_to_dict,
     validate_provider_config,
@@ -109,17 +104,12 @@ from .security_contract import redact_sensitive_data
 from .sip_media_plane import sip_media_plane_payload
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .runtime_config import (
-    VoicebotChannelConfig,
     VoicebotChatPromptConfig,
     VoicebotPromptConfig,
-    VoicebotQuotaConfig,
-    VoicebotRealtimeConfig,
-    VoicebotRuntimeConfig,
     VoicebotPromptConfigStore,
     VoicebotRuntimeConfigStore,
     VoicebotSubagentConfig,
     SubagentPromptConfig,
-    runtime_config_to_dict,
 )
 from .realtime_quality import metric_latency_budget_seconds
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
@@ -670,6 +660,23 @@ def create_app(
         )
     )
     app.include_router(
+        create_voicebot_runtime_config_router(
+            VoicebotRuntimeConfigApiContext(
+                runtime_config_store=runtime_config_store,
+                prompt_config_store=prompt_config_store,
+                provider_config_store=provider_config_store,
+                voicebot_store=voicebot_store,
+                events=events,
+                require_workspace_access=require_workspace_access,
+                prompt_config_from_request=prompt_config_from_request,
+                effective_prompt_config=effective_prompt_config,
+                subagent_config_from_request=subagent_config_from_request,
+                append_security_audit=append_security_audit,
+                broadcast=hub.broadcast,
+            )
+        )
+    )
+    app.include_router(
         create_scaling_router(
             ScalingApiContext(
                 events=events,
@@ -943,213 +950,6 @@ def create_app(
             "selection_plan": selection_plan,
             "issues": issues,
         }
-
-    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/runtime-config")
-    def get_voicebot_runtime_config(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        config = runtime_config_store.get(workspace_id, voicebot_id)
-        if config is None:
-            raise HTTPException(status_code=404, detail="Runtime config not found")
-        return {"config": runtime_config_to_dict(config)}
-
-    @app.put("/workspaces/{workspace_id}/voicebots/{voicebot_id}/runtime-config")
-    async def put_voicebot_runtime_config(
-        workspace_id: str,
-        voicebot_id: str,
-        request: VoicebotRuntimeConfigRequest,
-    ) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        try:
-            providers = VoicebotProviderConfig(
-                workspace_id=workspace_id,
-                voicebot_id=voicebot_id,
-                stt=provider_choice_from_request("stt", request.providers.stt, workspace_id),
-                tts=provider_choice_from_request("tts", request.providers.tts, workspace_id),
-                agent=provider_choice_from_request("agent", request.providers.agent, workspace_id),
-            )
-            config = VoicebotRuntimeConfig(
-                workspace_id=workspace_id,
-                voicebot_id=voicebot_id,
-                config_version=1,
-                providers=providers,
-                prompts=prompt_config_from_request(request.prompts),
-                realtime=VoicebotRealtimeConfig(**request.realtime.model_dump()),
-                channels=VoicebotChannelConfig(**request.channels.model_dump()),
-                quotas=VoicebotQuotaConfig(
-                    max_concurrent_sessions=request.quotas.max_concurrent_sessions,
-                    max_provider_inflight=request.quotas.max_provider_inflight,
-                    enabled_actions=tuple(request.quotas.enabled_actions),
-                ),
-                subagents=subagent_config_from_request(request.subagents),
-                enabled=request.enabled,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        descriptors = {
-            "stt": provider_catalog_descriptors("stt"),
-            "tts": provider_catalog_descriptors("tts"),
-            "agent": provider_catalog_descriptors("agent"),
-        }
-        issues = validate_provider_config(config.providers, descriptors)
-        if issues:
-            return {
-                "ok": False,
-                "config": runtime_config_to_dict(config),
-                "validation": [validation_issue_to_dict(issue) for issue in issues],
-            }
-        saved = runtime_config_store.save(config)
-        provider_config_store.save(saved.providers)
-        event = events.append(
-            "system",
-            "runtime_config_updated",
-            {
-                "workspace_id": workspace_id,
-                "voicebot_id": voicebot_id,
-                "config_version": saved.config_version,
-                "enabled": saved.enabled,
-            },
-        )
-        audit_event = append_security_audit(
-            workspace_id=workspace_id,
-            voicebot_id=voicebot_id,
-            action="runtime_config_change",
-            actor="api",
-            resource_type="runtime_config",
-            resource_id=voicebot_id,
-            outcome="saved",
-            metadata=runtime_config_to_dict(saved),
-        )
-        await hub.broadcast(event)
-        await hub.broadcast(audit_event)
-        return {
-            "ok": True,
-            "config": runtime_config_to_dict(saved),
-            "event": event_to_dict(event),
-            "validation": [],
-        }
-
-    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts")
-    def get_voicebot_prompts(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        if voicebot_store.get(workspace_id, voicebot_id) is None:
-            raise HTTPException(status_code=404, detail="Voicebot not found")
-        return prompts_payload(workspace_id, voicebot_id)
-
-    @app.put("/workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts")
-    async def put_voicebot_prompts(
-        workspace_id: str,
-        voicebot_id: str,
-        request: VoicebotPromptConfigRequest,
-    ) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        if voicebot_store.get(workspace_id, voicebot_id) is None:
-            raise HTTPException(status_code=404, detail="Voicebot not found")
-        try:
-            prompts = prompt_config_store.save(
-                workspace_id,
-                voicebot_id,
-                prompt_config_from_request(request),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        event = events.append(
-            "system",
-            "voicebot_prompts_updated",
-            {
-                "workspace_id": workspace_id,
-                "voicebot_id": voicebot_id,
-                "fields": sorted(prompts.as_dict()),
-            },
-        )
-        audit_event = append_security_audit(
-            workspace_id=workspace_id,
-            voicebot_id=voicebot_id,
-            action="prompt_config_change",
-            actor="api",
-            resource_type="voicebot_prompts",
-            resource_id=voicebot_id,
-            outcome="saved",
-            metadata=prompts.as_dict(),
-        )
-        await hub.broadcast(event)
-        await hub.broadcast(audit_event)
-        return {
-            "ok": True,
-            "workspace_id": workspace_id,
-            "voicebot_id": voicebot_id,
-            "prompts": prompts.as_dict(),
-            "event": event_to_dict(event),
-        }
-
-    @app.patch("/workspaces/{workspace_id}/voicebots/{voicebot_id}/prompts")
-    async def patch_voicebot_prompts(
-        workspace_id: str,
-        voicebot_id: str,
-        request: VoicebotPromptConfigPatchRequest,
-    ) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        if voicebot_store.get(workspace_id, voicebot_id) is None:
-            raise HTTPException(status_code=404, detail="Voicebot not found")
-        current = effective_prompt_config(workspace_id, voicebot_id)
-        payload = current.as_dict()
-        updates = request.model_dump(exclude_none=True)
-        if isinstance(updates.get("chat"), dict):
-            payload["chat"] = {**payload.get("chat", {}), **updates.pop("chat")}
-        payload.update(updates)
-        try:
-            chat_payload = payload.pop("chat", {}) or {}
-            prompts = prompt_config_store.save(
-                workspace_id,
-                voicebot_id,
-                VoicebotPromptConfig(**payload, chat=VoicebotChatPromptConfig(**chat_payload)),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        event = events.append(
-            "system",
-            "voicebot_prompts_updated",
-            {
-                "workspace_id": workspace_id,
-                "voicebot_id": voicebot_id,
-                "fields": sorted(updates),
-            },
-        )
-        audit_event = append_security_audit(
-            workspace_id=workspace_id,
-            voicebot_id=voicebot_id,
-            action="prompt_config_change",
-            actor="api",
-            resource_type="voicebot_prompts",
-            resource_id=voicebot_id,
-            outcome="saved",
-            metadata=prompts.as_dict(),
-        )
-        await hub.broadcast(event)
-        await hub.broadcast(audit_event)
-        return {
-            "ok": True,
-            "workspace_id": workspace_id,
-            "voicebot_id": voicebot_id,
-            "prompts": prompts.as_dict(),
-            "event": event_to_dict(event),
-        }
-
-    def provider_choice_from_request(family: str, request, workspace_id: str) -> ProviderChoice:
-        secret_ref = None
-        if request.secret_ref is not None:
-            secret_ref = SecretReference(
-                name=request.secret_ref.name,
-                workspace_id=request.secret_ref.workspace_id or workspace_id,
-            )
-        return ProviderChoice(
-            family,  # type: ignore[arg-type]
-            request.provider,
-            model=request.model,
-            voice=request.voice,
-            secret_ref=secret_ref,
-            fallback_provider=request.fallback_provider,
-            config=request.config,
-        )
 
     def provider_catalog_descriptors(family: str):
         if family == "stt":

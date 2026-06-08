@@ -43,6 +43,10 @@ class FakeProvider:
         return task.with_status("cancelled")
 
 
+class GenericChatbotProvider(FakeProvider):
+    kind = "langgraph_agent"
+
+
 @dataclass
 class FakeFlowHuntResult:
     ok: bool
@@ -314,20 +318,47 @@ class SubagentTests(unittest.TestCase):
         self.assertEqual(catalog["providers"]["internal_worker"]["result_context"], "clean")
 
     def test_coordinator_accepts_custom_subagent_provider_descriptor(self) -> None:
+        provider = GenericChatbotProvider()
         coordinator = SubagentCoordinator()
         coordinator.register(
-            FakeProvider(),
+            provider,
             SubagentProviderDescriptor(
-                kind="internal_worker",
-                label="Custom internal worker",
+                kind="langgraph_agent",
+                label="LangGraph agent",
                 required_metadata=("skill",),
             ),
         )
 
-        provider = coordinator.provider_catalog()["providers"]["internal_worker"]
+        catalog_entry = coordinator.provider_catalog()["providers"]["langgraph_agent"]
+        request = SubagentTaskRequest(
+            workspace_id="workspace-1",
+            session_id="call-1",
+            request_event_id=11,
+            provider="langgraph_agent",
+            input_text="Check the CRM record.",
+            metadata={"skill": "crm_lookup"},
+        )
+        task = coordinator.request(request)
 
-        self.assertEqual(provider["label"], "Custom internal worker")
-        self.assertEqual(provider["required_metadata"], ["skill"])
+        self.assertEqual(catalog_entry["label"], "LangGraph agent")
+        self.assertEqual(catalog_entry["required_metadata"], ["skill"])
+        self.assertEqual(task.provider, "langgraph_agent")
+        self.assertEqual(provider.submitted, 1)
+
+    def test_coordinator_requires_descriptor_for_custom_subagent_provider(self) -> None:
+        coordinator = SubagentCoordinator()
+
+        with self.assertRaisesRegex(ValueError, "descriptor is required"):
+            coordinator.register(GenericChatbotProvider())
+
+    def test_coordinator_rejects_mismatched_custom_subagent_provider_descriptor(self) -> None:
+        coordinator = SubagentCoordinator()
+
+        with self.assertRaisesRegex(ValueError, "does not match provider kind"):
+            coordinator.register(
+                GenericChatbotProvider(),
+                SubagentProviderDescriptor(kind="other_agent", label="Other agent"),
+            )
 
     def test_coordinator_rejects_invalid_subagent_provider_descriptor(self) -> None:
         coordinator = SubagentCoordinator()

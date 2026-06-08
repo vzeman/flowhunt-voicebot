@@ -21,13 +21,7 @@ from .flowhunt import (
 )
 
 
-SubagentProviderKind = Literal[
-    "flowhunt_flow",
-    "flowhunt_project",
-    "internal_worker",
-    "http_service",
-    "human_handoff",
-]
+SubagentProviderKind = str
 
 SubagentTaskStatus = Literal[
     "requested",
@@ -52,8 +46,10 @@ class SubagentProviderDescriptor:
 
     def validation_issues(self) -> tuple[str, ...]:
         issues: list[str] = []
-        if not self.kind:
+        if not self.kind.strip():
             issues.append("kind is required")
+        if self.kind != self.kind.strip():
+            issues.append("kind must not contain leading or trailing whitespace")
         if not self.label.strip():
             issues.append("label is required")
         if any(not key.strip() for key in self.required_metadata):
@@ -110,6 +106,10 @@ class SubagentTaskRequest:
             raise ValueError("workspace_id is required for subagent execution")
         if not self.session_id:
             raise ValueError("session_id is required for subagent execution")
+        if not self.provider.strip():
+            raise ValueError("provider is required for subagent execution")
+        if self.provider != self.provider.strip():
+            raise ValueError("provider must not contain leading or trailing whitespace")
         if self.request_event_id < 1:
             raise ValueError("request_event_id must be positive")
 
@@ -426,7 +426,14 @@ class SubagentCoordinator:
         provider: SubagentProvider,
         descriptor: SubagentProviderDescriptor | None = None,
     ) -> None:
-        resolved_descriptor = descriptor or DEFAULT_SUBAGENT_PROVIDER_DESCRIPTORS[provider.kind]
+        provider_descriptor = getattr(provider, "descriptor", None)
+        resolved_descriptor = descriptor or provider_descriptor or DEFAULT_SUBAGENT_PROVIDER_DESCRIPTORS.get(provider.kind)
+        if resolved_descriptor is None:
+            raise ValueError(f"subagent provider descriptor is required for custom provider: {provider.kind}")
+        if resolved_descriptor.kind != provider.kind:
+            raise ValueError(
+                f"subagent provider descriptor kind {resolved_descriptor.kind} does not match provider kind {provider.kind}"
+            )
         issues = resolved_descriptor.validation_issues()
         if issues:
             raise ValueError(f"invalid subagent provider descriptor for {provider.kind}: {', '.join(issues)}")

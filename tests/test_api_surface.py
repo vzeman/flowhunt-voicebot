@@ -166,6 +166,17 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("asterisk_audiosocket", payload["transports"])
         self.assertIn("hangup", payload["transports"]["webrtc"]["capabilities"]["call_control"])
 
+    def test_voicebot_transport_catalog_endpoint_can_include_health(self) -> None:
+        response = self.build_client().get(
+            "/workspaces/workspace-1/voicebots/voicebot-1/transports?include_health=true"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["transports"]["webrtc"]["health"]["status"], "ready")
+        self.assertEqual(payload["transports"]["asterisk_audiosocket"]["health"]["status"], "ready")
+        self.assertNotIn("health", payload["transports"]["twilio"])
+
     def build_client(self) -> TestClient:
         app = create_app(
             EventStore(max_context_events=20),

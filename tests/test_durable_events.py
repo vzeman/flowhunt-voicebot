@@ -10,11 +10,12 @@ from voicebot.agent_tasks import AgentTaskTracker, JsonAgentTaskTracker
 from voicebot.runtime_storage import (
     build_agent_task_tracker,
     build_event_store,
+    build_transcript_store,
     build_voicebot_session_store,
     build_worker_queue_store,
 )
 from voicebot.scaling import JsonWorkerQueueStore, RoutingKey, WorkerQueueEnvelope, WorkerQueueStore
-from voicebot.storage import SQLiteVoicebotSessionStore
+from voicebot.storage import SQLiteTranscriptStore, SQLiteVoicebotSessionStore
 from voicebot.transcripts import TranscriptStore
 from voicebot.workspace_model import JsonVoicebotSessionStore, VoicebotSessionRecord, VoicebotSessionStore
 
@@ -208,6 +209,26 @@ class DurableEventTests(unittest.TestCase):
 
         self.assertIsInstance(store, EventStore)
         self.assertNotIsInstance(store, JsonEventStore)
+
+    def test_runtime_builder_selects_sqlite_transcript_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = Settings(
+                transcript_store_provider="sqlite",
+                relational_database_url=f"sqlite:///{directory}/transcripts.sqlite3",
+            )
+            transcripts = build_transcript_store(settings)
+            events = EventStore(max_context_events=20, transcript_store=transcripts)
+            events.append("call-1", "call_started", {"workspace_id": "workspace-1"})
+            events.append("call-1", "user_transcript", {"text": "hello"})
+            transcripts.close()
+
+            reloaded = build_transcript_store(settings)
+            try:
+                self.assertIsInstance(reloaded, SQLiteTranscriptStore)
+                self.assertEqual(reloaded.list_call_ids(), ["call-1"])
+                self.assertEqual([event["type"] for event in reloaded.read("call-1")], ["call_started", "user_transcript"])
+            finally:
+                reloaded.close()
 
     def test_runtime_builder_selects_json_voicebot_session_store(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

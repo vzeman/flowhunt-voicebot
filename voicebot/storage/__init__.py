@@ -1,4 +1,4 @@
-from .artifacts import ArtifactRecord, FilesystemArtifactStore, safe_artifact_id
+from .artifacts import ArtifactRecord, FilesystemArtifactStore, S3ArtifactStore, safe_artifact_id
 from .drivers import (
     StoreHealth,
     StorageDriverDefinition,
@@ -59,6 +59,7 @@ __all__ = [
     "RedisSubagentTaskStore",
     "RedisWorkerQueueStore",
     "RedisWorkerRegistry",
+    "S3ArtifactStore",
     "SessionLeaseStoreProtocol",
     "SipTrunkStoreProtocol",
     "StorageDriverDefinition",

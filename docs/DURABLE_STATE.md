@@ -57,6 +57,7 @@ VOICEBOT_REDIS_URL=redis://redis:6379/0
 VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER=filesystem|object_storage|s3
 VOICEBOT_OBJECT_STORAGE_BUCKET=voicebot-audio
 VOICEBOT_OBJECT_STORAGE_ENDPOINT=https://s3.example.com
+VOICEBOT_OBJECT_STORAGE_REGION=eu-central-1
 ```
 
 Per-store variables such as `VOICEBOT_EVENT_STORE_PROVIDER` and
@@ -86,7 +87,7 @@ selected before their concrete adapter is added.
 | `provider_config` | `VOICEBOT_PROVIDER_CONFIG_STORE_PROVIDER` | `json` | `VOICEBOT_PROVIDER_CONFIG_STORE_PATH` or `VOICEBOT_RELATIONAL_DATABASE_URL` | `json`, `memory`, `sqlite` | `flowhunt_db`, secret references |
 | `sip_trunks` | `VOICEBOT_SIP_TRUNK_STORE_PROVIDER` | `json` | `VOICEBOT_SIP_TRUNK_REGISTRY_PATH`, `VOICEBOT_SIP_TRUNK_PJSIP_INCLUDE_PATH` | `json` | `flowhunt_db`, secret references |
 | `subagent_tasks` | `VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER` | `json` | `VOICEBOT_SUBAGENT_TASK_STORE_PATH` or `VOICEBOT_REDIS_URL` | `json`, `memory`, `redis` | `flowhunt_db`, `flowhunt_queue` |
-| `audio_artifacts` | `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER` | `filesystem` | `VOICEBOT_TTS_CACHE_DIR`, `VOICEBOT_DEBUG_AUDIO_DIR`, object-storage env vars | `filesystem` | `object_storage`, `s3`, CDN/cache |
+| `audio_artifacts` | `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER` | `filesystem` | `VOICEBOT_TTS_CACHE_DIR`, `VOICEBOT_DEBUG_AUDIO_DIR`, object-storage env vars | `filesystem`, `s3` | `object_storage`, CDN/cache |
 
 Compatibility note: existing `json` and `jsonl` aliases are preserved for local
 event storage, and object-style JSON stores continue to accept `jsonl` as an
@@ -149,17 +150,25 @@ before they can be selected for running services.
 
 ## Audio Artifacts
 
-`FilesystemArtifactStore` is the first concrete audio artifact driver. It stores
-binary artifacts under a configured root and writes sidecar metadata files with
-the `.metadata.json` suffix. The TTS cache and speech-only call recordings write
-through this artifact interface, so generated audio and recording playback files
-follow the same `put/get/delete/list` contract that an object-storage driver
-must implement later.
+`FilesystemArtifactStore` stores binary artifacts under a configured root and
+writes sidecar metadata files with the `.metadata.json` suffix. `S3ArtifactStore`
+stores the same artifacts in an S3-compatible bucket using object metadata for
+the voicebot artifact metadata payload. The TTS cache and speech-only call
+recordings write through this artifact interface, so generated audio and
+recording playback files follow the same `put/get/delete/list` contract across
+local and shared artifact stores.
 
 The current local TTS cache still uses:
 
 - `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER=filesystem`
 - `VOICEBOT_TTS_CACHE_DIR=/data/tts-cache`
+
+S3-compatible artifact storage uses:
+
+- `VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER=s3`
+- `VOICEBOT_OBJECT_STORAGE_BUCKET=voicebot-audio`
+- `VOICEBOT_OBJECT_STORAGE_ENDPOINT=https://s3.example.com`
+- `VOICEBOT_OBJECT_STORAGE_REGION=eu-central-1`
 
 Speech-only call recording is controlled by:
 
@@ -170,10 +179,12 @@ The current filesystem driver stores call recordings in the same local audio
 artifact root. Recording metadata contains the compact playback duration and the
 original call offsets for each captured caller or voicebot speech segment.
 
-The managed production target remains object storage plus a DB metadata index.
-Production object-storage drivers must keep artifact metadata workspace-scoped
-and must not make recordings, debug audio, or generated speech publicly
-readable unless a separate authenticated access layer issues a signed URL.
+The broader managed production target remains object storage plus a DB metadata
+index. The implemented S3-compatible driver covers the object payload path;
+managed object-storage drivers must additionally keep artifact metadata
+workspace-scoped and must not make recordings, debug audio, or generated speech
+publicly readable unless a separate authenticated access layer issues a signed
+URL.
 
 Retention and deletion policy is exposed separately by
 `GET /workspaces/{workspace_id}/security/retention`. The policy defines

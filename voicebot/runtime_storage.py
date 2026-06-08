@@ -10,6 +10,7 @@ from .session_leases import JsonSessionLeaseStore, SessionLeaseStore
 from .sip_trunks import SipTrunkStore
 from .storage import (
     FilesystemArtifactStore,
+    S3ArtifactStore,
     RedisAgentTaskTracker,
     RedisCallStateStore,
     RedisSessionLeaseStore,
@@ -87,7 +88,7 @@ def default_storage_registry() -> StorageRegistry:
             _definition("subagent_tasks", "flowhunt_queue", "shared", True, False, True, "FlowHunt task queue handoff", implemented=False),
             _definition("audio_artifacts", "filesystem", "node", False, True, False, "local filesystem artifacts/cache"),
             _definition("audio_artifacts", "object_storage", "shared", True, False, True, "managed object storage", implemented=False),
-            _definition("audio_artifacts", "s3", "shared", True, False, True, "S3-compatible object storage", implemented=False),
+            _definition("audio_artifacts", "s3", "shared", True, False, True, "S3-compatible object storage"),
         ]
     )
 
@@ -387,7 +388,7 @@ def build_subagent_task_store(settings: Settings) -> SubagentTaskStore:
     raise_unsupported_storage("VOICEBOT_SUBAGENT_TASK_STORE_PROVIDER", settings.subagent_task_store_provider, selection)
 
 
-def build_audio_artifact_store(settings: Settings) -> FilesystemArtifactStore:
+def build_audio_artifact_store(settings: Settings) -> FilesystemArtifactStore | S3ArtifactStore:
     driver = normalize_driver_name(settings.audio_artifact_store_provider)
     selection = storage_driver_selection(
         "audio_artifacts",
@@ -398,6 +399,25 @@ def build_audio_artifact_store(settings: Settings) -> FilesystemArtifactStore:
     )
     if driver == "filesystem":
         return attach_storage_driver(FilesystemArtifactStore(settings.tts_cache_dir), selection)
+    if driver == "s3":
+        return attach_storage_driver(
+            S3ArtifactStore(
+                settings.object_storage_bucket,
+                endpoint_url=settings.object_storage_endpoint,
+                region_name=settings.object_storage_region,
+            ),
+            storage_driver_selection(
+                "audio_artifacts",
+                driver,
+                settings.audio_artifact_store_provider,
+                None,
+                {
+                    "bucket": settings.object_storage_bucket,
+                    "endpoint": settings.object_storage_endpoint,
+                    "region": settings.object_storage_region,
+                },
+            ),
+        )
     raise_unsupported_storage("VOICEBOT_AUDIO_ARTIFACT_STORE_PROVIDER", settings.audio_artifact_store_provider, selection)
 
 
@@ -497,8 +517,14 @@ def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelec
             "audio_artifacts",
             normalize_driver_name(settings.audio_artifact_store_provider),
             settings.audio_artifact_store_provider,
-            settings.tts_cache_dir,
-            {"debug_audio_dir": settings.debug_audio_dir},
+            settings.tts_cache_dir if normalize_driver_name(settings.audio_artifact_store_provider) == "filesystem" else None,
+            {"debug_audio_dir": settings.debug_audio_dir}
+            if normalize_driver_name(settings.audio_artifact_store_provider) == "filesystem"
+            else {
+                "bucket": settings.object_storage_bucket,
+                "endpoint": settings.object_storage_endpoint,
+                "region": settings.object_storage_region,
+            },
         ),
     }
     return selections

@@ -28,7 +28,7 @@ from voicebot.runtime_storage import (
     selected_storage_drivers,
     storage_drivers_payload,
 )
-from voicebot.storage import attached_storage_driver, normalize_driver_name
+from voicebot.storage import S3ArtifactStore, attached_storage_driver, normalize_driver_name
 from voicebot.storage.redis_leases import RedisSessionLeaseStore
 from voicebot.storage.redis_subagent_tasks import RedisSubagentTaskStore
 from voicebot.storage.redis_worker_queue import RedisWorkerQueueStore
@@ -60,7 +60,9 @@ class StorageDriverTests(unittest.TestCase):
         transcript_definitions = {
             definition.driver: definition for definition in registry.definitions_for_family("transcripts")
         }
-        artifact_drivers = {definition.driver for definition in registry.definitions_for_family("audio_artifacts")}
+        artifact_definitions = {
+            definition.driver: definition for definition in registry.definitions_for_family("audio_artifacts")
+        }
         queue_drivers = {definition.driver for definition in registry.definitions_for_family("worker_queue")}
 
         self.assertIn("jsonl", event_definitions)
@@ -80,7 +82,8 @@ class StorageDriverTests(unittest.TestCase):
         self.assertFalse(subagent_task_definitions["flowhunt_db"].implemented)
         self.assertTrue(session_definitions["sqlite"].implemented)
         self.assertTrue(transcript_definitions["sqlite"].implemented)
-        self.assertIn("s3", artifact_drivers)
+        self.assertTrue(artifact_definitions["s3"].implemented)
+        self.assertFalse(artifact_definitions["object_storage"].implemented)
         self.assertIn("redis", {definition.driver for definition in registry.definitions_for_family("session_leases")})
         self.assertIn("redis_streams", queue_drivers)
         self.assertIn("flowhunt_queue", queue_drivers)
@@ -267,6 +270,41 @@ class StorageDriverTests(unittest.TestCase):
         self.assertEqual(attached_storage_driver(store).driver, "redis")
         self.assertEqual(attached_storage_driver(store).options["redis_url"], "redis://test")
 
+    def test_s3_audio_artifact_driver_is_buildable(self) -> None:
+        with patch("voicebot.storage.artifacts._s3_client", return_value=FakeS3()):
+            store = build_audio_artifact_store(
+                Settings(
+                    audio_artifact_store_provider="s3",
+                    object_storage_bucket="voicebot-audio",
+                    object_storage_endpoint="https://s3.example.com",
+                    object_storage_region="eu-central-1",
+                )
+            )
+
+        selection = attached_storage_driver(store)
+        self.assertIsInstance(store, S3ArtifactStore)
+        self.assertEqual(selection.driver, "s3")
+        self.assertEqual(selection.options["bucket"], "voicebot-audio")
+        self.assertEqual(selection.options["endpoint"], "https://s3.example.com")
+        self.assertEqual(selection.options["region"], "eu-central-1")
+
+    def test_s3_audio_artifact_selection_reports_object_storage_options(self) -> None:
+        payload = storage_drivers_payload(
+            Settings(
+                audio_artifact_store_provider="s3",
+                object_storage_bucket="voicebot-audio",
+                object_storage_endpoint="https://s3.example.com",
+                object_storage_region="eu-central-1",
+            )
+        )
+
+        selected = payload["selected"]["audio_artifacts"]
+        self.assertEqual(selected["driver"], "s3")
+        self.assertTrue(selected["definition"]["implemented"])
+        self.assertEqual(selected["options"]["bucket"], "voicebot-audio")
+        self.assertEqual(selected["options"]["endpoint"], "https://s3.example.com")
+        self.assertEqual(selected["options"]["region"], "eu-central-1")
+
     def test_provider_config_sqlite_driver_is_buildable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = build_provider_config_store(
@@ -392,6 +430,49 @@ class FakeRedis:
         expired = [key for key, (_value, expires_at) in self.values.items() if expires_at is not None and expires_at <= now]
         for key in expired:
             self.values.pop(key, None)
+
+
+class FakeBody:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+
+    def read(self) -> bytes:
+        return self.data
+
+
+class FakeS3:
+    def __init__(self) -> None:
+        self.objects: dict[tuple[str, str], tuple[bytes, dict[str, str]]] = {}
+
+    def put_object(self, *, Bucket: str, Key: str, Body: bytes, Metadata: dict[str, str]) -> dict:
+        self.objects[(Bucket, Key)] = (Body, Metadata)
+        return {}
+
+    def get_object(self, *, Bucket: str, Key: str) -> dict:
+        try:
+            data, metadata = self.objects[(Bucket, Key)]
+        except KeyError as exc:
+            raise FileNotFoundError(Key) from exc
+        return {"Body": FakeBody(data), "Metadata": metadata}
+
+    def delete_object(self, *, Bucket: str, Key: str) -> dict:
+        self.objects.pop((Bucket, Key), None)
+        return {}
+
+    def list_objects_v2(self, *, Bucket: str, Prefix: str) -> dict:
+        contents = [
+            {"Key": key}
+            for bucket, key in sorted(self.objects)
+            if bucket == Bucket and key.startswith(Prefix)
+        ]
+        return {"Contents": contents}
+
+    def head_object(self, *, Bucket: str, Key: str) -> dict:
+        try:
+            _data, metadata = self.objects[(Bucket, Key)]
+        except KeyError as exc:
+            raise FileNotFoundError(Key) from exc
+        return {"Metadata": metadata}
 
 
 if __name__ == "__main__":

@@ -9,20 +9,12 @@ from time import perf_counter
 from typing import Any, get_args
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
 from .agent_tasks import AgentTaskTracker
-from .api_surface import (
-    api_scope_violations,
-    api_surface_by_area,
-    api_surface_integrity_issues,
-    api_surface_summary,
-    prototype_endpoints,
-    public_endpoints_are_workspace_scoped,
-)
-from .api_audience import apply_route_audiences, filter_routes_by_audience, route_audience_inventory
+from .api_audience import apply_route_audiences
 from .api_contracts import ContractsApiContext, create_contracts_router
+from .api_discovery import DiscoveryApiContext, create_discovery_router
 from .api_models import (
     AgentResponseRequest,
     AgentTaskClaimRequest,
@@ -637,6 +629,7 @@ def create_app(
         )
     )
     app.include_router(create_contracts_router(ContractsApiContext(runtime_settings=runtime_settings)))
+    app.include_router(create_discovery_router(DiscoveryApiContext(app=app)))
 
     @app.get("/calls")
     def list_calls() -> dict[str, Any]:
@@ -701,36 +694,6 @@ def create_app(
     @app.get("/providers")
     def providers() -> dict[str, Any]:
         return provider_catalog()
-
-    @app.get("/api/surface")
-    def api_surface() -> dict[str, Any]:
-        return {
-            "summary": api_surface_summary(),
-            "areas": api_surface_by_area(),
-            "public_endpoints_are_workspace_scoped": public_endpoints_are_workspace_scoped(),
-            "scope_violations": api_scope_violations(),
-            "integrity_issues": api_surface_integrity_issues(),
-            "route_audiences": route_audience_inventory(app.routes),
-        }
-
-    @app.get("/openapi/public.json", include_in_schema=False)
-    def public_openapi() -> dict[str, Any]:
-        return audience_openapi("public")
-
-    @app.get("/openapi/internal.json", include_in_schema=False)
-    def internal_openapi() -> dict[str, Any]:
-        return audience_openapi("internal", include_local_dev=True)
-
-    def audience_openapi(audience: str, include_local_dev: bool = False) -> dict[str, Any]:
-        return get_openapi(
-            title=f"{app.title} {audience.title()} API",
-            version=app.version,
-            routes=filter_routes_by_audience(app.routes, audience, include_local_dev=include_local_dev),  # type: ignore[arg-type]
-        )
-
-    @app.get("/api/surface/prototypes")
-    def api_surface_prototypes() -> dict[str, Any]:
-        return {"endpoints": prototype_endpoints()}
 
     @app.get("/workspaces/{workspace_id}/voicebots")
     def list_workspace_voicebots(workspace_id: str) -> dict[str, Any]:

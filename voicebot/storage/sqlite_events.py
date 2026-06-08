@@ -107,6 +107,10 @@ class SQLiteEventStore(EventStore):
             ).fetchone()
         return _event_from_row(row) if row is not None else None
 
+    def close(self) -> None:
+        with self._db_lock:
+            self._connection.close()
+
     def _migrate(self) -> None:
         with self._db_lock:
             self._connection.execute("PRAGMA journal_mode=WAL")
@@ -184,4 +188,3 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
-

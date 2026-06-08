@@ -33,6 +33,7 @@ from voicebot.storage.redis_worker_registry import RedisWorkerRegistry
 from voicebot.storage.sqlite_events import SQLiteEventStore
 from voicebot.storage.sqlite_provider_config import SQLiteProviderConfigStore
 from voicebot.storage.sqlite_sessions import SQLiteVoicebotSessionStore
+from voicebot.storage.sqlite_transcripts import SQLiteTranscriptStore
 from voicebot.transcripts import TranscriptStore
 from storage_contract_cases import assert_event_store_contract
 
@@ -53,6 +54,9 @@ class StorageDriverTests(unittest.TestCase):
         session_definitions = {
             definition.driver: definition for definition in registry.definitions_for_family("voicebot_sessions")
         }
+        transcript_definitions = {
+            definition.driver: definition for definition in registry.definitions_for_family("transcripts")
+        }
         artifact_drivers = {definition.driver for definition in registry.definitions_for_family("audio_artifacts")}
         queue_drivers = {definition.driver for definition in registry.definitions_for_family("worker_queue")}
 
@@ -71,6 +75,7 @@ class StorageDriverTests(unittest.TestCase):
         self.assertTrue(subagent_task_definitions["redis"].implemented)
         self.assertFalse(subagent_task_definitions["flowhunt_db"].implemented)
         self.assertTrue(session_definitions["sqlite"].implemented)
+        self.assertTrue(transcript_definitions["sqlite"].implemented)
         self.assertIn("s3", artifact_drivers)
         self.assertIn("redis", {definition.driver for definition in registry.definitions_for_family("session_leases")})
         self.assertIn("redis_streams", queue_drivers)
@@ -262,6 +267,20 @@ class StorageDriverTests(unittest.TestCase):
             )
 
             self.assertIsInstance(store, SQLiteVoicebotSessionStore)
+            self.assertEqual(attached_storage_driver(store).driver, "sqlite")
+            self.assertEqual(attached_storage_driver(store).options["database_url"].startswith("sqlite:///"), True)
+            store.close()
+
+    def test_transcript_sqlite_driver_is_buildable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = build_transcript_store(
+                Settings(
+                    transcript_store_provider="sqlite",
+                    relational_database_url=f"sqlite:///{directory}/transcripts.sqlite3",
+                )
+            )
+
+            self.assertIsInstance(store, SQLiteTranscriptStore)
             self.assertEqual(attached_storage_driver(store).driver, "sqlite")
             self.assertEqual(attached_storage_driver(store).options["database_url"].startswith("sqlite:///"), True)
             store.close()

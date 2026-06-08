@@ -17,6 +17,7 @@ from .storage import (
     RedisWorkerRegistry,
     SQLiteEventStore,
     SQLiteProviderConfigStore,
+    SQLiteTranscriptStore,
     SQLiteVoicebotSessionStore,
     StorageDriverDefinition,
     StorageDriverSelection,
@@ -39,7 +40,7 @@ def default_storage_registry() -> StorageRegistry:
             _definition("events", "flowhunt_db", "shared", True, False, True, "workspace-scoped durable DB event rows", implemented=False),
             _definition("events", "append_only_event_log", "shared", True, False, True, "managed append-only event log", implemented=False),
             _definition("transcripts", "jsonl", "node", False, True, False, "per-call JSONL transcript files"),
-            _definition("transcripts", "sqlite", "node", False, True, False, "SQLite transcript metadata and text index", implemented=False),
+            _definition("transcripts", "sqlite", "node", False, True, False, "SQLite transcript metadata and text index"),
             _definition("transcripts", "postgres", "shared", True, False, True, "PostgreSQL transcript metadata and text index", implemented=False),
             _definition("transcripts", "flowhunt_db", "shared", True, False, True, "workspace-scoped transcript rows", implemented=False),
             _definition("voicebot_sessions", "memory", "process", False, True, False, "in-memory routed session records"),
@@ -296,6 +297,17 @@ def build_transcript_store(settings: Settings) -> TranscriptStore:
     selection = storage_driver_selection("transcripts", driver, settings.transcript_store_provider, settings.transcript_dir)
     if driver == "jsonl":
         return attach_storage_driver(TranscriptStore(settings.transcript_dir), selection)
+    if driver == "sqlite":
+        return attach_storage_driver(
+            SQLiteTranscriptStore(settings.relational_database_url),
+            storage_driver_selection(
+                "transcripts",
+                driver,
+                settings.transcript_store_provider,
+                None,
+                {"database_url": settings.relational_database_url},
+            ),
+        )
     raise_unsupported_storage("VOICEBOT_TRANSCRIPT_STORE_PROVIDER", settings.transcript_store_provider, selection)
 
 
@@ -391,7 +403,12 @@ def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelec
             "transcripts",
             "jsonl" if normalize_driver_name(settings.transcript_store_provider) == "json" else normalize_driver_name(settings.transcript_store_provider),
             settings.transcript_store_provider,
-            settings.transcript_dir,
+            settings.transcript_dir
+            if normalize_driver_name(settings.transcript_store_provider) not in {"sqlite", "postgres"}
+            else None,
+            {"database_url": settings.relational_database_url}
+            if normalize_driver_name(settings.transcript_store_provider) in {"sqlite", "postgres"}
+            else None,
         ),
         "voicebot_sessions": storage_driver_selection(
             "voicebot_sessions",

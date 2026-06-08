@@ -208,7 +208,19 @@ class MediaTransport(Protocol):
     kind: TransportKind
     capabilities: TransportCapabilities
 
+    def start(self) -> TransportHealth:
+        ...
+
+    def create_session(self, call_id: str, metadata: dict[str, Any] | None = None) -> MediaSessionDescriptor:
+        ...
+
     def describe_session(self, call_id: str, metadata: dict[str, Any] | None = None) -> MediaSessionDescriptor:
+        ...
+
+    def receive_inbound_media(self, call_id: str, payload: bytes, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        ...
+
+    def send_outbound_media(self, call_id: str, payload: bytes, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         ...
 
     def execute_call_control(self, request: CallControlRequest) -> CallControlResult:
@@ -298,6 +310,12 @@ class TransportRegistry:
     def enabled(self) -> tuple[MediaTransport, ...]:
         return tuple(definition.transport for definition in self.implemented() if definition.enabled and definition.transport is not None)
 
+    def start_enabled(self) -> dict[TransportKind, dict[str, Any]]:
+        return {transport.kind: transport.start().to_dict() for transport in self.enabled()}
+
+    def shutdown_enabled(self) -> dict[TransportKind, dict[str, Any]]:
+        return {transport.kind: transport.shutdown().to_dict() for transport in self.enabled()}
+
     def definitions(self) -> tuple[TransportDefinition, ...]:
         return tuple(self._definitions[kind] for kind in sorted(self._definitions))
 
@@ -326,6 +344,18 @@ class StaticMediaTransport:
         self.capabilities = capabilities
         self.sample_rate = sample_rate
         self._shutdown = False
+        self._started = False
+        self._sessions: dict[str, MediaSessionDescriptor] = {}
+
+    def start(self) -> TransportHealth:
+        self._started = True
+        self._shutdown = False
+        return self.health()
+
+    def create_session(self, call_id: str, metadata: dict[str, Any] | None = None) -> MediaSessionDescriptor:
+        descriptor = self.describe_session(call_id, metadata)
+        self._sessions[call_id] = descriptor
+        return descriptor
 
     def describe_session(self, call_id: str, metadata: dict[str, Any] | None = None) -> MediaSessionDescriptor:
         route = CallRoute.from_metadata(metadata)
@@ -336,6 +366,12 @@ class StaticMediaTransport:
             capabilities=self.capabilities,
             sample_rate=self.sample_rate,
         )
+
+    def receive_inbound_media(self, call_id: str, payload: bytes, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._media_event("inbound", call_id, payload, metadata)
+
+    def send_outbound_media(self, call_id: str, payload: bytes, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._media_event("outbound", call_id, payload, metadata)
 
     def execute_call_control(self, request: CallControlRequest) -> CallControlResult:
         if self._shutdown:
@@ -360,13 +396,33 @@ class StaticMediaTransport:
             kind=self.kind,
             ok=not self._shutdown,
             status="stopped" if self._shutdown else "ready",
-            active_sessions=0,
-            details={"sample_rate": self.sample_rate},
+            active_sessions=len(self._sessions),
+            details={"sample_rate": self.sample_rate, "started": self._started},
         )
 
     def shutdown(self) -> TransportHealth:
         self._shutdown = True
+        self._sessions.clear()
         return self.health()
+
+    def _media_event(
+        self,
+        direction: Literal["inbound", "outbound"],
+        call_id: str,
+        payload: bytes,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if self._shutdown:
+            raise RuntimeError(f"{self.kind} transport is stopped")
+        if not call_id:
+            raise ValueError("call_id is required for media")
+        return {
+            "transport": self.kind,
+            "call_id": call_id,
+            "direction": direction,
+            "byte_count": len(payload),
+            "metadata": dict(metadata or {}),
+        }
 
 
 def transport_capabilities_to_dict(capabilities: TransportCapabilities) -> dict[str, Any]:

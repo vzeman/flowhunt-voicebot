@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -179,6 +180,16 @@ class StorageDriverTests(unittest.TestCase):
                 self,
                 lambda: SQLiteEventStore(f"sqlite:///{directory}/events.sqlite3", max_context_events=20),
             )
+
+    def test_sqlite_event_store_can_close_connection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SQLiteEventStore(f"sqlite:///{directory}/events.sqlite3", max_context_events=20)
+            store.append("call-1", "call_started", {})
+
+            store.close()
+
+            with self.assertRaises(sqlite3.ProgrammingError):
+                store.list_events()
 
     def test_redis_session_lease_store_uses_client_boundary(self) -> None:
         store = RedisSessionLeaseStore("redis://test", client=FakeRedis())

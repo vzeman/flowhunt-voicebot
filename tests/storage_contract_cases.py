@@ -9,19 +9,23 @@ from voicebot.subagents import SubagentTaskRequest, SubagentTaskResult
 
 def assert_event_store_contract(testcase: Any, factory: Callable[[], Any]) -> None:
     store = factory()
+    try:
+        first = store.append("call-1", "call_started", {"workspace_id": "ws-1", "voicebot_id": "bot-1"})
+        second = store.append("call-1", "user_transcript", {"workspace_id": "ws-1", "voicebot_id": "bot-1", "text": "hello"})
+        store.append("call-2", "call_started", {"workspace_id": "ws-2", "voicebot_id": "bot-2"})
 
-    first = store.append("call-1", "call_started", {"workspace_id": "ws-1", "voicebot_id": "bot-1"})
-    second = store.append("call-1", "user_transcript", {"workspace_id": "ws-1", "voicebot_id": "bot-1", "text": "hello"})
-    store.append("call-2", "call_started", {"workspace_id": "ws-2", "voicebot_id": "bot-2"})
-
-    testcase.assertEqual(second.id, first.id + 1)
-    testcase.assertEqual(store.get_event(first.id).call_id, "call-1")
-    testcase.assertEqual([event.id for event in store.list_events(after=first.id)], [second.id, second.id + 1])
-    testcase.assertEqual([event.call_id for event in store.list_events(call_id="call-1")], ["call-1", "call-1"])
-    testcase.assertEqual(
-        [event.call_id for event in store.list_events(workspace_id="ws-1", voicebot_id="bot-1")],
-        ["call-1", "call-1"],
-    )
+        testcase.assertEqual(second.id, first.id + 1)
+        testcase.assertEqual(store.get_event(first.id).call_id, "call-1")
+        testcase.assertEqual([event.id for event in store.list_events(after=first.id)], [second.id, second.id + 1])
+        testcase.assertEqual([event.call_id for event in store.list_events(call_id="call-1")], ["call-1", "call-1"])
+        testcase.assertEqual(
+            [event.call_id for event in store.list_events(workspace_id="ws-1", voicebot_id="bot-1")],
+            ["call-1", "call-1"],
+        )
+    finally:
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
 
 
 def assert_call_state_store_contract(testcase: Any, factory: Callable[[], Any]) -> None:

@@ -56,7 +56,6 @@ from .api_transcripts import (
 from .api_voicebot_runtime_config import VoicebotRuntimeConfigApiContext, create_voicebot_runtime_config_router
 from .api_voicebot_sessions import VoicebotSessionsApiContext, create_voicebot_sessions_router
 from .asterisk_control import AsteriskAMI, ControlResult
-from .call_recording import recording_artifact_id
 from .calls import AgentResponse, CallRegistry
 from .config import Settings, redacted_settings
 from .drain import DrainState
@@ -635,6 +634,7 @@ def create_app(
         events=events,
         broadcast=hub.broadcast,
         multimodal_capabilities=_API_MULTIMODAL_CAPABILITIES,
+        audio_artifacts=audio_artifacts,
     )
     app.include_router(create_calls_router(calls_api_context))
     transcripts_api_context = TranscriptsApiContext(
@@ -1388,35 +1388,6 @@ def create_app(
         if not closed:
             raise HTTPException(status_code=404, detail=f"WebRTC session not found: {session_id}")
         return {"closed": True, "session_id": session_id}
-
-    @app.get("/calls/{call_id}/recording")
-    def get_call_recording_metadata(call_id: str) -> dict[str, Any]:
-        record = call_recording_record(call_id)
-        if record is None:
-            raise HTTPException(status_code=404, detail=f"Call recording not found: {call_id}")
-        return {"artifact_id": record.artifact_id, "metadata": record.metadata}
-
-    @app.get("/calls/{call_id}/recording.wav")
-    def get_call_recording_audio(call_id: str) -> Response:
-        if audio_artifacts is None:
-            raise HTTPException(status_code=503, detail="Audio artifact storage is not configured")
-        data = audio_artifacts.get(recording_artifact_id(call_id))
-        if data is None:
-            raise HTTPException(status_code=404, detail=f"Call recording not found: {call_id}")
-        return Response(
-            content=data,
-            media_type="audio/wav",
-            headers={"Content-Disposition": f'inline; filename="{recording_artifact_id(call_id)}"'},
-        )
-
-    def call_recording_record(call_id: str):
-        if audio_artifacts is None:
-            raise HTTPException(status_code=503, detail="Audio artifact storage is not configured")
-        artifact_id = recording_artifact_id(call_id)
-        for record in audio_artifacts.list():
-            if record.artifact_id == artifact_id:
-                return record
-        return None
 
     @app.post("/calls/{call_id}/responses")
     async def submit_response(call_id: str, request: AgentResponseRequest) -> dict[str, Any]:

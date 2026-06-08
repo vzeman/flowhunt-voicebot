@@ -4,9 +4,15 @@ import tempfile
 import unittest
 
 import numpy as np
+from fastapi.testclient import TestClient
 
+from voicebot.agent_tasks import AgentTaskTracker
+from voicebot.api import WebSocketHub, create_app
 from voicebot.call_recording import SpeechOnlyCallRecorder, recording_artifact_id
+from voicebot.calls import CallRegistry
+from voicebot.events import EventStore
 from voicebot.storage.artifacts import FilesystemArtifactStore
+from voicebot.transcripts import TranscriptStore
 
 
 class SpeechOnlyCallRecordingTests(unittest.TestCase):
@@ -81,6 +87,32 @@ class SpeechOnlyCallRecordingTests(unittest.TestCase):
             self.assertIsNotNone(saved)
             assert saved is not None
             self.assertEqual(saved["segment_count"], 3)
+
+    def test_api_serves_recording_metadata_and_audio_from_artifact_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = FilesystemArtifactStore(directory)
+            artifact_id = recording_artifact_id("call-5")
+            store.put(artifact_id, b"RIFF-wave-bytes", {"call_id": "call-5", "segment_count": 1})
+            app = create_app(
+                EventStore(max_context_events=20),
+                CallRegistry(),
+                AgentTaskTracker(),
+                WebSocketHub(),
+                TranscriptStore(f"{directory}/transcripts"),
+                None,
+                audio_artifacts=store,
+            )
+            client = TestClient(app)
+
+            metadata = client.get("/calls/call-5/recording")
+            audio = client.get("/calls/call-5/recording.wav")
+
+            self.assertEqual(metadata.status_code, 200)
+            self.assertEqual(metadata.json()["artifact_id"], artifact_id)
+            self.assertEqual(metadata.json()["metadata"]["segment_count"], 1)
+            self.assertEqual(audio.status_code, 200)
+            self.assertEqual(audio.content, b"RIFF-wave-bytes")
+            self.assertEqual(audio.headers["content-type"], "audio/wav")
 
 
 if __name__ == "__main__":

@@ -36,10 +36,8 @@ from .api_models import (
     PlaybackInterruptRequest,
     PublicVoicebotRoutePatchRequest,
     PublicVoicebotRouteRequest,
-    RetentionDeleteRequest,
     ScalingAdmissionRequest,
     ScalingBackpressureRequest,
-    SecurityAuditRequest,
     ScalingWorkloadPlanRequest,
     SessionLeaseEnforceRequest,
     SessionLeaseReleaseRequest,
@@ -66,6 +64,7 @@ from .api_models import (
 )
 from .api_events import EventsApiContext, create_events_router, events_payload, metrics_payload
 from .api_runtime import RuntimeApiContext, create_runtime_router
+from .api_security import SecurityApiContext, create_security_router
 from .asterisk_control import AsteriskAMI, ControlResult
 from .call_recording import recording_artifact_id
 from .calls import AgentResponse, CallRegistry
@@ -137,7 +136,7 @@ from .scaling import (
     priority_routing_rules,
 )
 from .session_leases import SessionLeaseStore
-from .security_contract import redact_sensitive_data, security_contract_issues, security_contract_payload
+from .security_contract import redact_sensitive_data
 from .sip_media_plane import sip_media_plane_payload
 from .sip_trunks import SipTrunk, SipTrunkStore
 from .runtime_config import (
@@ -626,77 +625,17 @@ def create_app(
         validated_limit=validated_limit,
     )
     app.include_router(create_events_router(events_api_context))
-
-    @app.get("/security/contract")
-    def security_contract() -> dict[str, Any]:
-        return {
-            "contract": security_contract_payload(runtime_settings, workspace_access_policy),
-            "issues": security_contract_issues(runtime_settings, workspace_access_policy),
-        }
-
-    @app.get("/workspaces/{workspace_id}/security/retention")
-    def workspace_security_retention(workspace_id: str) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        contract = security_contract_payload(runtime_settings, workspace_access_policy)
-        return {"workspace_id": workspace_id, "retention": contract["retention"]}
-
-    @app.post("/workspaces/{workspace_id}/security/audit")
-    async def workspace_security_audit(workspace_id: str, request: SecurityAuditRequest) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        event = append_security_audit(
-            workspace_id=workspace_id,
-            voicebot_id=request.voicebot_id,
-            session_id=request.session_id,
-            call_id=request.call_id,
-            action=request.action,
-            actor=request.actor,
-            resource_type=request.resource_type,
-            resource_id=request.resource_id,
-            outcome=request.outcome,
-            metadata=request.metadata,
+    app.include_router(
+        create_security_router(
+            SecurityApiContext(
+                runtime_settings=runtime_settings,
+                workspace_access_policy=workspace_access_policy,
+                require_workspace_access=require_workspace_access,
+                append_security_audit=append_security_audit,
+                broadcast=hub.broadcast,
+            )
         )
-        await hub.broadcast(event)
-        return {"event": event_to_dict(event)}
-
-    @app.post("/workspaces/{workspace_id}/security/retention/delete")
-    async def workspace_retention_delete(workspace_id: str, request: RetentionDeleteRequest) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        contract = security_contract_payload(runtime_settings, workspace_access_policy)
-        known_classes = {item["name"]: item for item in contract["retention"]["classes"]}
-        selected = request.classes or sorted(known_classes)
-        unknown = [name for name in selected if name not in known_classes]
-        if unknown:
-            raise HTTPException(status_code=400, detail={"unknown_retention_classes": unknown})
-        scope = {
-            "workspace_id": workspace_id,
-            "voicebot_id": request.voicebot_id,
-            "session_id": request.session_id,
-            "call_id": request.call_id,
-            "artifact_id": request.artifact_id,
-        }
-        hooks = [
-            {
-                "class": name,
-                "deletion_hook": known_classes[name]["deletion_hook"],
-                "scope": {key: value for key, value in scope.items() if value},
-                "dry_run": request.dry_run,
-            }
-            for name in selected
-        ]
-        event = append_security_audit(
-            workspace_id=workspace_id,
-            voicebot_id=request.voicebot_id,
-            session_id=request.session_id,
-            call_id=request.call_id,
-            action="retention_delete",
-            actor="dashboard_or_internal_api",
-            resource_type="retention_scope",
-            resource_id=request.artifact_id or request.session_id or request.voicebot_id or workspace_id,
-            outcome="planned" if request.dry_run else "requested",
-            metadata={"classes": selected, "scope": scope, "reason": request.reason, "dry_run": request.dry_run},
-        )
-        await hub.broadcast(event)
-        return {"workspace_id": workspace_id, "dry_run": request.dry_run, "hooks": hooks, "audit_event": event_to_dict(event)}
+    )
 
     @app.get("/pipeline/contract")
     def pipeline_contract() -> dict[str, Any]:

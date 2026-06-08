@@ -245,10 +245,50 @@ class SessionLeaseApiTests(unittest.TestCase):
         self.assertEqual(enforced.status_code, 200)
         self.assertTrue(session.stopped)
         self.assertEqual([event["type"] for event in enforced.json()["recovered"]], ["session_recovered"])
+        self.assertEqual(
+            enforced.json()["recovered"][0]["data"]["reacquired_lease"]["owner"],
+            "worker-1",
+        )
+        self.assertEqual(
+            client.get("/scaling/session-leases?workspace_id=workspace-1&voicebot_id=voicebot-1").json()["leases"][0]["owner"],
+            "worker-1",
+        )
         self.assertEqual([event["type"] for event in enforced.json()["interrupted"]], ["session_interrupted"])
         event_types = [event.type for event in events.list_events(call_id="call-1")]
         self.assertIn("session_lease_lost", event_types)
+        self.assertIn("session_lease_reacquired", event_types)
         self.assertIn("session_interrupted", event_types)
+
+    def test_session_lease_enforce_does_not_steal_active_lease_from_another_owner(self) -> None:
+        registry = CallRegistry()
+        session = FakeSession("call-1")
+        registry.add(session)
+        leases = SessionLeaseStore()
+        leases.acquire("workspace-1", "voicebot-1", "session-1", "worker-2", 30, call_id="call-1")
+        app = create_app(
+            EventStore(max_context_events=50),
+            registry,
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+            session_leases=leases,
+        )
+        client = TestClient(app)
+
+        enforced = client.post(
+            "/scaling/session-leases/enforce",
+            json={"owner": "worker-1", "stop_unleased_sessions": False, "recover_non_media_work": True},
+        )
+
+        self.assertEqual(enforced.status_code, 200)
+        self.assertEqual(enforced.json()["recovered"][0]["data"]["reason"], "lease_owner_mismatch")
+        self.assertIsNone(enforced.json()["recovered"][0]["data"]["reacquired_lease"])
+        self.assertEqual(
+            client.get("/scaling/session-leases?workspace_id=workspace-1&voicebot_id=voicebot-1").json()["leases"][0]["owner"],
+            "worker-2",
+        )
+        self.assertFalse(session.stopped)
 
 
 if __name__ == "__main__":

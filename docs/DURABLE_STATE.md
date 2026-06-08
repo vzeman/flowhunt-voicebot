@@ -295,10 +295,13 @@ such as pod/node identifiers. The runtime emits `session_lease_acquired`,
 `/scaling/session-leases/enforce` compares active session snapshots with the
 lease store for the supplied owner. If a live media session is missing its
 lease, or the lease belongs to another owner, the runtime emits
-`session_lease_lost`. It can then stop the active media session and emit
-`session_interrupted` while also emitting `session_recovered` for non-media
-work that can continue, such as subagent polling, transcript storage, summaries,
-and late task result handling.
+`session_lease_lost`. Missing leases can be reacquired for the enforcing owner,
+which emits `session_lease_reacquired` and includes the new lease in
+`session_recovered`. Active leases held by another owner are not stolen; the
+owner mismatch remains visible until that lease is released or expires.
+Enforcement can also stop the active media session and emit
+`session_interrupted` while recovering non-media work such as subagent polling,
+transcript storage, summaries, and late task result handling.
 
 ## External Tasks
 

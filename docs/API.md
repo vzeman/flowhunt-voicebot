@@ -2322,13 +2322,17 @@ expiration through the shared lease backend or a coordinator.
 ### POST `/scaling/session-leases/enforce`
 
 Stops active media sessions that no longer have a valid owner lease and emits
-`session_lease_lost`, `session_interrupted`, and `session_recovered` events.
+`session_lease_lost`, `session_lease_reacquired`, `session_interrupted`, and
+`session_recovered` events. Missing leases can be reacquired by the enforcing
+owner; active leases held by another owner are reported but not stolen.
 
 ```json
 {
   "owner": "voicebot-pod-1",
   "stop_unleased_sessions": true,
-  "recover_non_media_work": true
+  "recover_non_media_work": true,
+  "reacquire_missing_leases": true,
+  "lease_ttl_seconds": 30
 }
 ```
 

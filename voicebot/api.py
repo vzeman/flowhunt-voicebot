@@ -1529,11 +1529,29 @@ def create_app(
                 "reason": row["reason"],
             }
             events.append(row["call_id"], "session_lease_lost", loss_data)
+            reacquired_lease = None
+            if request.reacquire_missing_leases and row["status"] == "missing":
+                reacquired_lease = session_lease_store.acquire(
+                    row["workspace_id"],
+                    row["voicebot_id"],
+                    row["session_id"],
+                    request.owner,
+                    request.lease_ttl_seconds,
+                    call_id=row["call_id"],
+                    transport=row["transport"],
+                    metadata={"recovered_from": row["reason"]},
+                )
+                if reacquired_lease is not None:
+                    events.append(row["call_id"], "session_lease_reacquired", reacquired_lease.as_dict())
             if request.recover_non_media_work:
                 recovered_event = events.append(
                     row["call_id"],
                     "session_recovered",
-                    {**loss_data, "recovered_work": ["subagent_polling", "transcript_storage", "late_task_results"]},
+                    {
+                        **loss_data,
+                        "recovered_work": ["subagent_polling", "transcript_storage", "late_task_results"],
+                        "reacquired_lease": reacquired_lease.as_dict() if reacquired_lease is not None else None,
+                    },
                 )
                 recovered.append(event_to_dict(recovered_event))
             if request.stop_unleased_sessions:

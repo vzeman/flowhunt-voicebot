@@ -419,6 +419,8 @@ class SessionLeaseEnforceRequest(BaseModel):
     owner: str
     stop_unleased_sessions: bool = True
     recover_non_media_work: bool = True
+    reacquire_missing_leases: bool = True
+    lease_ttl_seconds: float = 30.0
 
 
 class AgentToolRequest(BaseModel):

@@ -98,17 +98,17 @@ priority. The routing partition key keeps all work for a session addressable
 after worker restart, while the provider key supports provider-specific rate
 limits.
 
-`WorkerQueueStore` is the local lifecycle contract for these envelopes. It can
+`WorkerQueueStore` is the lifecycle contract for these envelopes. It can
 enqueue pending items, deduplicate active submissions by idempotency key, claim
 them by queue with an owner and TTL, renew claims, acknowledge completed work,
 release failed work back to pending, expire abandoned claims, dead-letter work
 after retry exhaustion, and produce grouped pending/claimed/dead-letter
 snapshots. Claims always prefer `high`, then `normal`, then `background`, while
-keeping FIFO order inside each priority. It is intentionally in-memory; the
-same lifecycle should move to Redis streams, a database queue, or FlowHunt
-shared infrastructure for production.
-`JsonWorkerQueueStore` persists this local lifecycle for restart recovery during
-development and single-node deployments.
+keeping FIFO order inside each priority. `JsonWorkerQueueStore` persists this
+lifecycle for restart recovery during development and single-node deployments.
+`RedisWorkerQueueStore` backs the same contract with shared Redis state for
+multi-worker testing while Redis Streams, database queues, and FlowHunt shared
+queue infrastructure remain separate planned drivers.
 
 Priority classes:
 
@@ -226,9 +226,14 @@ On worker restart:
 Session ownership is represented by `/scaling/session-leases/*`. Lease records
 include workspace, voicebot, session, owner, expiry, and optional call/transport
 metadata. Local Docker can explicitly expire abandoned leases and enforce owner
-loss with `/scaling/session-leases/enforce`. Enforcement stops live media that
-cannot be safely recovered, emits `session_interrupted`, and emits
-`session_recovered` for non-media work that can continue on another worker.
+loss with `/scaling/session-leases/enforce`. Enforcement emits
+`session_lease_lost` for missing or mismatched ownership, reacquires missing
+leases for the enforcing owner when `reacquire_missing_leases=true`, and emits
+`session_lease_reacquired` plus `session_recovered` for non-media work that can
+continue on another worker. It does not steal a still-active lease from another
+owner; owner mismatches stay observable until the owning worker releases or the
+lease expires. If configured, enforcement also stops live media that lost
+ownership and emits `session_interrupted`.
 
 Runtime drain state is represented by `/operations/drain/*`. Readiness fails
 while draining, but liveness remains healthy unless the process is actually

@@ -22,6 +22,7 @@ from .api_surface import (
     public_endpoints_are_workspace_scoped,
 )
 from .api_audience import apply_route_audiences, filter_routes_by_audience, route_audience_inventory
+from .api_contracts import ContractsApiContext, create_contracts_router
 from .api_models import (
     AgentResponseRequest,
     AgentTaskClaimRequest,
@@ -102,7 +103,6 @@ from .multimodal import (
     validate_multimodal_content,
 )
 from .observability import ConversationExpectation, build_timeline, diagnostics_summary, evaluate_conversation, evaluate_slos
-from .pipeline_contract import pipeline_contract_payload
 from .progress import ProgressCadenceMemory, normalize_progress_message
 from .public_access import FixedWindowPublicRateLimiter, origin_allowed
 from .provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities, provider_catalog
@@ -152,7 +152,7 @@ from .runtime_config import (
     SubagentPromptConfig,
     runtime_config_to_dict,
 )
-from .realtime_quality import metric_latency_budget_seconds, realtime_audio_profile, realtime_audio_profile_issues
+from .realtime_quality import metric_latency_budget_seconds
 from .routing_admission import IncomingSessionRequest, evaluate_incoming_session
 from .session_ownership import audit_session_ownership
 from .subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, subagent_task_to_dict
@@ -636,15 +636,7 @@ def create_app(
             )
         )
     )
-
-    @app.get("/pipeline/contract")
-    def pipeline_contract() -> dict[str, Any]:
-        return pipeline_contract_payload()
-
-    @app.get("/realtime/audio-profile")
-    def get_realtime_audio_profile() -> dict[str, Any]:
-        profile = realtime_audio_profile(runtime_settings)
-        return {"profile": profile, "issues": realtime_audio_profile_issues(profile)}
+    app.include_router(create_contracts_router(ContractsApiContext(runtime_settings=runtime_settings)))
 
     @app.get("/calls")
     def list_calls() -> dict[str, Any]:

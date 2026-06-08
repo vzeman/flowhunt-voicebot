@@ -63,6 +63,25 @@ implemented by this runtime, call-control actions, audio flags, concurrency
 support, and modality support. Control planes can use this before binding a
 voicebot to SIP, WebRTC, or future telephony providers.
 
+## Adapter Lifecycle
+
+Every implemented transport adapter follows the same lifecycle contract:
+
+- `start()` makes the adapter ready and returns normalized health.
+- `create_session(call_id, metadata)` creates a `MediaSessionDescriptor`.
+- `receive_inbound_media(call_id, payload, metadata)` records normalized
+  inbound media handoff details.
+- `send_outbound_media(call_id, payload, metadata)` records normalized outbound
+  media handoff details.
+- `execute_call_control(request)` returns a normalized `CallControlResult`.
+- `health()` reports readiness and active session count.
+- `shutdown()` stops the adapter and clears active sessions.
+
+The static local adapters implement this full contract for tests and catalog
+health. SIP/Asterisk and WebRTC runtime code already produce descriptors and
+transport-scoped events; hosted telephony adapters should implement the same
+methods before adding provider-specific webhook or media-session behavior.
+
 ## SIP Runtime
 
 SIP calls are currently handled by Asterisk using PJSIP registration, INVITE,

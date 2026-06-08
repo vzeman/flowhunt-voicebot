@@ -141,17 +141,38 @@ class TransportContractTests(unittest.TestCase):
     def test_transport_health_and_shutdown_are_event_ready(self) -> None:
         transport = StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES, sample_rate=16000)
 
-        ready = transport.health()
+        ready = transport.start()
+        descriptor = transport.create_session("call-1", {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"})
+        inbound = transport.receive_inbound_media("call-1", b"caller-audio", {"codec": "pcm"})
+        outbound = transport.send_outbound_media("call-1", b"bot-audio")
+        active = transport.health()
         stopped = transport.shutdown()
         result = transport.execute_call_control(CallControlRequest("call-1", "hangup"))
 
+        self.assertEqual(descriptor.call_id, "call-1")
+        self.assertEqual(inbound["direction"], "inbound")
+        self.assertEqual(inbound["byte_count"], len(b"caller-audio"))
+        self.assertEqual(inbound["metadata"], {"codec": "pcm"})
+        self.assertEqual(outbound["direction"], "outbound")
         self.assertIsInstance(ready, TransportHealth)
         self.assertEqual(ready.to_dict()["status"], "ready")
         self.assertEqual(ready.to_dict()["details"]["sample_rate"], 16000)
+        self.assertTrue(ready.to_dict()["details"]["started"])
+        self.assertEqual(active.active_sessions, 1)
         self.assertFalse(stopped.ok)
         self.assertEqual(stopped.status, "stopped")
+        self.assertEqual(stopped.active_sessions, 0)
         self.assertFalse(result.ok)
         self.assertIn("stopped", result.reason or "")
+
+    def test_static_transport_rejects_media_after_shutdown(self) -> None:
+        transport = StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES)
+        transport.shutdown()
+
+        with self.assertRaisesRegex(RuntimeError, "stopped"):
+            transport.receive_inbound_media("call-1", b"audio")
+        with self.assertRaisesRegex(ValueError, "call_id"):
+            StaticMediaTransport("webrtc", WEBRTC_CAPABILITIES).send_outbound_media("", b"audio")
 
     def test_transport_health_rejects_invalid_payloads(self) -> None:
         with self.assertRaisesRegex(ValueError, "active_sessions"):
@@ -194,6 +215,18 @@ class TransportContractTests(unittest.TestCase):
             registry.get("asterisk_audiosocket")
         with self.assertRaisesRegex(ValueError, "not implemented"):
             registry.get("twilio", require_enabled=False)
+
+    def test_transport_registry_starts_and_shuts_down_enabled_adapters(self) -> None:
+        registry = default_transport_registry(enabled_kinds={"webrtc"})
+
+        started = registry.start_enabled()
+        registry.get("webrtc").create_session("call-1")
+        stopped = registry.shutdown_enabled()
+
+        self.assertEqual(list(started), ["webrtc"])
+        self.assertEqual(started["webrtc"]["status"], "ready")
+        self.assertEqual(stopped["webrtc"]["status"], "stopped")
+        self.assertEqual(stopped["webrtc"]["active_sessions"], 0)
 
     def test_transport_registry_rejects_duplicate_and_invalid_definitions(self) -> None:
         registry = TransportRegistry()

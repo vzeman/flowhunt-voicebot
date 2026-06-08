@@ -47,7 +47,6 @@ from .api_models import (
     VoicebotChannelRequest,
     VoicebotPromptConfigPatchRequest,
     VoicebotPromptConfigRequest,
-    VoicebotProviderConfigRequest,
     VoicebotRuntimeConfigRequest,
     WorkerQueueClaimRequest,
     WorkerQueueEnqueueRequest,
@@ -56,6 +55,7 @@ from .api_models import (
     WebRTCOfferRequest,
 )
 from .api_events import EventsApiContext, create_events_router, events_payload, metrics_payload
+from .api_providers import ProvidersApiContext, create_providers_router
 from .api_runtime import RuntimeApiContext, create_runtime_router
 from .api_security import SecurityApiContext, create_security_router
 from .asterisk_control import AsteriskAMI, ControlResult
@@ -90,7 +90,7 @@ from .multimodal import Modality, ModalityCapabilities, MultimodalContextStore
 from .observability import ConversationExpectation, build_timeline, diagnostics_summary, evaluate_conversation, evaluate_slos
 from .progress import ProgressCadenceMemory, normalize_progress_message
 from .public_access import FixedWindowPublicRateLimiter, origin_allowed
-from .provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities, provider_catalog
+from .provider_catalog import _agent_capabilities, _stt_capabilities, _tts_capabilities
 from .provider_config import (
     ProviderChoice,
     ProviderConfigStore,
@@ -622,6 +622,15 @@ def create_app(
     )
     app.include_router(create_contracts_router(ContractsApiContext(runtime_settings=runtime_settings)))
     app.include_router(create_discovery_router(DiscoveryApiContext(app=app)))
+    app.include_router(
+        create_providers_router(
+            ProvidersApiContext(
+                provider_config_store=provider_config_store,
+                require_workspace_access=require_workspace_access,
+                append_security_audit=append_security_audit,
+            )
+        )
+    )
     calls_api_context = CallsApiContext(
         registry=registry,
         multimodal_store=multimodal_store,
@@ -630,10 +639,6 @@ def create_app(
         multimodal_capabilities=_API_MULTIMODAL_CAPABILITIES,
     )
     app.include_router(create_calls_router(calls_api_context))
-
-    @app.get("/providers")
-    def providers() -> dict[str, Any]:
-        return provider_catalog()
 
     @app.get("/workspaces/{workspace_id}/voicebots")
     def list_workspace_voicebots(workspace_id: str) -> dict[str, Any]:
@@ -1004,18 +1009,6 @@ def create_app(
             "tasks": [subagent_task_to_dict(task) for task in tasks],
         }
 
-    @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")
-    def get_voicebot_provider_config(workspace_id: str, voicebot_id: str) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        config = provider_config_store.get(workspace_id, voicebot_id)
-        if config is None:
-            raise HTTPException(status_code=404, detail="Provider config not found")
-        return {
-            "config": provider_config_to_dict(config),
-            "selection_plan": selection_plan_to_dict(provider_selection_plan(config)),
-            "validation": [],
-        }
-
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/transports")
     def get_voicebot_transport_catalog(
         workspace_id: str,
@@ -1027,53 +1020,6 @@ def create_app(
             "workspace_id": workspace_id,
             "voicebot_id": voicebot_id,
             **transport_catalog(include_health=include_health),
-        }
-
-    @app.put("/workspaces/{workspace_id}/voicebots/{voicebot_id}/providers")
-    def put_voicebot_provider_config(
-        workspace_id: str,
-        voicebot_id: str,
-        request: VoicebotProviderConfigRequest,
-    ) -> dict[str, Any]:
-        require_workspace_access(workspace_id)
-        try:
-            config = VoicebotProviderConfig(
-                workspace_id=workspace_id,
-                voicebot_id=voicebot_id,
-                stt=provider_choice_from_request("stt", request.stt, workspace_id),
-                tts=provider_choice_from_request("tts", request.tts, workspace_id),
-                agent=provider_choice_from_request("agent", request.agent, workspace_id),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        descriptors = {
-            "stt": provider_catalog_descriptors("stt"),
-            "tts": provider_catalog_descriptors("tts"),
-            "agent": provider_catalog_descriptors("agent"),
-        }
-        issues = validate_provider_config(config, descriptors)
-        if issues:
-            return {
-                "ok": False,
-                "config": provider_config_to_dict(config),
-                "validation": [validation_issue_to_dict(issue) for issue in issues],
-            }
-        saved = provider_config_store.save(config)
-        append_security_audit(
-            workspace_id=workspace_id,
-            voicebot_id=voicebot_id,
-            action="provider_config_change",
-            actor="api",
-            resource_type="provider_config",
-            resource_id=voicebot_id,
-            outcome="saved",
-            metadata=provider_config_to_dict(saved),
-        )
-        return {
-            "ok": True,
-            "config": provider_config_to_dict(saved),
-            "selection_plan": selection_plan_to_dict(provider_selection_plan(saved)),
-            "validation": [],
         }
 
     @app.get("/workspaces/{workspace_id}/voicebots/{voicebot_id}/runtime-config")

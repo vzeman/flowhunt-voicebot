@@ -48,6 +48,27 @@ class SubagentApiTests(unittest.TestCase):
         )
         return TestClient(app), events
 
+    def build_client_without_subagents(self) -> TestClient:
+        events = EventStore(max_context_events=50)
+        app = create_app(
+            events,
+            CallRegistry(),
+            AgentTaskTracker(),
+            WebSocketHub(),
+            TranscriptStore(tempfile.mkdtemp()),
+            None,
+            settings=Settings(flowhunt_workspace_id="workspace-1"),
+        )
+        return TestClient(app)
+
+    def test_subagent_api_reports_unconfigured_coordinator(self) -> None:
+        client = self.build_client_without_subagents()
+
+        response = client.get("/subagent/providers")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Subagent coordinator is not configured")
+
     def test_provider_neutral_subagent_api_submits_schedules_and_cancels_task(self) -> None:
         client, _events = self.build_client()
 

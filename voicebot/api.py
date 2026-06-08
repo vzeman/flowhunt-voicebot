@@ -39,11 +39,6 @@ from .api_models import (
     SessionLeaseReleaseRequest,
     SessionLeaseRequest,
     SipTrunkRequest,
-    SpeculativeSubagentCancelRequest,
-    SpeculativeSubagentConfirmRequest,
-    SpeculativeSubagentTaskRequest,
-    SubagentTaskCancelRequest,
-    SubagentTaskSubmitRequest,
     VoicebotAdminPatchRequest,
     VoicebotAdminRequest,
     VoicebotChannelPatchRequest,
@@ -61,6 +56,7 @@ from .api_events import EventsApiContext, create_events_router, events_payload, 
 from .api_providers import ProvidersApiContext, create_providers_router
 from .api_runtime import RuntimeApiContext, create_runtime_router
 from .api_security import SecurityApiContext, create_security_router
+from .api_subagents import SubagentsApiContext, create_subagents_router
 from .asterisk_control import AsteriskAMI, ControlResult
 from .call_recording import recording_artifact_id
 from .calls import AgentResponse, CallRegistry
@@ -2315,127 +2311,6 @@ def create_app(
         await hub.broadcast(event)
         return {"event": event_to_dict(event)}
 
-    @app.get("/subagent/tasks")
-    def subagent_tasks(workspace_id: str | None = None, session_id: str | None = None) -> dict[str, Any]:
-        if subagent_coordinator is None:
-            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
-        tasks = subagent_coordinator.store.list(workspace_id=workspace_id, session_id=session_id)
-        return {"tasks": [subagent_task_to_dict(task) for task in tasks]}
-
-    @app.get("/subagent/providers")
-    def subagent_providers() -> dict[str, Any]:
-        if subagent_coordinator is None:
-            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
-        return subagent_coordinator.provider_catalog()
-
-    @app.post("/subagent/tasks")
-    def submit_subagent_task(request: SubagentTaskSubmitRequest) -> dict[str, Any]:
-        if subagent_coordinator is None:
-            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
-        require_workspace_access(request.workspace_id)
-        try:
-            task = subagent_coordinator.request(
-                SubagentTaskRequest(
-                    workspace_id=request.workspace_id,
-                    voicebot_id=request.voicebot_id,
-                    session_id=request.session_id,
-                    request_event_id=request.request_event_id,
-                    provider=request.provider,  # type: ignore[arg-type]
-                    input_text=request.input_text,
-                    dedupe_key=request.dedupe_key,
-                    metadata=request.metadata,
-                )
-            )
-            if request.schedule:
-                if subagent_lifecycle is None:
-                    raise HTTPException(status_code=503, detail="Subagent lifecycle runner is not configured")
-                task = subagent_lifecycle.schedule(task)
-        except KeyError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        return {"task": subagent_task_to_dict(task), "ok": task.status != "failed"}
-
-    @app.post("/subagent/tasks/speculative")
-    def submit_speculative_subagent_task(request: SpeculativeSubagentTaskRequest) -> dict[str, Any]:
-        if subagent_coordinator is None:
-            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
-        if subagent_lifecycle is None:
-            raise HTTPException(status_code=503, detail="Subagent lifecycle runner is not configured")
-        require_workspace_access(request.workspace_id)
-        try:
-            task = subagent_coordinator.request_speculative(
-                SubagentTaskRequest(
-                    workspace_id=request.workspace_id,
-                    voicebot_id=request.voicebot_id,
-                    session_id=request.session_id,
-                    request_event_id=request.request_event_id,
-                    provider=request.provider,  # type: ignore[arg-type]
-                    input_text=request.input_text,
-                    dedupe_key=request.dedupe_key,
-                    metadata=request.metadata,
-                ),
-                speculative_key=request.speculative_key,
-            )
-            task = subagent_lifecycle.schedule(task)
-        except KeyError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        return {"task": subagent_task_to_dict(task), "ok": task.status != "failed"}
-
-    @app.post("/subagent/tasks/{task_id}/confirm-speculative")
-    async def confirm_speculative_subagent_task(task_id: str, request: SpeculativeSubagentConfirmRequest) -> dict[str, Any]:
-        if subagent_coordinator is None:
-            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
-        require_workspace_access(request.workspace_id)
-        try:
-            task = subagent_coordinator.confirm_speculative(
-                task_id,
-                request.workspace_id,
-                final_request_event_id=request.final_request_event_id,
-                final_input_text=request.final_input_text,
-            )
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from None
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        if request.notify_if_terminal and task.status == "completed":
-            await notify_subagent_terminal_task(task)
-        return {"task": subagent_task_to_dict(task), "ok": True}
-
-    @app.post("/subagent/tasks/{task_id}/cancel-speculative")
-    def cancel_speculative_subagent_task(task_id: str, request: SpeculativeSubagentCancelRequest) -> dict[str, Any]:
-        if subagent_coordinator is None:
-            raise HTTPException(status_code=503, detail="Subagent coordinator is not configured")
-        require_workspace_access(request.workspace_id)
-        try:
-            task = subagent_coordinator.cancel_speculative(task_id, request.workspace_id, reason=request.reason)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from None
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        return {"task": subagent_task_to_dict(task), "ok": task.metadata.get("speculative_status") == "cancelled"}
-
-    @app.post("/subagent/tasks/{task_id}/cancel")
-    def cancel_subagent_task(task_id: str, request: SubagentTaskCancelRequest) -> dict[str, Any]:
-        if subagent_lifecycle is None:
-            raise HTTPException(status_code=503, detail="Subagent lifecycle runner is not configured")
-        require_workspace_access(request.workspace_id)
-        try:
-            task = subagent_lifecycle.mark_terminal(subagent_coordinator.cancel(task_id, request.workspace_id))
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from None
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        return {"task": subagent_task_to_dict(task), "ok": task.status == "cancelled"}
-
-    @app.get("/subagent/tasks/lifecycle")
-    def subagent_task_lifecycle(workspace_id: str | None = None, session_id: str | None = None) -> dict[str, Any]:
-        if subagent_lifecycle is None:
-            raise HTTPException(status_code=503, detail="Subagent lifecycle runner is not configured")
-        return {"lifecycle": subagent_lifecycle.snapshot(workspace_id=workspace_id, session_id=session_id)}
-
     @app.get("/agent/tools")
     def agent_tools() -> dict[str, Any]:
         return {"tools": tool_definitions_legacy()}
@@ -3824,6 +3699,17 @@ def create_app(
     tool_executor.register("get_runtime_config", tool_get_runtime_config)
     tool_executor.register("get_agent_task_status", tool_get_agent_task_status)
     tool_executor.register("get_agent_task_summary", tool_get_agent_task_summary)
+
+    app.include_router(
+        create_subagents_router(
+            SubagentsApiContext(
+                subagent_coordinator=subagent_coordinator,
+                subagent_lifecycle=subagent_lifecycle,
+                require_workspace_access=require_workspace_access,
+                notify_subagent_terminal_task=notify_subagent_terminal_task,
+            )
+        )
+    )
 
     unclassified_routes = apply_route_audiences(app.routes)
     app.state.route_audience_issues = unclassified_routes

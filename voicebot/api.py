@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Res
 
 from .agent_tasks import AgentTaskTracker
 from .api_audience import apply_route_audiences
+from .api_calls import CallsApiContext, call_state_payload, create_calls_router
 from .api_contracts import ContractsApiContext, create_contracts_router
 from .api_discovery import DiscoveryApiContext, create_discovery_router
 from .api_models import (
@@ -25,7 +26,6 @@ from .api_models import (
     CompactContextRequest,
     ConversationEvaluationRequest,
     IncomingSessionAdmissionRequest,
-    MultimodalContentRequest,
     PlaybackInterruptRequest,
     PublicVoicebotRoutePatchRequest,
     PublicVoicebotRouteRequest,
@@ -86,14 +86,7 @@ from .internal_auth import (
     validate_internal_api_key,
 )
 from .language import detected_session_language, is_auto_language
-from .multimodal import (
-    ContentDirection,
-    Modality,
-    ModalityCapabilities,
-    MultimodalContent,
-    MultimodalContextStore,
-    validate_multimodal_content,
-)
+from .multimodal import Modality, ModalityCapabilities, MultimodalContextStore
 from .observability import ConversationExpectation, build_timeline, diagnostics_summary, evaluate_conversation, evaluate_slos
 from .progress import ProgressCadenceMemory, normalize_progress_message
 from .public_access import FixedWindowPublicRateLimiter, origin_allowed
@@ -169,7 +162,6 @@ from .workspace_model import (
 )
 
 _MODALITIES = set(get_args(Modality))
-_CONTENT_DIRECTIONS = set(get_args(ContentDirection))
 _API_MULTIMODAL_CAPABILITIES = ModalityCapabilities(
     input=frozenset(_MODALITIES),
     output=frozenset(_MODALITIES),
@@ -630,66 +622,14 @@ def create_app(
     )
     app.include_router(create_contracts_router(ContractsApiContext(runtime_settings=runtime_settings)))
     app.include_router(create_discovery_router(DiscoveryApiContext(app=app)))
-
-    @app.get("/calls")
-    def list_calls() -> dict[str, Any]:
-        return {"calls": registry.snapshots()}
-
-    @app.get("/calls/state-store")
-    def list_stored_call_states(active_only: bool = False) -> dict[str, Any]:
-        return {"calls": registry.stored_snapshots(active_only=active_only)}
-
-    @app.get("/calls/{call_id}")
-    def call_state(call_id: str) -> dict[str, Any]:
-        snapshot = registry.snapshot(call_id)
-        if snapshot is None:
-            raise HTTPException(status_code=404, detail=f"Active call not found: {call_id}")
-        return snapshot
-
-    @app.get("/calls/{call_id}/multimodal")
-    def call_multimodal_context(call_id: str) -> dict[str, Any]:
-        return multimodal_store.get(call_id).to_agent_context()
-
-    @app.post("/calls/{call_id}/multimodal/parts")
-    async def add_call_multimodal_part(call_id: str, request: MultimodalContentRequest) -> dict[str, Any]:
-        if request.modality not in _MODALITIES:
-            raise HTTPException(status_code=400, detail=f"unsupported modality: {request.modality}")
-        if request.direction not in _CONTENT_DIRECTIONS:
-            raise HTTPException(status_code=400, detail=f"unsupported content direction: {request.direction}")
-        part = MultimodalContent(
-            modality=request.modality,  # type: ignore[arg-type]
-            direction=request.direction,  # type: ignore[arg-type]
-            mime_type=request.mime_type,
-            uri=request.uri,
-            text=request.text,
-            metadata=request.metadata,
-        )
-        validation_issues = validate_multimodal_content(part, _API_MULTIMODAL_CAPABILITIES)
-        if validation_issues:
-            raise HTTPException(status_code=400, detail=[issue.to_dict() for issue in validation_issues])
-        try:
-            context = multimodal_store.add_part(
-                call_id,
-                part,
-                workspace_id=request.workspace_id,
-                voicebot_id=request.voicebot_id,
-                session_id=request.session_id,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        event = events.append(
-            call_id,
-            "multimodal_content_added",
-            {
-                "workspace_id": request.workspace_id,
-                "voicebot_id": request.voicebot_id,
-                "session_id": request.session_id,
-                "part": part.to_agent_part(),
-                "part_count": len(context.parts),
-            },
-        )
-        await hub.broadcast(event)
-        return {"context": context.to_agent_context(), "event": event_to_dict(event)}
+    calls_api_context = CallsApiContext(
+        registry=registry,
+        multimodal_store=multimodal_store,
+        events=events,
+        broadcast=hub.broadcast,
+        multimodal_capabilities=_API_MULTIMODAL_CAPABILITIES,
+    )
+    app.include_router(create_calls_router(calls_api_context))
 
     @app.get("/providers")
     def providers() -> dict[str, Any]:
@@ -4014,7 +3954,7 @@ def create_app(
 
     def tool_get_call_state(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
-        return call_state(call_id)
+        return call_state_payload(calls_api_context, call_id)
 
     def tool_get_runtime_config(args: dict[str, Any]) -> dict[str, Any]:
         return config()

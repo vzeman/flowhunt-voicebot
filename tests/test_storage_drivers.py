@@ -20,6 +20,7 @@ from voicebot.runtime_storage import (
     build_provider_config_store,
     build_subagent_task_store,
     build_transcript_store,
+    build_voicebot_session_store,
     build_worker_registry,
     default_storage_registry,
     selected_storage_drivers,
@@ -31,6 +32,7 @@ from voicebot.storage.redis_subagent_tasks import RedisSubagentTaskStore
 from voicebot.storage.redis_worker_registry import RedisWorkerRegistry
 from voicebot.storage.sqlite_events import SQLiteEventStore
 from voicebot.storage.sqlite_provider_config import SQLiteProviderConfigStore
+from voicebot.storage.sqlite_sessions import SQLiteVoicebotSessionStore
 from voicebot.transcripts import TranscriptStore
 from storage_contract_cases import assert_event_store_contract
 
@@ -47,6 +49,9 @@ class StorageDriverTests(unittest.TestCase):
         }
         subagent_task_definitions = {
             definition.driver: definition for definition in registry.definitions_for_family("subagent_tasks")
+        }
+        session_definitions = {
+            definition.driver: definition for definition in registry.definitions_for_family("voicebot_sessions")
         }
         artifact_drivers = {definition.driver for definition in registry.definitions_for_family("audio_artifacts")}
         queue_drivers = {definition.driver for definition in registry.definitions_for_family("worker_queue")}
@@ -65,6 +70,7 @@ class StorageDriverTests(unittest.TestCase):
         self.assertFalse(worker_registry_definitions["flowhunt_db"].implemented)
         self.assertTrue(subagent_task_definitions["redis"].implemented)
         self.assertFalse(subagent_task_definitions["flowhunt_db"].implemented)
+        self.assertTrue(session_definitions["sqlite"].implemented)
         self.assertIn("s3", artifact_drivers)
         self.assertIn("redis", {definition.driver for definition in registry.definitions_for_family("session_leases")})
         self.assertIn("redis_streams", queue_drivers)
@@ -242,6 +248,20 @@ class StorageDriverTests(unittest.TestCase):
             )
 
             self.assertIsInstance(store, SQLiteProviderConfigStore)
+            self.assertEqual(attached_storage_driver(store).driver, "sqlite")
+            self.assertEqual(attached_storage_driver(store).options["database_url"].startswith("sqlite:///"), True)
+            store.close()
+
+    def test_voicebot_session_sqlite_driver_is_buildable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = build_voicebot_session_store(
+                Settings(
+                    voicebot_session_store_provider="sqlite",
+                    relational_database_url=f"sqlite:///{directory}/sessions.sqlite3",
+                )
+            )
+
+            self.assertIsInstance(store, SQLiteVoicebotSessionStore)
             self.assertEqual(attached_storage_driver(store).driver, "sqlite")
             self.assertEqual(attached_storage_driver(store).options["database_url"].startswith("sqlite:///"), True)
             store.close()

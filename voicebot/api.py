@@ -18,6 +18,7 @@ from .api_agent_tasks import (
     agent_task_summary_payload,
     create_agent_tasks_router,
 )
+from .api_agent_tools import AgentToolsApiContext, create_agent_tools_router
 from .api_audience import apply_route_audiences
 from .api_calls import CallsApiContext, call_state_payload, create_calls_router
 from .api_context import ContextApiContext, create_context_router
@@ -25,7 +26,6 @@ from .api_contracts import ContractsApiContext, create_contracts_router
 from .api_discovery import DiscoveryApiContext, create_discovery_router
 from .api_models import (
     AgentResponseRequest,
-    AgentToolRequest,
     CallControlRequest,
     ConversationEvaluationRequest,
     IncomingSessionAdmissionRequest,
@@ -144,7 +144,6 @@ from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLife
 from .tool_executor import AgentToolExecutor
 from .transcripts import TranscriptStore
 from .transports import transport_catalog
-from .tools import tool_definitions_json_schema, tool_definitions_legacy
 from .webrtc import WebRTCSessionManager
 from .webrtc_media_plane import webrtc_media_plane_payload
 from .workspace_access import WorkspaceAccessPolicy, workspace_access_policy_from_settings
@@ -2302,21 +2301,6 @@ def create_app(
             )
         )
 
-    @app.get("/agent/tools")
-    def agent_tools() -> dict[str, Any]:
-        return {"tools": tool_definitions_legacy()}
-
-    @app.get("/agent/tools/schema")
-    def agent_tool_schema() -> dict[str, Any]:
-        return {"tools": tool_definitions_json_schema()}
-
-    @app.post("/agent/tools/{tool_name}")
-    async def agent_tool(tool_name: str, request: AgentToolRequest) -> dict[str, Any]:
-        try:
-            return await tool_executor.execute(tool_name, request.arguments)
-        except KeyError:
-            raise HTTPException(status_code=404, detail=f"unknown agent tool: {tool_name}") from None
-
     @app.post("/calls/{call_id}/responses")
     async def submit_response(call_id: str, request: AgentResponseRequest) -> dict[str, Any]:
         session = registry.get(call_id)
@@ -3691,6 +3675,7 @@ def create_app(
     tool_executor.register("get_agent_task_status", tool_get_agent_task_status)
     tool_executor.register("get_agent_task_summary", tool_get_agent_task_summary)
 
+    app.include_router(create_agent_tools_router(AgentToolsApiContext(tool_executor=tool_executor)))
     app.include_router(
         create_subagents_router(
             SubagentsApiContext(

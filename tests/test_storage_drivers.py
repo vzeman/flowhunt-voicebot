@@ -89,7 +89,7 @@ class StorageDriverTests(unittest.TestCase):
         self.assertTrue(transcript_definitions["sqlite"].implemented)
         self.assertTrue(sip_trunk_definitions["sqlite"].implemented)
         self.assertTrue(artifact_definitions["s3"].implemented)
-        self.assertFalse(artifact_definitions["object_storage"].implemented)
+        self.assertTrue(artifact_definitions["object_storage"].implemented)
         self.assertIn("redis", {definition.driver for definition in registry.definitions_for_family("session_leases")})
         self.assertIn("redis_streams", queue_drivers)
         self.assertIn("flowhunt_queue", queue_drivers)
@@ -136,7 +136,9 @@ class StorageDriverTests(unittest.TestCase):
 
         self.assertEqual(session_leases["redis"]["runtime_dependencies"], ["redis"])
         self.assertEqual(artifacts["s3"]["runtime_dependencies"], ["boto3"])
+        self.assertEqual(artifacts["object_storage"]["runtime_dependencies"], ["boto3"])
         self.assertTrue(artifacts["s3"]["selectable"])
+        self.assertTrue(artifacts["object_storage"]["selectable"])
 
     def test_planned_driver_selection_is_visible_but_not_buildable(self) -> None:
         settings = Settings(agent_task_store_provider="flowhunt_db")
@@ -316,6 +318,24 @@ class StorageDriverTests(unittest.TestCase):
         self.assertEqual(selection.options["bucket"], "voicebot-audio")
         self.assertEqual(selection.options["endpoint"], "https://s3.example.com")
         self.assertEqual(selection.options["region"], "eu-central-1")
+
+    def test_object_storage_audio_artifact_driver_is_buildable(self) -> None:
+        with patch("voicebot.storage.artifacts._s3_client", return_value=FakeS3()):
+            store = build_audio_artifact_store(
+                Settings(
+                    audio_artifact_store_provider="object_storage",
+                    object_storage_bucket="voicebot-audio",
+                    object_storage_endpoint="https://object-storage.example.com",
+                    object_storage_region="eu-central-1",
+                )
+            )
+
+        selection = attached_storage_driver(store)
+        self.assertIsInstance(store, S3ArtifactStore)
+        self.assertEqual(selection.driver, "object_storage")
+        self.assertEqual(selection.configured_driver, "object_storage")
+        self.assertEqual(selection.options["bucket"], "voicebot-audio")
+        self.assertEqual(selection.options["endpoint"], "https://object-storage.example.com")
 
     def test_s3_audio_artifact_selection_reports_object_storage_options(self) -> None:
         payload = storage_drivers_payload(

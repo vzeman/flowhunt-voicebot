@@ -662,6 +662,7 @@ def create_app(
                 events=events,
                 transcripts=transcripts,
                 subagent_coordinator=subagent_coordinator,
+                runtime_settings=runtime_settings,
                 require_workspace_access=require_workspace_access,
                 durable_call_events=durable_call_events,
                 validated_limit=validated_limit,

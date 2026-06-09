@@ -451,8 +451,12 @@ def default_transport_registry(enabled_kinds: set[TransportKind] | None = None) 
     return registry
 
 
-def transport_catalog(*, include_health: bool = False) -> dict[str, Any]:
-    return default_transport_registry().to_dict(include_health=include_health)
+def transport_catalog(
+    *,
+    include_health: bool = False,
+    enabled_kinds: set[TransportKind] | None = None,
+) -> dict[str, Any]:
+    return default_transport_registry(enabled_kinds=enabled_kinds).to_dict(include_health=include_health)
 
 
 def _optional_str(value: Any) -> str | None:

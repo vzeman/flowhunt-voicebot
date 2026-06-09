@@ -16,6 +16,7 @@ from voicebot.api_surface import (
     public_endpoints_are_workspace_scoped,
 )
 from voicebot.calls import CallRegistry
+from voicebot.config import Settings
 from voicebot.events import EventStore
 from voicebot.transcripts import TranscriptStore
 
@@ -177,7 +178,18 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(payload["transports"]["asterisk_audiosocket"]["health"]["status"], "ready")
         self.assertNotIn("health", payload["transports"]["twilio"])
 
-    def build_client(self) -> TestClient:
+    def test_voicebot_transport_catalog_endpoint_reflects_enabled_transport_settings(self) -> None:
+        response = self.build_client(Settings(enabled_transports=("webrtc",))).get(
+            "/workspaces/workspace-1/voicebots/voicebot-1/transports"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["transports"]["webrtc"]["enabled"])
+        self.assertFalse(payload["transports"]["asterisk_audiosocket"]["enabled"])
+        self.assertFalse(payload["transports"]["twilio"]["enabled"])
+
+    def build_client(self, settings: Settings | None = None) -> TestClient:
         app = create_app(
             EventStore(max_context_events=20),
             CallRegistry(),
@@ -185,6 +197,7 @@ class ApiSurfaceTests(unittest.TestCase):
             WebSocketHub(),
             TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
             None,
+            settings,
         )
         return TestClient(app)
 

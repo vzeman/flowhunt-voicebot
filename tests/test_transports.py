@@ -200,6 +200,13 @@ class TransportContractTests(unittest.TestCase):
         self.assertEqual(catalog["transports"]["asterisk_audiosocket"]["health"]["status"], "ready")
         self.assertNotIn("health", catalog["transports"]["twilio"])
 
+    def test_transport_catalog_reflects_configured_enabled_transports(self) -> None:
+        catalog = transport_catalog(enabled_kinds={"webrtc"})
+
+        self.assertTrue(catalog["transports"]["webrtc"]["enabled"])
+        self.assertFalse(catalog["transports"]["asterisk_audiosocket"]["enabled"])
+        self.assertFalse(catalog["transports"]["twilio"]["enabled"])
+
     def test_default_transport_registry_selects_enabled_implemented_transports(self) -> None:
         registry = default_transport_registry(enabled_kinds={"webrtc"})
         disabled_registry = default_transport_registry(enabled_kinds=set())

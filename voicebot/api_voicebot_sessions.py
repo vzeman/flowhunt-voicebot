@@ -16,6 +16,7 @@ class VoicebotSessionsApiContext:
     events: Any
     transcripts: Any
     subagent_coordinator: Any
+    runtime_settings: Any
     require_workspace_access: Callable[[str], None]
     durable_call_events: Callable[..., list[VoicebotEvent]]
     validated_limit: Callable[[int], int]
@@ -142,7 +143,10 @@ def create_voicebot_sessions_router(context: VoicebotSessionsApiContext) -> APIR
         return {
             "workspace_id": workspace_id,
             "voicebot_id": voicebot_id,
-            **transport_catalog(include_health=include_health),
+            **transport_catalog(
+                include_health=include_health,
+                enabled_kinds=set(context.runtime_settings.enabled_transports),
+            ),
         }
 
     return router

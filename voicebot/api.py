@@ -43,6 +43,7 @@ from .api_models import (
 )
 from .api_events import EventsApiContext, create_events_router, events_payload, metrics_payload
 from .api_providers import ProvidersApiContext, create_providers_router
+from .api_public_widget import PublicWidgetApiContext, create_public_widget_router
 from .api_runtime import RuntimeApiContext, create_runtime_router, runtime_config_payload
 from .api_scaling import ScalingApiContext, create_scaling_router
 from .api_security import SecurityApiContext, create_security_router
@@ -784,55 +785,6 @@ def create_app(
             "recent_events": [event_to_dict(event) for event in events.list_events(limit=80, workspace_id=selected_workspace or None)],
         }
 
-    @app.get("/.well-known/flowhunt-voicebot")
-    def public_voicebot_bootstrap(request: Request) -> dict[str, Any]:
-        route = resolve_public_voicebot_route(request)
-        if route is None:
-            events.append(
-                "system",
-                "session_admission_decided",
-                {
-                    "transport": "webrtc",
-                    "decision": "reject",
-                    "reason": "public_route_not_found",
-                    "host": request.headers.get("x-forwarded-host") or request.headers.get("host") or "",
-                },
-            )
-            raise HTTPException(status_code=404, detail="Public voicebot route not found")
-        voicebot = voicebot_store.get(route.workspace_id, route.voicebot_id)
-        widget_config = caller_safe_widget_config(route, voicebot.display_name if voicebot else "")
-        return {
-            "route_id": route.route_id,
-            "workspace_id": route.workspace_id,
-            "voicebot_id": route.voicebot_id,
-            "channel_id": route.channel_id,
-            "display_name": voicebot.display_name if voicebot else "",
-            "transport": "webrtc",
-            "session_endpoint": "/webrtc/sessions",
-            "widget_script": "/widget.js",
-            "widget_page": "/widget",
-            "widget": widget_config,
-            "ice_servers": list(runtime_settings.webrtc_stun_urls),
-            "modalities": {"input": ["audio"], "output": ["audio"]},
-            "limits": {
-                "sdp_max_bytes": runtime_settings.public_sdp_max_bytes,
-                "rate_limit_per_minute": runtime_settings.public_session_rate_limit_per_minute,
-                "max_concurrent_sessions": runtime_settings.public_voicebot_max_concurrent_sessions,
-            },
-        }
-
-    @app.get("/widget.js")
-    def public_widget_script() -> Response:
-        return Response(
-            content=VOICEBOT_WIDGET_JS,
-            media_type="application/javascript; charset=utf-8",
-            headers={"Cache-Control": "public, max-age=3600"},
-        )
-
-    @app.get("/widget")
-    def public_widget_page() -> HTMLResponse:
-        return HTMLResponse(WIDGET_PAGE)
-
     def resolve_public_voicebot_route(request: Request) -> PublicVoicebotRoute | None:
         host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
         path = (
@@ -853,27 +805,6 @@ def create_app(
         if channel is None or not channel.enabled:
             raise HTTPException(status_code=403, detail="Public route channel is disabled")
         return route
-
-    def caller_safe_widget_config(route: PublicVoicebotRoute, display_name: str) -> dict[str, Any]:
-        metadata = route.metadata if isinstance(route.metadata, dict) else {}
-        theme = metadata.get("theme") if isinstance(metadata.get("theme"), dict) else {}
-        primary_color = str(theme.get("primary_color") or metadata.get("primary_color") or "#0969da")[:32]
-        placement = str(theme.get("placement") or metadata.get("placement") or "bottom-right")[:32]
-        launcher_label = str(metadata.get("launcher_label") or display_name or "Start voice call")[:80]
-        return {
-            "enabled": route.status == "active",
-            "display_name": display_name,
-            "launcher_label": launcher_label,
-            "welcome_label": str(metadata.get("welcome_label") or "Voice call")[:80],
-            "locale": str(metadata.get("locale") or "")[:32],
-            "theme": {
-                "primary_color": primary_color,
-                "placement": placement,
-            },
-            "show_captions": bool(metadata.get("show_captions", False)),
-            "visitor_metadata_max_bytes": 2048,
-            "recording_visible_to_visitor": bool(metadata.get("recording_visible_to_visitor", False)),
-        }
 
     def sanitized_public_visitor_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         reserved = {
@@ -1086,6 +1017,19 @@ def create_app(
                 **(extra or {}),
             },
         )
+
+    app.include_router(
+        create_public_widget_router(
+            PublicWidgetApiContext(
+                events=events,
+                voicebot_store=voicebot_store,
+                settings=runtime_settings,
+                resolve_public_voicebot_route=resolve_public_voicebot_route,
+                widget_script=VOICEBOT_WIDGET_JS,
+                widget_page=WIDGET_PAGE,
+            )
+        )
+    )
 
     app.include_router(
         create_webrtc_router(

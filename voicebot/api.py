@@ -55,6 +55,7 @@ from .api_transcripts import (
 )
 from .api_voicebot_runtime_config import VoicebotRuntimeConfigApiContext, create_voicebot_runtime_config_router
 from .api_voicebot_sessions import VoicebotSessionsApiContext, create_voicebot_sessions_router
+from .api_webrtc import WebRTCApiContext, create_webrtc_router
 from .asterisk_control import AsteriskAMI, ControlResult
 from .calls import AgentResponse, CallRegistry
 from .config import Settings, redacted_settings
@@ -115,7 +116,6 @@ from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner, TaskLife
 from .tool_executor import AgentToolExecutor
 from .transcripts import TranscriptStore
 from .webrtc import WebRTCSessionManager
-from .webrtc_media_plane import webrtc_media_plane_payload
 from .workspace_access import WorkspaceAccessPolicy, workspace_access_policy_from_settings
 from .workspace_model import (
     ChannelResolver,
@@ -1091,41 +1091,6 @@ def create_app(
     def public_widget_page() -> HTMLResponse:
         return HTMLResponse(WIDGET_PAGE)
 
-    @app.get("/webrtc/sessions")
-    def list_webrtc_sessions() -> dict[str, Any]:
-        if webrtc is None:
-            raise HTTPException(status_code=503, detail="WebRTC transport is not configured")
-        return {"sessions": webrtc.snapshots()}
-
-    @app.get("/webrtc/media-plane")
-    def get_webrtc_media_plane() -> dict[str, Any]:
-        return webrtc_media_plane_payload()
-
-    @app.post("/webrtc/sessions")
-    async def create_webrtc_session(request: WebRTCOfferRequest, http_request: Request) -> dict[str, Any]:
-        if webrtc is None:
-            raise HTTPException(status_code=503, detail="WebRTC transport is not configured")
-        if request.type != "offer":
-            raise HTTPException(status_code=400, detail="WebRTC session type must be offer")
-        try:
-            metadata = dict(request.metadata or {})
-            route = resolve_public_voicebot_route(http_request)
-            if route is not None:
-                visitor_metadata = sanitized_public_visitor_metadata(metadata)
-                metadata = {"visitor_metadata": visitor_metadata} if visitor_metadata else {}
-                enforce_public_session_admission(route, http_request, request)
-                metadata.update(route.event_data())
-                metadata["public_route_resolved"] = True
-            workspace_id = non_empty_str(metadata.get("workspace_id"))
-            voicebot_id = non_empty_str(metadata.get("voicebot_id"))
-            if workspace_id:
-                require_workspace_access(workspace_id)
-            if workspace_id and voicebot_id:
-                metadata.setdefault("prompt_config", effective_prompt_config(workspace_id, voicebot_id).as_dict())
-            return await webrtc.create_session(request.sdp, request.type, metadata)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from None
-
     def resolve_public_voicebot_route(request: Request) -> PublicVoicebotRoute | None:
         host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
         path = (
@@ -1380,14 +1345,19 @@ def create_app(
             },
         )
 
-    @app.delete("/webrtc/sessions/{session_id}")
-    async def delete_webrtc_session(session_id: str) -> dict[str, Any]:
-        if webrtc is None:
-            raise HTTPException(status_code=503, detail="WebRTC transport is not configured")
-        closed = await webrtc.close_session(session_id)
-        if not closed:
-            raise HTTPException(status_code=404, detail=f"WebRTC session not found: {session_id}")
-        return {"closed": True, "session_id": session_id}
+    app.include_router(
+        create_webrtc_router(
+            WebRTCApiContext(
+                webrtc=webrtc,
+                require_workspace_access=require_workspace_access,
+                resolve_public_voicebot_route=resolve_public_voicebot_route,
+                sanitized_public_visitor_metadata=sanitized_public_visitor_metadata,
+                enforce_public_session_admission=enforce_public_session_admission,
+                effective_prompt_config=effective_prompt_config,
+                non_empty_str=non_empty_str,
+            )
+        )
+    )
 
     @app.post("/calls/{call_id}/responses")
     async def submit_response(call_id: str, request: AgentResponseRequest) -> dict[str, Any]:

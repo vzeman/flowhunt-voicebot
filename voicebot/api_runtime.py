@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from .api_models import DrainRequest
+from .config import redacted_settings
 from .deployment_topology import deployment_topology_payload, role_readiness_payload
 from .drain import DrainState, rollout_contract
 from .events import event_to_dict
@@ -77,6 +78,10 @@ def create_runtime_router(context: RuntimeApiContext) -> APIRouter:
     def liveness() -> dict[str, Any]:
         return {"ok": True, "draining": context.drain_state.draining}
 
+    @router.get("/config")
+    def config() -> dict[str, Any]:
+        return runtime_config_payload(context)
+
     @router.get("/deployment/topology")
     def deployment_topology() -> dict[str, Any]:
         return deployment_topology_payload(context.runtime_settings)
@@ -129,3 +134,7 @@ def create_runtime_router(context: RuntimeApiContext) -> APIRouter:
         return storage_drivers_payload(context.runtime_settings)
 
     return router
+
+
+def runtime_config_payload(context: RuntimeApiContext) -> dict[str, Any]:
+    return {"settings": redacted_settings(context.runtime_settings)}

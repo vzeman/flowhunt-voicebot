@@ -28,6 +28,7 @@ from .redis_worker_registry import RedisWorkerRegistry
 from .sqlite_events import SQLiteEventStore
 from .sqlite_provider_config import SQLiteProviderConfigStore
 from .sqlite_sessions import SQLiteVoicebotSessionStore
+from .sqlite_sip_trunks import SQLiteSipTrunkStore
 from .sqlite_transcripts import SQLiteTranscriptStore
 from .protocols import (
     AgentTaskStoreProtocol,
@@ -77,6 +78,7 @@ __all__ = [
     "StoreHealth",
     "SQLiteEventStore",
     "SQLiteProviderConfigStore",
+    "SQLiteSipTrunkStore",
     "SQLiteTranscriptStore",
     "SQLiteVoicebotSessionStore",
     "SubagentTaskStoreProtocol",

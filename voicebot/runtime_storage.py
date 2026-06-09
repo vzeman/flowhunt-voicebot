@@ -19,6 +19,7 @@ from .storage import (
     RedisWorkerRegistry,
     SQLiteEventStore,
     SQLiteProviderConfigStore,
+    SQLiteSipTrunkStore,
     SQLiteTranscriptStore,
     SQLiteVoicebotSessionStore,
     StorageDriverDefinition,
@@ -78,7 +79,7 @@ def default_storage_registry() -> StorageRegistry:
             _definition("provider_config", "postgres", "shared", True, False, True, "PostgreSQL provider config records", implemented=False),
             _definition("provider_config", "flowhunt_db", "shared", True, False, True, "versioned provider config records", implemented=False),
             _definition("sip_trunks", "json", "node", False, True, False, "local trunk registry plus generated PJSIP include"),
-            _definition("sip_trunks", "sqlite", "node", False, True, False, "SQLite trunk records plus generated PJSIP include", implemented=False),
+            _definition("sip_trunks", "sqlite", "node", False, True, False, "SQLite trunk records plus generated PJSIP include"),
             _definition("sip_trunks", "postgres", "shared", True, False, True, "PostgreSQL trunk records with secret references", implemented=False),
             _definition("sip_trunks", "flowhunt_db", "shared", True, False, True, "workspace-scoped trunk records", implemented=False),
             _definition("subagent_tasks", "memory", "process", False, True, False, "in-memory delegated task lifecycle"),
@@ -361,6 +362,17 @@ def build_sip_trunk_store(settings: Settings) -> SipTrunkStore:
             SipTrunkStore(settings.sip_trunk_registry_path, settings.sip_trunk_pjsip_include_path),
             selection,
         )
+    if driver == "sqlite":
+        return attach_storage_driver(
+            SQLiteSipTrunkStore(settings.relational_database_url, settings.sip_trunk_pjsip_include_path),
+            storage_driver_selection(
+                "sip_trunks",
+                driver,
+                settings.sip_trunk_store_provider,
+                None,
+                {"database_url": settings.relational_database_url},
+            ),
+        )
     raise_unsupported_storage("VOICEBOT_SIP_TRUNK_STORE_PROVIDER", settings.sip_trunk_store_provider, selection)
 
 
@@ -506,7 +518,12 @@ def selected_storage_drivers(settings: Settings) -> dict[str, StorageDriverSelec
             "sip_trunks",
             normalize_driver_name(settings.sip_trunk_store_provider),
             settings.sip_trunk_store_provider,
-            settings.sip_trunk_registry_path,
+            settings.sip_trunk_registry_path
+            if normalize_driver_name(settings.sip_trunk_store_provider) not in {"sqlite", "postgres"}
+            else None,
+            {"database_url": settings.relational_database_url}
+            if normalize_driver_name(settings.sip_trunk_store_provider) in {"sqlite", "postgres"}
+            else None,
         ),
         "subagent_tasks": storage_driver_selection(
             "subagent_tasks",

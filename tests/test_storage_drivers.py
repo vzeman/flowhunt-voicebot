@@ -19,6 +19,7 @@ from voicebot.runtime_storage import (
     build_call_state_store,
     build_event_store,
     build_provider_config_store,
+    build_sip_trunk_store,
     build_subagent_task_store,
     build_transcript_store,
     build_voicebot_session_store,
@@ -36,6 +37,7 @@ from voicebot.storage.redis_worker_registry import RedisWorkerRegistry
 from voicebot.storage.sqlite_events import SQLiteEventStore
 from voicebot.storage.sqlite_provider_config import SQLiteProviderConfigStore
 from voicebot.storage.sqlite_sessions import SQLiteVoicebotSessionStore
+from voicebot.storage.sqlite_sip_trunks import SQLiteSipTrunkStore
 from voicebot.storage.sqlite_transcripts import SQLiteTranscriptStore
 from voicebot.transcripts import TranscriptStore
 from storage_contract_cases import assert_event_store_contract
@@ -63,6 +65,9 @@ class StorageDriverTests(unittest.TestCase):
         artifact_definitions = {
             definition.driver: definition for definition in registry.definitions_for_family("audio_artifacts")
         }
+        sip_trunk_definitions = {
+            definition.driver: definition for definition in registry.definitions_for_family("sip_trunks")
+        }
         queue_drivers = {definition.driver for definition in registry.definitions_for_family("worker_queue")}
 
         self.assertIn("jsonl", event_definitions)
@@ -82,6 +87,7 @@ class StorageDriverTests(unittest.TestCase):
         self.assertFalse(subagent_task_definitions["flowhunt_db"].implemented)
         self.assertTrue(session_definitions["sqlite"].implemented)
         self.assertTrue(transcript_definitions["sqlite"].implemented)
+        self.assertTrue(sip_trunk_definitions["sqlite"].implemented)
         self.assertTrue(artifact_definitions["s3"].implemented)
         self.assertFalse(artifact_definitions["object_storage"].implemented)
         self.assertIn("redis", {definition.driver for definition in registry.definitions_for_family("session_leases")})
@@ -366,6 +372,21 @@ class StorageDriverTests(unittest.TestCase):
             )
 
             self.assertIsInstance(store, SQLiteTranscriptStore)
+            self.assertEqual(attached_storage_driver(store).driver, "sqlite")
+            self.assertEqual(attached_storage_driver(store).options["database_url"].startswith("sqlite:///"), True)
+            store.close()
+
+    def test_sip_trunk_sqlite_driver_is_buildable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = build_sip_trunk_store(
+                Settings(
+                    sip_trunk_store_provider="sqlite",
+                    relational_database_url=f"sqlite:///{directory}/sip_trunks.sqlite3",
+                    sip_trunk_pjsip_include_path=f"{directory}/pjsip-trunks.conf",
+                )
+            )
+
+            self.assertIsInstance(store, SQLiteSipTrunkStore)
             self.assertEqual(attached_storage_driver(store).driver, "sqlite")
             self.assertEqual(attached_storage_driver(store).options["database_url"].startswith("sqlite:///"), True)
             store.close()

@@ -52,25 +52,25 @@ def default_storage_registry() -> StorageRegistry:
             _definition("voicebot_sessions", "flowhunt_db", "shared", True, False, True, "workspace-scoped session table", implemented=False),
             _definition("session_leases", "memory", "process", False, True, False, "best-effort in-memory leases"),
             _definition("session_leases", "json", "node", False, True, False, "local JSON leases"),
-            _definition("session_leases", "redis", "shared", True, False, True, "atomic lease-capable KV"),
+            _definition("session_leases", "redis", "shared", True, False, True, "atomic lease-capable KV", runtime_dependencies=("redis",)),
             _definition("agent_tasks", "memory", "process", False, True, False, "in-memory task claims/responded ids"),
             _definition("agent_tasks", "json", "node", False, True, False, "local JSON task claims/responded ids"),
-            _definition("agent_tasks", "redis", "shared", True, False, True, "shared claim and responded-id state"),
+            _definition("agent_tasks", "redis", "shared", True, False, True, "shared claim and responded-id state", runtime_dependencies=("redis",)),
             _definition("agent_tasks", "flowhunt_db", "shared", True, False, True, "durable task response table", implemented=False),
             _definition("worker_queue", "memory", "process", False, True, False, "in-memory queue"),
             _definition("worker_queue", "json", "node", False, True, False, "local JSON queue"),
-            _definition("worker_queue", "redis", "shared", True, False, True, "shared Redis queue state"),
+            _definition("worker_queue", "redis", "shared", True, False, True, "shared Redis queue state", runtime_dependencies=("redis",)),
             _definition("worker_queue", "redis_streams", "shared", True, False, True, "Redis Streams queue", implemented=False),
             _definition("worker_queue", "nats_jetstream", "shared", True, False, True, "NATS JetStream queue", implemented=False),
             _definition("worker_queue", "rabbitmq", "shared", True, False, True, "RabbitMQ queue", implemented=False),
             _definition("worker_queue", "flowhunt_queue", "shared", True, False, True, "FlowHunt managed queue", implemented=False),
             _definition("worker_registry", "memory", "process", False, True, False, "in-memory worker heartbeats"),
             _definition("worker_registry", "json", "node", False, True, False, "local JSON worker heartbeats"),
-            _definition("worker_registry", "redis", "shared", True, False, True, "shared heartbeat registry"),
+            _definition("worker_registry", "redis", "shared", True, False, True, "shared heartbeat registry", runtime_dependencies=("redis",)),
             _definition("worker_registry", "flowhunt_db", "shared", True, False, True, "durable worker records", implemented=False),
             _definition("call_states", "memory", "process", False, True, False, "in-memory active call snapshots"),
             _definition("call_states", "json", "node", False, True, False, "local JSON active call snapshots"),
-            _definition("call_states", "redis", "shared", True, False, True, "shared active call snapshots"),
+            _definition("call_states", "redis", "shared", True, False, True, "shared active call snapshots", runtime_dependencies=("redis",)),
             _definition("call_states", "flowhunt_db", "shared", True, False, True, "durable call state snapshots", implemented=False),
             _definition("provider_config", "memory", "process", False, True, False, "in-memory provider config"),
             _definition("provider_config", "json", "node", False, True, False, "local JSON provider config records"),
@@ -84,11 +84,11 @@ def default_storage_registry() -> StorageRegistry:
             _definition("subagent_tasks", "memory", "process", False, True, False, "in-memory delegated task lifecycle"),
             _definition("subagent_tasks", "json", "node", False, True, False, "local JSON delegated task lifecycle"),
             _definition("subagent_tasks", "flowhunt_db", "shared", True, False, True, "durable delegated task records", implemented=False),
-            _definition("subagent_tasks", "redis", "shared", True, False, True, "shared delegated task coordination"),
+            _definition("subagent_tasks", "redis", "shared", True, False, True, "shared delegated task coordination", runtime_dependencies=("redis",)),
             _definition("subagent_tasks", "flowhunt_queue", "shared", True, False, True, "FlowHunt task queue handoff", implemented=False),
             _definition("audio_artifacts", "filesystem", "node", False, True, False, "local filesystem artifacts/cache"),
             _definition("audio_artifacts", "object_storage", "shared", True, False, True, "managed object storage", implemented=False),
-            _definition("audio_artifacts", "s3", "shared", True, False, True, "S3-compatible object storage"),
+            _definition("audio_artifacts", "s3", "shared", True, False, True, "S3-compatible object storage", runtime_dependencies=("boto3",)),
         ]
     )
 
@@ -103,6 +103,7 @@ def _definition(
     consistency: str,
     *,
     implemented: bool = True,
+    runtime_dependencies: tuple[str, ...] = (),
 ) -> StorageDriverDefinition:
     return StorageDriverDefinition(
         family=family,
@@ -113,6 +114,7 @@ def _definition(
         supports_production=supports_production,
         consistency=consistency,
         implemented=implemented,
+        runtime_dependencies=runtime_dependencies,
     )
 
 

@@ -12,4 +12,5 @@ soundfile
 supertonic
 uvicorn[standard]
 redis
+boto3
 pytest

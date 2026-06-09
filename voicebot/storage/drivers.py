@@ -26,6 +26,7 @@ class StorageDriverDefinition:
     implemented: bool = True
     idempotency_fields: tuple[str, ...] = ()
     required_scope_fields: tuple[str, ...] = ()
+    runtime_dependencies: tuple[str, ...] = ()
     notes: str = ""
 
     def key(self) -> tuple[str, str]:
@@ -40,9 +41,13 @@ class StorageDriverDefinition:
             "supports_local_dev": self.supports_local_dev,
             "supports_production": self.supports_production,
             "implemented": self.implemented,
+            "status": "implemented" if self.implemented else "planned",
+            "selectable": self.implemented,
+            "unavailable_reason": "" if self.implemented else "planned_not_implemented",
             "consistency": self.consistency,
             "idempotency_fields": list(self.idempotency_fields),
             "required_scope_fields": list(self.required_scope_fields),
+            "runtime_dependencies": list(self.runtime_dependencies),
             "notes": self.notes,
         }
 

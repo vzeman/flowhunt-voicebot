@@ -105,9 +105,32 @@ class StorageDriverTests(unittest.TestCase):
         }
 
         self.assertTrue(events["jsonl"]["implemented"])
+        self.assertEqual(events["jsonl"]["status"], "implemented")
+        self.assertTrue(events["jsonl"]["selectable"])
+        self.assertEqual(events["jsonl"]["unavailable_reason"], "")
         self.assertTrue(events["sqlite"]["implemented"])
         self.assertFalse(events["postgres"]["implemented"])
+        self.assertEqual(events["postgres"]["status"], "planned")
+        self.assertFalse(events["postgres"]["selectable"])
+        self.assertEqual(events["postgres"]["unavailable_reason"], "planned_not_implemented")
         self.assertFalse(queues["redis_streams"]["implemented"])
+        self.assertEqual(queues["redis_streams"]["status"], "planned")
+
+    def test_implemented_external_drivers_report_runtime_dependencies(self) -> None:
+        payload = storage_drivers_payload(Settings())
+
+        session_leases = {
+            definition["driver"]: definition
+            for definition in payload["registry"]["families"]["session_leases"]
+        }
+        artifacts = {
+            definition["driver"]: definition
+            for definition in payload["registry"]["families"]["audio_artifacts"]
+        }
+
+        self.assertEqual(session_leases["redis"]["runtime_dependencies"], ["redis"])
+        self.assertEqual(artifacts["s3"]["runtime_dependencies"], ["boto3"])
+        self.assertTrue(artifacts["s3"]["selectable"])
 
     def test_planned_driver_selection_is_visible_but_not_buildable(self) -> None:
         settings = Settings(agent_task_store_provider="flowhunt_db")

@@ -248,12 +248,31 @@ def create_scaling_router(context: ScalingApiContext) -> APIRouter:
         return {
             "expected_owner": expected_owner,
             "sessions": rows,
-            "summary": {
-                "total": len(rows),
-                "owned": sum(1 for row in rows if row["status"] == "owned"),
-                "missing": sum(1 for row in rows if row["status"] == "missing"),
-                "owner_mismatch": sum(1 for row in rows if row["status"] == "owner_mismatch"),
-                "unscoped": sum(1 for row in rows if row["status"] == "unscoped"),
+            "summary": _ownership_summary(rows),
+        }
+
+    @router.get("/scaling/multi-worker-readiness")
+    def scaling_multi_worker_readiness(expected_owner: str | None = None) -> dict[str, Any]:
+        event_id_strategy = _event_id_strategy(context.events)
+        rows = audit_session_ownership(context.registry.snapshots(), context.session_lease_store, expected_owner=expected_owner)
+        summary = _ownership_summary(rows)
+        blocking_reasons: list[str] = []
+        if not event_id_strategy.get("collision_safe_across_processes", False):
+            blocking_reasons.append("event_ids_not_process_safe")
+        if summary["missing"] > 0:
+            blocking_reasons.append("active_sessions_missing_leases")
+        if summary["owner_mismatch"] > 0:
+            blocking_reasons.append("active_sessions_owned_by_other_workers")
+        if summary["unscoped"] > 0:
+            blocking_reasons.append("active_sessions_missing_workspace_scope")
+        return {
+            "multi_worker_ready": not blocking_reasons,
+            "expected_owner": expected_owner,
+            "blocking_reasons": blocking_reasons,
+            "event_id_strategy": event_id_strategy,
+            "session_ownership": {
+                "summary": summary,
+                "sessions": rows,
             },
         }
 
@@ -485,6 +504,29 @@ def _validated_channel_kind(value: str) -> ChannelKind:
     if value not in get_args(ChannelKind):
         raise ValueError(f"unsupported channel kind: {value}")
     return value  # type: ignore[return-value]
+
+
+def _event_id_strategy(events: Any) -> dict[str, Any]:
+    strategy = getattr(events, "event_id_strategy", None)
+    if not callable(strategy):
+        return {
+            "name": "unknown",
+            "scope": "unknown",
+            "monotonic": False,
+            "collision_safe_across_processes": False,
+            "collision_safe_across_nodes": False,
+        }
+    return dict(strategy())
+
+
+def _ownership_summary(rows: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "total": len(rows),
+        "owned": sum(1 for row in rows if row["status"] == "owned"),
+        "missing": sum(1 for row in rows if row["status"] == "missing"),
+        "owner_mismatch": sum(1 for row in rows if row["status"] == "owner_mismatch"),
+        "unscoped": sum(1 for row in rows if row["status"] == "unscoped"),
+    }
 
 
 def _backpressure_key_from_request(request: ScalingBackpressureRequest) -> str:

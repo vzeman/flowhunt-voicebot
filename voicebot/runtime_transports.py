@@ -11,7 +11,9 @@ from .processor_registry import ProcessorSpec, processor_specs_from_config
 from .stt import STTProvider
 from .transports import (
     ASTERISK_AUDIOSOCKET_CAPABILITIES,
+    TRANSPORT_ADAPTER_CONTRACTS,
     TRANSPORT_CAPABILITIES,
+    TRANSPORT_UNAVAILABLE_REASONS,
     WEBRTC_CAPABILITIES,
     CallControlRequest,
     CallControlResult,
@@ -190,7 +192,13 @@ def build_runtime_transport_registry(
     for kind in get_args(TransportKind):
         if kind in {"asterisk_audiosocket", "webrtc", "local"}:
             continue
-        registry.register_planned(kind, TRANSPORT_CAPABILITIES[kind], enabled=kind in enabled)
+        registry.register_planned(
+            kind,
+            TRANSPORT_CAPABILITIES[kind],
+            enabled=kind in enabled,
+            adapter_contract=TRANSPORT_ADAPTER_CONTRACTS.get(kind),
+            unavailable_reason=TRANSPORT_UNAVAILABLE_REASONS.get(kind),
+        )
     for kind in enabled:
         registry.get(kind)  # fail startup for planned or unknown transports selected by config
     return registry

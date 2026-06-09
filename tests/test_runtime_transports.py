@@ -78,6 +78,22 @@ class RuntimeTransportTests(unittest.TestCase):
                 VoicebotSessionStore(),
             )
 
+    def test_runtime_transport_registry_exposes_planned_adapter_contracts(self) -> None:
+        runtime_registry = build_runtime_transport_registry(
+            Settings(enabled_transports=("webrtc",)),
+            EventStore(max_context_events=20),
+            CallRegistry(),
+            FakeSTT(),
+            FakeTTS(),
+            VoicebotSessionStore(),
+        )
+
+        payload = runtime_registry.to_dict()
+
+        self.assertEqual(payload["transports"]["twilio"]["status"], "planned")
+        self.assertEqual(payload["transports"]["twilio"]["adapter_contract"], "hosted_telephony_webhook")
+        self.assertIn("planned", payload["transports"]["twilio"]["unavailable_reason"])
+
     def test_runtime_transport_registry_starts_and_stops_audiosocket_adapter(self) -> None:
         runtime_registry = build_runtime_transport_registry(
             Settings(enabled_transports=("asterisk_audiosocket",), audiosocket_host="127.0.0.1", audiosocket_port=0),

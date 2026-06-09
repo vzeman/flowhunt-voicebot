@@ -192,6 +192,18 @@ class TransportContractTests(unittest.TestCase):
         self.assertTrue(catalog["transports"]["webrtc"]["implemented"])
         self.assertTrue(catalog["transports"]["webrtc"]["enabled"])
         self.assertFalse(catalog["transports"]["twilio"]["implemented"])
+        self.assertEqual(catalog["transports"]["webrtc"]["status"], "available")
+        self.assertEqual(catalog["transports"]["twilio"]["status"], "planned")
+
+    def test_transport_catalog_exposes_planned_hosted_adapter_contracts(self) -> None:
+        catalog = transport_catalog()
+
+        self.assertEqual(catalog["transports"]["twilio"]["adapter_contract"], "hosted_telephony_webhook")
+        self.assertEqual(catalog["transports"]["telnyx"]["adapter_contract"], "hosted_telephony_webhook")
+        self.assertEqual(catalog["transports"]["vonage"]["adapter_contract"], "hosted_telephony_webhook")
+        self.assertEqual(catalog["transports"]["livekit"]["adapter_contract"], "hosted_realtime_media_session")
+        self.assertEqual(catalog["transports"]["daily"]["adapter_contract"], "hosted_realtime_media_session")
+        self.assertIn("planned", catalog["transports"]["twilio"]["unavailable_reason"])
 
     def test_transport_catalog_can_include_implemented_adapter_health(self) -> None:
         catalog = transport_catalog(include_health=True)

@@ -107,6 +107,22 @@ TRANSPORT_CAPABILITIES: dict[TransportKind, TransportCapabilities] = {
     "daily": WEBRTC_CAPABILITIES,
 }
 
+TRANSPORT_ADAPTER_CONTRACTS: dict[TransportKind, str] = {
+    "twilio": "hosted_telephony_webhook",
+    "telnyx": "hosted_telephony_webhook",
+    "vonage": "hosted_telephony_webhook",
+    "livekit": "hosted_realtime_media_session",
+    "daily": "hosted_realtime_media_session",
+}
+
+TRANSPORT_UNAVAILABLE_REASONS: dict[TransportKind, str] = {
+    "twilio": "Twilio webhook/media adapter is planned and not wired to runtime startup yet.",
+    "telnyx": "Telnyx webhook/media adapter is planned and not wired to runtime startup yet.",
+    "vonage": "Vonage webhook/media adapter is planned and not wired to runtime startup yet.",
+    "livekit": "LiveKit media-session adapter is planned and not wired to runtime startup yet.",
+    "daily": "Daily media-session adapter is planned and not wired to runtime startup yet.",
+}
+
 
 @dataclass(frozen=True)
 class MediaSessionDescriptor:
@@ -240,6 +256,8 @@ class TransportDefinition:
     implemented: bool
     enabled: bool = True
     transport: MediaTransport | None = None
+    adapter_contract: str | None = None
+    unavailable_reason: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in get_args(TransportKind):
@@ -255,7 +273,12 @@ class TransportDefinition:
             "capabilities": transport_capabilities_to_dict(self.capabilities),
             "implemented": self.implemented,
             "enabled": self.enabled,
+            "status": "available" if self.implemented else "planned",
         }
+        if self.adapter_contract:
+            payload["adapter_contract"] = self.adapter_contract
+        if self.unavailable_reason:
+            payload["unavailable_reason"] = self.unavailable_reason
         if include_health and self.transport is not None:
             payload["health"] = self.transport.health().to_dict()
         return payload
@@ -283,7 +306,15 @@ class TransportRegistry:
             )
         )
 
-    def register_planned(self, kind: TransportKind, capabilities: TransportCapabilities, *, enabled: bool = False) -> None:
+    def register_planned(
+        self,
+        kind: TransportKind,
+        capabilities: TransportCapabilities,
+        *,
+        enabled: bool = False,
+        adapter_contract: str | None = None,
+        unavailable_reason: str | None = None,
+    ) -> None:
         self.register_definition(
             TransportDefinition(
                 kind=kind,
@@ -291,6 +322,8 @@ class TransportRegistry:
                 implemented=False,
                 enabled=enabled,
                 transport=None,
+                adapter_contract=adapter_contract,
+                unavailable_reason=unavailable_reason,
             )
         )
 
@@ -447,7 +480,13 @@ def default_transport_registry(enabled_kinds: set[TransportKind] | None = None) 
                 enabled=kind in enabled,
             )
         else:
-            registry.register_planned(kind, capabilities, enabled=kind in enabled)
+            registry.register_planned(
+                kind,
+                capabilities,
+                enabled=kind in enabled,
+                adapter_contract=TRANSPORT_ADAPTER_CONTRACTS.get(kind),
+                unavailable_reason=TRANSPORT_UNAVAILABLE_REASONS.get(kind),
+            )
     return registry
 
 

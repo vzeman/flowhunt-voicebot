@@ -124,6 +124,7 @@ TRANSPORT_UNAVAILABLE_REASONS: dict[TransportKind, str] = {
 }
 
 HOSTED_TELEPHONY_TRANSPORTS: frozenset[TransportKind] = frozenset({"twilio", "telnyx", "vonage"})
+HOSTED_REALTIME_TRANSPORTS: frozenset[TransportKind] = frozenset({"livekit", "daily"})
 
 
 @dataclass(frozen=True)
@@ -195,6 +196,55 @@ class HostedTelephonyWebhookSessionRequest:
             "provider_call_id": self.provider_call_id,
             **({"media_stream_url": self.media_stream_url} if self.media_stream_url else {}),
             **({"control_callback_url": self.control_callback_url} if self.control_callback_url else {}),
+        }
+        return MediaSessionDescriptor(
+            call_id=self.call_id,
+            transport=self.transport,
+            route=self.route(),
+            capabilities=capabilities or TRANSPORT_CAPABILITIES[self.transport],
+            sample_rate=sample_rate,
+            metadata=metadata,
+        )
+
+
+@dataclass(frozen=True)
+class HostedRealtimeMediaSessionRequest:
+    transport: TransportKind
+    provider_session_id: str
+    workspace_id: str
+    voicebot_id: str
+    room_url: str | None = None
+    access_token_ref: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.transport not in HOSTED_REALTIME_TRANSPORTS:
+            raise ValueError(f"hosted realtime transport is required: {self.transport}")
+        for field_name in ("provider_session_id", "workspace_id", "voicebot_id"):
+            if not str(getattr(self, field_name) or "").strip():
+                raise ValueError(f"{field_name} is required")
+        if self.room_url is not None and not self.room_url.strip():
+            raise ValueError("room_url must not be blank")
+        if self.access_token_ref is not None and not self.access_token_ref.strip():
+            raise ValueError("access_token_ref must not be blank")
+
+    @property
+    def call_id(self) -> str:
+        return f"{self.transport}-{self.provider_session_id}"
+
+    def route(self) -> CallRoute:
+        return CallRoute(
+            workspace_id=self.workspace_id,
+            voicebot_id=self.voicebot_id,
+            external_call_id=self.provider_session_id,
+            metadata=dict(self.metadata),
+        )
+
+    def descriptor(self, capabilities: TransportCapabilities | None = None, *, sample_rate: int = 48_000) -> MediaSessionDescriptor:
+        metadata = {
+            "provider_session_id": self.provider_session_id,
+            **({"room_url": self.room_url} if self.room_url else {}),
+            **({"access_token_ref": self.access_token_ref} if self.access_token_ref else {}),
         }
         return MediaSessionDescriptor(
             call_id=self.call_id,

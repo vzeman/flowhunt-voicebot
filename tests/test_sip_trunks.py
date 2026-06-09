@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from voicebot.sip_trunks import SipTrunk, SipTrunkStore, render_pjsip_trunks
+from voicebot.storage.sqlite_sip_trunks import SQLiteSipTrunkStore
 
 
 class SipTrunkStoreTests(unittest.TestCase):
@@ -50,6 +51,25 @@ class SipTrunkStoreTests(unittest.TestCase):
 
             self.assertFalse(store.get("customer-1").enabled)
             self.assertNotIn("trunk-customer-1-reg", include.read_text(encoding="utf-8"))
+
+    def test_sqlite_store_persists_trunks_and_renders_pjsip_include(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database_url = f"sqlite:///{directory}/sip_trunks.sqlite3"
+            include = Path(directory) / "pjsip-trunks.conf"
+            store = SQLiteSipTrunkStore(database_url, str(include))
+
+            store.upsert(SipTrunk("customer-1", "sip.example.com", "user-1", "secret"))
+            store.close()
+
+            reloaded = SQLiteSipTrunkStore(database_url, str(include))
+            self.assertEqual(reloaded.get("customer-1").host, "sip.example.com")
+            self.assertIn("trunk-customer-1-reg", include.read_text(encoding="utf-8"))
+
+            reloaded.set_enabled("customer-1", False)
+            self.assertNotIn("trunk-customer-1-reg", include.read_text(encoding="utf-8"))
+            self.assertEqual(reloaded.delete("customer-1").trunk_id, "customer-1")
+            self.assertIsNone(reloaded.get("customer-1"))
+            reloaded.close()
 
     def test_rejects_unsafe_trunk_id(self) -> None:
         with self.assertRaisesRegex(ValueError, "trunk_id"):

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from voicebot.agent_tasks import AgentTaskTracker
 from voicebot.api import WebSocketHub, create_app
 from voicebot.calls import CallRegistry
-from voicebot.events import EventStore
+from voicebot.events import EventStore, JsonEventStore
 from voicebot.scaling import (
     RoutingKey,
     JsonWorkerQueueStore,
@@ -724,6 +724,56 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(prometheus_response.status_code, 200)
         self.assertIn("voicebot_active_sessions", prometheus_response.text)
 
+    def test_multi_worker_readiness_reports_process_local_event_ids_as_blocking(self) -> None:
+        client = self.build_client()
+
+        response = client.get("/scaling/multi-worker-readiness")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["multi_worker_ready"])
+        self.assertIn("event_ids_not_process_safe", payload["blocking_reasons"])
+        self.assertEqual(payload["event_id_strategy"]["scope"], "process")
+
+    def test_multi_worker_readiness_passes_with_durable_ids_and_no_active_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client = self.build_client(events=JsonEventStore(f"{directory}/events.jsonl", max_context_events=20))
+
+            response = client.get("/scaling/multi-worker-readiness")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["multi_worker_ready"])
+        self.assertEqual(payload["blocking_reasons"], [])
+        self.assertEqual(payload["event_id_strategy"]["scope"], "node_file")
+
+    def test_multi_worker_readiness_reports_active_sessions_without_leases(self) -> None:
+        class FakeSession:
+            call_id = "call-1"
+
+            def snapshot(self):
+                return {
+                    "call_id": "call-1",
+                    "transport": "webrtc",
+                    "route": {"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"},
+                }
+
+        with tempfile.TemporaryDirectory() as directory:
+            registry = CallRegistry()
+            registry.add(FakeSession())
+            client = self.build_client(
+                registry=registry,
+                events=JsonEventStore(f"{directory}/events.jsonl", max_context_events=20),
+            )
+
+            response = client.get("/scaling/multi-worker-readiness?expected_owner=worker-1")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["multi_worker_ready"])
+        self.assertIn("active_sessions_missing_leases", payload["blocking_reasons"])
+        self.assertEqual(payload["session_ownership"]["summary"]["missing"], 1)
+
     def test_scaling_admission_endpoint_rejects_when_session_capacity_is_full(self) -> None:
         class FakeSession:
             call_id = "call-1"
@@ -944,10 +994,15 @@ class ScalingTests(unittest.TestCase):
         self.assertEqual(invalid_claim.status_code, 400)
         self.assertIn("limit", invalid_claim.json()["detail"])
 
-    def build_client(self, settings: Settings | None = None) -> TestClient:
+    def build_client(
+        self,
+        settings: Settings | None = None,
+        events: EventStore | None = None,
+        registry: CallRegistry | None = None,
+    ) -> TestClient:
         app = create_app(
-            EventStore(max_context_events=20),
-            CallRegistry(),
+            events or EventStore(max_context_events=20),
+            registry or CallRegistry(),
             AgentTaskTracker(),
             WebSocketHub(),
             TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),

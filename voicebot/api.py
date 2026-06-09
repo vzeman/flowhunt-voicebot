@@ -21,7 +21,16 @@ from .api_agent_tasks import (
 )
 from .api_agent_tools import AgentToolsApiContext, create_agent_tools_router
 from .api_audience import apply_route_audiences
-from .api_calls import CallsApiContext, call_state_payload, create_calls_router
+from .api_calls import (
+    CallsApiContext,
+    call_control_payload,
+    call_state_payload,
+    create_calls_router,
+    interrupt_playback_payload,
+    submit_response_payload,
+    validated_dtmf_digit,
+    validated_transfer_target,
+)
 from .api_context import ContextApiContext, create_context_router
 from .api_contracts import ContractsApiContext, create_contracts_router
 from .api_discovery import DiscoveryApiContext, create_discovery_router
@@ -51,7 +60,7 @@ from .api_voicebot_admin import VoicebotAdminApiContext, create_voicebot_admin_r
 from .api_voicebot_runtime_config import VoicebotRuntimeConfigApiContext, create_voicebot_runtime_config_router
 from .api_voicebot_sessions import VoicebotSessionsApiContext, create_voicebot_sessions_router
 from .api_webrtc import WebRTCApiContext, create_webrtc_router
-from .asterisk_control import AsteriskAMI, ControlResult
+from .asterisk_control import AsteriskAMI
 from .calls import AgentResponse, CallRegistry
 from .config import Settings
 from .drain import DrainState
@@ -618,6 +627,10 @@ def create_app(
         broadcast=hub.broadcast,
         multimodal_capabilities=_API_MULTIMODAL_CAPABILITIES,
         audio_artifacts=audio_artifacts,
+        tracker=tracker,
+        asterisk=asterisk,
+        webrtc=webrtc,
+        append_security_audit=append_security_audit,
     )
     app.include_router(create_calls_router(calls_api_context))
     transcripts_api_context = TranscriptsApiContext(
@@ -1085,207 +1098,6 @@ def create_app(
         )
     )
 
-    @app.post("/calls/{call_id}/responses")
-    async def submit_response(call_id: str, request: AgentResponseRequest) -> dict[str, Any]:
-        session = registry.get(call_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail=f"Active call not found: {call_id}")
-        if request.finalize_only:
-            tracker.mark_responded(request.response_to_event_id)
-            event = events.append(
-                call_id,
-                "agent_response_received",
-                {
-                    "text": "",
-                    "response_to_event_id": request.response_to_event_id,
-                    "response_kind": request.response_kind or "stream_finalized",
-                    "stream_finalized": True,
-                },
-            )
-            await hub.broadcast(event)
-            return {"event": event_to_dict(event), "ok": True}
-        try:
-            event = await asyncio.to_thread(
-                session.submit_agent_response,
-                AgentResponse(
-                    call_id=call_id,
-                    text=request.text,
-                    response_to_event_id=request.response_to_event_id,
-                    response_kind=request.response_kind,
-                    partial=request.partial,
-                    chat=request.chat,
-                ),
-            )
-        except Exception as exc:
-            if not request.partial:
-                tracker.mark_responded(request.response_to_event_id)
-            failed = events.append(
-                call_id,
-                "agent_response_dropped",
-                {
-                    "reason": "playback_failed",
-                    "error": str(exc),
-                    "response_to_event_id": request.response_to_event_id,
-                },
-            )
-            await hub.broadcast(failed)
-            return {"event": event_to_dict(failed), "ok": False}
-        if not request.partial:
-            tracker.mark_responded(request.response_to_event_id)
-        await hub.broadcast(event)
-        return {"event": event_to_dict(event), "ok": True}
-
-    @app.post("/calls/{call_id}/control")
-    async def call_control(call_id: str, request: CallControlRequest) -> dict[str, Any]:
-        requested = events.append(call_id, "call_control_requested", request.model_dump())
-        active_session = registry.get(call_id)
-        active_snapshot = active_session.snapshot() if active_session is not None else None
-        route = active_snapshot.get("route") if isinstance(active_snapshot, dict) else {}
-        if not isinstance(route, dict):
-            route = {}
-        audit_session_id = None
-        if isinstance(active_snapshot, dict):
-            audit_session_id = route.get("session_id") or active_snapshot.get("session_id")
-        audit_event = append_security_audit(
-            workspace_id=route.get("workspace_id"),
-            voicebot_id=route.get("voicebot_id"),
-            session_id=audit_session_id,
-            call_id=call_id,
-            action=f"call_control.{request.action}",
-            actor="agent_or_api",
-            resource_type="call",
-            resource_id=call_id,
-            outcome="requested",
-            metadata=request.model_dump(),
-        )
-        await hub.broadcast(audit_event)
-        transport = active_snapshot.get("transport") if isinstance(active_snapshot, dict) else None
-
-        if transport == "webrtc":
-            if request.action == "hangup":
-                closed = False
-                if webrtc is not None:
-                    closed = await webrtc.close_call(call_id)
-                elif active_session is not None:
-                    active_session.stop()
-                    registry.remove(call_id)
-                    closed = True
-                completed = events.append(
-                    call_id,
-                    "call_control_completed",
-                    {
-                        "action": request.action,
-                        "ok": closed,
-                        "message": "WebRTC call closed" if closed else "WebRTC call not found",
-                        "request_event_id": requested.id,
-                    },
-                )
-                tracker.mark_responded(request.response_to_event_id)
-                await hub.broadcast(completed)
-                return {"event": event_to_dict(completed)}
-
-            completed = events.append(
-                call_id,
-                "call_control_completed",
-                {
-                    "action": request.action,
-                    "ok": False,
-                    "message": f"{request.action} is not supported for WebRTC calls yet",
-                    "request_event_id": requested.id,
-                },
-            )
-            tracker.mark_responded(request.response_to_event_id)
-            await hub.broadcast(completed)
-            return {"event": event_to_dict(completed)}
-
-        if asterisk is None:
-            completed = events.append(
-                call_id,
-                "call_control_completed",
-                {
-                    "action": request.action,
-                    "ok": False,
-                    "message": "Asterisk AMI control is not configured",
-                    "request_event_id": requested.id,
-                },
-            )
-            tracker.mark_responded(request.response_to_event_id)
-            await hub.broadcast(completed)
-            raise HTTPException(status_code=503, detail="Asterisk AMI control is not configured")
-
-        try:
-            if request.action == "hangup":
-                result = asterisk.hangup(call_id)
-            elif request.action == "transfer" and request.target:
-                result = asterisk.transfer(call_id, validated_transfer_target(request.target))
-            elif request.action == "transfer":
-                completed = events.append(
-                    call_id,
-                    "call_control_completed",
-                    {
-                        "action": request.action,
-                        "ok": False,
-                        "message": "transfer requires target",
-                        "request_event_id": requested.id,
-                    },
-                )
-                tracker.mark_responded(request.response_to_event_id)
-                await hub.broadcast(completed)
-                raise HTTPException(status_code=400, detail="transfer requires target")
-            elif request.action == "send_dtmf" and request.digit:
-                result = asterisk.send_dtmf(call_id, validated_dtmf_digit(request.digit))
-            elif request.action == "send_dtmf":
-                completed = events.append(
-                    call_id,
-                    "call_control_completed",
-                    {
-                        "action": request.action,
-                        "ok": False,
-                        "message": "send_dtmf requires digit",
-                        "request_event_id": requested.id,
-                    },
-                )
-                tracker.mark_responded(request.response_to_event_id)
-                await hub.broadcast(completed)
-                raise HTTPException(status_code=400, detail="send_dtmf requires digit")
-            else:
-                completed = events.append(
-                    call_id,
-                    "call_control_completed",
-                    {
-                        "action": request.action,
-                        "ok": False,
-                        "message": f"unsupported control action: {request.action}",
-                        "request_event_id": requested.id,
-                    },
-                )
-                tracker.mark_responded(request.response_to_event_id)
-                await hub.broadcast(completed)
-                raise HTTPException(status_code=400, detail=f"unsupported control action: {request.action}")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            result = ControlResult(False, f"Asterisk AMI request failed: {exc}")
-
-        completed = events.append(
-            call_id,
-            "call_control_completed",
-            {"action": request.action, "ok": result.ok, "message": result.message, "request_event_id": requested.id},
-        )
-        tracker.mark_responded(request.response_to_event_id)
-        await hub.broadcast(completed)
-        return {"event": event_to_dict(completed)}
-
-    @app.post("/calls/{call_id}/playback/interrupt")
-    async def interrupt_playback(call_id: str, request: PlaybackInterruptRequest) -> dict[str, Any]:
-        session = registry.get(call_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail=f"Active call not found: {call_id}")
-        event = session.interrupt_playback(request.reason)
-        tracker.mark_responded(request.response_to_event_id)
-        await hub.broadcast(event)
-        return {"event": event_to_dict(event)}
-
     @app.websocket("/ws/events")
     async def websocket_events(websocket: WebSocket) -> None:
         if runtime_settings.internal_auth_enabled:
@@ -1329,11 +1141,12 @@ def create_app(
             response_kind=args.get("response_kind"),
             chat=args.get("chat") if isinstance(args.get("chat"), dict) else None,
         )
-        return await submit_response(call_id, response)
+        return await submit_response_payload(calls_api_context, call_id, response)
 
     async def tool_hangup_call(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
-        return await call_control(
+        return await call_control_payload(
+            calls_api_context,
             call_id,
             CallControlRequest(action="hangup", response_to_event_id=args.get("response_to_event_id")),
         )
@@ -1341,7 +1154,8 @@ def create_app(
     async def tool_transfer_call(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
         target = validated_transfer_target(require_arg(args, "target"))
-        return await call_control(
+        return await call_control_payload(
+            calls_api_context,
             call_id,
             CallControlRequest(
                 action="transfer",
@@ -1353,7 +1167,8 @@ def create_app(
     async def tool_send_dtmf(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
         digit = validated_dtmf_digit(require_arg(args, "digit"))
-        return await call_control(
+        return await call_control_payload(
+            calls_api_context,
             call_id,
             CallControlRequest(
                 action="send_dtmf",
@@ -1364,7 +1179,8 @@ def create_app(
 
     async def tool_stop_playback(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")
-        return await interrupt_playback(
+        return await interrupt_playback_payload(
+            calls_api_context,
             call_id,
             PlaybackInterruptRequest(
                 reason=str(args.get("reason") or "agent_requested"),
@@ -2507,24 +2323,6 @@ def _seconds_between_timestamps(start: Any, end: Any) -> float | None:
     except ValueError:
         return None
     return max(0.0, (ended - started).total_seconds())
-
-
-def validated_dtmf_digit(value: Any) -> str:
-    digit = str(value).upper()
-    if len(digit) != 1 or digit not in "0123456789*#ABCD":
-        raise HTTPException(status_code=400, detail="digit must be one DTMF character: 0-9, *, #, A-D")
-    return digit
-
-
-def validated_transfer_target(value: Any) -> str:
-    target = str(value).strip()
-    if not target:
-        raise HTTPException(status_code=400, detail="transfer target must not be empty")
-    if len(target) > 128:
-        raise HTTPException(status_code=400, detail="transfer target must be at most 128 characters")
-    if any(ord(char) < 32 or ord(char) == 127 for char in target):
-        raise HTTPException(status_code=400, detail="transfer target must not contain control characters")
-    return target
 
 
 DASHBOARD_PAGE = """<!doctype html>

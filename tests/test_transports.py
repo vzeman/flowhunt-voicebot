@@ -7,6 +7,7 @@ from voicebot.transports import (
     WEBRTC_CAPABILITIES,
     CallControlRequest,
     CallRoute,
+    HostedRealtimeMediaSessionRequest,
     HostedTelephonyWebhookSessionRequest,
     MediaSessionDescriptor,
     StaticMediaTransport,
@@ -143,6 +144,52 @@ class TransportContractTests(unittest.TestCase):
             HostedTelephonyWebhookSessionRequest("twilio", "", "workspace-1", "voicebot-1")
         with self.assertRaisesRegex(ValueError, "media_stream_url"):
             HostedTelephonyWebhookSessionRequest("twilio", "call-1", "workspace-1", "voicebot-1", media_stream_url="")
+
+    def test_hosted_realtime_session_request_creates_session_descriptor(self) -> None:
+        request = HostedRealtimeMediaSessionRequest(
+            transport="livekit",
+            provider_session_id="room-session-1",
+            workspace_id="workspace-1",
+            voicebot_id="voicebot-1",
+            room_url="wss://livekit.example.com/rooms/support",
+            access_token_ref="secret:livekit-token",
+            metadata={"channel": "browser"},
+        )
+
+        descriptor = request.descriptor()
+
+        self.assertEqual(request.call_id, "livekit-room-session-1")
+        self.assertEqual(descriptor.transport, "livekit")
+        self.assertEqual(descriptor.sample_rate, 48000)
+        self.assertTrue(descriptor.capabilities.supports("hangup"))
+        self.assertEqual(descriptor.route.workspace_id, "workspace-1")
+        self.assertEqual(descriptor.route.voicebot_id, "voicebot-1")
+        self.assertEqual(descriptor.route.external_call_id, "room-session-1")
+        self.assertEqual(descriptor.route.metadata, {"channel": "browser"})
+        self.assertEqual(
+            descriptor.lifecycle_event_data(),
+            {
+                "transport": "livekit",
+                "sample_rate": 48000,
+                "workspace_id": "workspace-1",
+                "voicebot_id": "voicebot-1",
+                "external_call_id": "room-session-1",
+                "metadata": {"channel": "browser"},
+                "provider_session_id": "room-session-1",
+                "room_url": "wss://livekit.example.com/rooms/support",
+                "access_token_ref": "secret:livekit-token",
+            },
+        )
+
+    def test_hosted_realtime_session_request_rejects_invalid_payloads(self) -> None:
+        with self.assertRaisesRegex(ValueError, "hosted realtime"):
+            HostedRealtimeMediaSessionRequest("twilio", "session-1", "workspace-1", "voicebot-1")
+        with self.assertRaisesRegex(ValueError, "provider_session_id"):
+            HostedRealtimeMediaSessionRequest("daily", "", "workspace-1", "voicebot-1")
+        with self.assertRaisesRegex(ValueError, "room_url"):
+            HostedRealtimeMediaSessionRequest("daily", "session-1", "workspace-1", "voicebot-1", room_url="")
+        with self.assertRaisesRegex(ValueError, "access_token_ref"):
+            HostedRealtimeMediaSessionRequest("daily", "session-1", "workspace-1", "voicebot-1", access_token_ref="")
 
     def test_supported_call_control_returns_successful_result(self) -> None:
         transport = StaticMediaTransport("asterisk_audiosocket", ASTERISK_AUDIOSOCKET_CAPABILITIES)

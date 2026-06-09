@@ -7,6 +7,7 @@ from voicebot.transports import (
     WEBRTC_CAPABILITIES,
     CallControlRequest,
     CallRoute,
+    HostedTelephonyWebhookSessionRequest,
     MediaSessionDescriptor,
     StaticMediaTransport,
     TransportHealth,
@@ -96,6 +97,52 @@ class TransportContractTests(unittest.TestCase):
         self.assertEqual(routed.require_workspace_scope().session_id, "call-1")
         with self.assertRaisesRegex(ValueError, "workspace_id"):
             unrouted.require_workspace_scope()
+
+    def test_hosted_telephony_webhook_request_creates_session_descriptor(self) -> None:
+        request = HostedTelephonyWebhookSessionRequest(
+            transport="twilio",
+            provider_call_id="CA123",
+            workspace_id="workspace-1",
+            voicebot_id="voicebot-1",
+            trunk_id="trunk-1",
+            media_stream_url="wss://media.example.com/twilio/CA123",
+            control_callback_url="https://hooks.example.com/twilio/control",
+            metadata={"from": "+421"},
+        )
+
+        descriptor = request.descriptor(sample_rate=8000)
+
+        self.assertEqual(request.call_id, "twilio-CA123")
+        self.assertEqual(descriptor.transport, "twilio")
+        self.assertEqual(descriptor.route.workspace_id, "workspace-1")
+        self.assertEqual(descriptor.route.voicebot_id, "voicebot-1")
+        self.assertEqual(descriptor.route.trunk_id, "trunk-1")
+        self.assertEqual(descriptor.route.external_call_id, "CA123")
+        self.assertEqual(descriptor.route.metadata, {"from": "+421"})
+        self.assertEqual(descriptor.require_workspace_scope().workspace_id, "workspace-1")
+        self.assertEqual(
+            descriptor.lifecycle_event_data(),
+            {
+                "transport": "twilio",
+                "sample_rate": 8000,
+                "workspace_id": "workspace-1",
+                "voicebot_id": "voicebot-1",
+                "trunk_id": "trunk-1",
+                "external_call_id": "CA123",
+                "metadata": {"from": "+421"},
+                "provider_call_id": "CA123",
+                "media_stream_url": "wss://media.example.com/twilio/CA123",
+                "control_callback_url": "https://hooks.example.com/twilio/control",
+            },
+        )
+
+    def test_hosted_telephony_webhook_request_rejects_invalid_payloads(self) -> None:
+        with self.assertRaisesRegex(ValueError, "hosted telephony"):
+            HostedTelephonyWebhookSessionRequest("webrtc", "call-1", "workspace-1", "voicebot-1")
+        with self.assertRaisesRegex(ValueError, "provider_call_id"):
+            HostedTelephonyWebhookSessionRequest("twilio", "", "workspace-1", "voicebot-1")
+        with self.assertRaisesRegex(ValueError, "media_stream_url"):
+            HostedTelephonyWebhookSessionRequest("twilio", "call-1", "workspace-1", "voicebot-1", media_stream_url="")
 
     def test_supported_call_control_returns_successful_result(self) -> None:
         transport = StaticMediaTransport("asterisk_audiosocket", ASTERISK_AUDIOSOCKET_CAPABILITIES)

@@ -123,6 +123,8 @@ TRANSPORT_UNAVAILABLE_REASONS: dict[TransportKind, str] = {
     "daily": "Daily media-session adapter is planned and not wired to runtime startup yet.",
 }
 
+HOSTED_TELEPHONY_TRANSPORTS: frozenset[TransportKind] = frozenset({"twilio", "telnyx", "vonage"})
+
 
 @dataclass(frozen=True)
 class MediaSessionDescriptor:
@@ -151,6 +153,57 @@ class MediaSessionDescriptor:
 
     def require_workspace_scope(self) -> WorkspaceScope:
         return self.route.require_workspace_scope(self.call_id)
+
+
+@dataclass(frozen=True)
+class HostedTelephonyWebhookSessionRequest:
+    transport: TransportKind
+    provider_call_id: str
+    workspace_id: str
+    voicebot_id: str
+    trunk_id: str | None = None
+    media_stream_url: str | None = None
+    control_callback_url: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.transport not in HOSTED_TELEPHONY_TRANSPORTS:
+            raise ValueError(f"hosted telephony transport is required: {self.transport}")
+        for field_name in ("provider_call_id", "workspace_id", "voicebot_id"):
+            if not str(getattr(self, field_name) or "").strip():
+                raise ValueError(f"{field_name} is required")
+        if self.media_stream_url is not None and not self.media_stream_url.strip():
+            raise ValueError("media_stream_url must not be blank")
+        if self.control_callback_url is not None and not self.control_callback_url.strip():
+            raise ValueError("control_callback_url must not be blank")
+
+    @property
+    def call_id(self) -> str:
+        return f"{self.transport}-{self.provider_call_id}"
+
+    def route(self) -> CallRoute:
+        return CallRoute(
+            workspace_id=self.workspace_id,
+            voicebot_id=self.voicebot_id,
+            trunk_id=self.trunk_id,
+            external_call_id=self.provider_call_id,
+            metadata=dict(self.metadata),
+        )
+
+    def descriptor(self, capabilities: TransportCapabilities | None = None, *, sample_rate: int = 8_000) -> MediaSessionDescriptor:
+        metadata = {
+            "provider_call_id": self.provider_call_id,
+            **({"media_stream_url": self.media_stream_url} if self.media_stream_url else {}),
+            **({"control_callback_url": self.control_callback_url} if self.control_callback_url else {}),
+        }
+        return MediaSessionDescriptor(
+            call_id=self.call_id,
+            transport=self.transport,
+            route=self.route(),
+            capabilities=capabilities or TRANSPORT_CAPABILITIES[self.transport],
+            sample_rate=sample_rate,
+            metadata=metadata,
+        )
 
 
 @dataclass(frozen=True)

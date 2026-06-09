@@ -28,7 +28,9 @@ Environment variables:
 
 The current smoke suite verifies readiness, the event catalog, configured
 storage drivers, workspace transport discovery, event-stream readability,
-worker queue lifecycle behavior, and session lease events over HTTP. The queue
+worker queue lifecycle behavior, and session lease events over HTTP. Transport
+discovery checks the per-transport registry payload, including enabled
+implemented transports and planned hosted-provider adapter contracts. The queue
 and lease checks are deterministic process-boundary probes that do not require
 provider credentials.
 Provider-backed media scenarios should be added as separate `e2e` tests with

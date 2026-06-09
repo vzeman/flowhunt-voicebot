@@ -96,8 +96,14 @@ class DeployedStackSmokeTests(unittest.TestCase):
 
         self.assertEqual(catalog["workspace_id"], _workspace_id())
         self.assertEqual(catalog["voicebot_id"], _voicebot_id())
-        self.assertIn("available_transports", catalog)
-        self.assertIn("enabled_transports", catalog)
+        self.assertIn("transports", catalog)
+        self.assertIn("asterisk_audiosocket", catalog["transports"])
+        self.assertIn("webrtc", catalog["transports"])
+        self.assertEqual(catalog["transports"]["webrtc"]["status"], "available")
+        self.assertIn("hangup", catalog["transports"]["webrtc"]["capabilities"]["call_control"])
+        self.assertEqual(catalog["transports"]["twilio"]["status"], "planned")
+        self.assertEqual(catalog["transports"]["twilio"]["adapter_contract"], "hosted_telephony_webhook")
+        self.assertIn("unavailable_reason", catalog["transports"]["twilio"])
 
     def test_deployed_stack_event_stream_is_queryable(self) -> None:
         events = _get_json("/events", {"after": 0, "limit": 5})

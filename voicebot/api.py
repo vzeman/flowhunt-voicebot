@@ -40,7 +40,7 @@ from .api_models import (
 )
 from .api_events import EventsApiContext, create_events_router, events_payload, metrics_payload
 from .api_providers import ProvidersApiContext, create_providers_router
-from .api_runtime import RuntimeApiContext, create_runtime_router
+from .api_runtime import RuntimeApiContext, create_runtime_router, runtime_config_payload
 from .api_scaling import ScalingApiContext, create_scaling_router
 from .api_security import SecurityApiContext, create_security_router
 from .api_sip import SipApiContext, create_sip_router
@@ -58,7 +58,7 @@ from .api_voicebot_sessions import VoicebotSessionsApiContext, create_voicebot_s
 from .api_webrtc import WebRTCApiContext, create_webrtc_router
 from .asterisk_control import AsteriskAMI, ControlResult
 from .calls import AgentResponse, CallRegistry
-from .config import Settings, redacted_settings
+from .config import Settings
 from .drain import DrainState
 from .events import EventStore, VoicebotEvent, event_to_dict
 from .execution_model import ExecutionScope
@@ -559,26 +559,23 @@ def create_app(
         else None
     )
 
-    app.include_router(
-        create_runtime_router(
-            RuntimeApiContext(
-                events=events,
-                registry=registry,
-                tracker=tracker,
-                transcripts=transcripts,
-                asterisk=asterisk,
-                runtime_settings=runtime_settings,
-                workspace_access_policy=workspace_access_policy,
-                session_lease_store=session_lease_store,
-                scaling_workers=scaling_workers,
-                voicebot_session_store=voicebot_session_store,
-                provider_config_store=provider_config_store,
-                scaling_queue=scaling_queue,
-                subagent_coordinator=subagent_coordinator,
-                drain_state=drain_state,
-            )
-        )
+    runtime_api_context = RuntimeApiContext(
+        events=events,
+        registry=registry,
+        tracker=tracker,
+        transcripts=transcripts,
+        asterisk=asterisk,
+        runtime_settings=runtime_settings,
+        workspace_access_policy=workspace_access_policy,
+        session_lease_store=session_lease_store,
+        scaling_workers=scaling_workers,
+        voicebot_session_store=voicebot_session_store,
+        provider_config_store=provider_config_store,
+        scaling_queue=scaling_queue,
+        subagent_coordinator=subagent_coordinator,
+        drain_state=drain_state,
     )
+    app.include_router(create_runtime_router(runtime_api_context))
     events_api_context = EventsApiContext(
         events=events,
         transcripts=transcripts,
@@ -987,10 +984,6 @@ def create_app(
             return None
         text = str(value).strip()
         return text or None
-
-    @app.get("/config")
-    def config() -> dict[str, Any]:
-        return {"settings": redacted_settings(runtime_settings)}
 
     @app.get("/dashboard")
     def dashboard() -> HTMLResponse:
@@ -2654,7 +2647,7 @@ def create_app(
         return call_state_payload(calls_api_context, call_id)
 
     def tool_get_runtime_config(args: dict[str, Any]) -> dict[str, Any]:
-        return config()
+        return runtime_config_payload(runtime_api_context)
 
     def tool_get_agent_task_status(args: dict[str, Any]) -> dict[str, Any]:
         return agent_task_status_payload(agent_tasks_api_context, owner=args.get("owner"))

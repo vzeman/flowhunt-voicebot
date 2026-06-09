@@ -9,7 +9,7 @@ import threading
 from time import perf_counter
 from typing import Any, get_args
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from .agent_tasks import AgentTaskTracker
@@ -576,6 +576,9 @@ def create_app(
         transcripts=transcripts,
         durable_call_events=durable_call_events,
         validated_limit=validated_limit,
+        hub=hub,
+        settings=runtime_settings,
+        internal_keys=internal_keys,
     )
     app.include_router(create_events_router(events_api_context))
     app.include_router(
@@ -1097,40 +1100,6 @@ def create_app(
             )
         )
     )
-
-    @app.websocket("/ws/events")
-    async def websocket_events(websocket: WebSocket) -> None:
-        if runtime_settings.internal_auth_enabled:
-            result = validate_internal_api_key(
-                websocket.headers.get(runtime_settings.internal_auth_header),
-                internal_keys,
-                "diagnostics:read",
-            )
-            if not result.ok:
-                events.append(
-                    "system",
-                    "internal_api_auth_denied",
-                    {
-                        "method": "WEBSOCKET",
-                        "path": "/ws/events",
-                        "reason": result.reason,
-                        "scope": result.scope,
-                        **({"key_id": result.key.key_id} if result.key is not None else {}),
-                    },
-                )
-                await websocket.close(code=1008, reason=result.reason)
-                return
-        await hub.connect(websocket)
-        last_id = 0
-        try:
-            while True:
-                new_events = events.list_events(after=last_id, limit=100)
-                for event in new_events:
-                    await websocket.send_json(event_to_dict(event))
-                    last_id = max(last_id, event.id)
-                await asyncio.sleep(0.25)
-        except WebSocketDisconnect:
-            hub.disconnect(websocket)
 
     async def tool_say(args: dict[str, Any]) -> dict[str, Any]:
         call_id = require_arg(args, "call_id")

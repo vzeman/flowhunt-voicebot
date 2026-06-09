@@ -88,7 +88,7 @@ def default_storage_registry() -> StorageRegistry:
             _definition("subagent_tasks", "redis", "shared", True, False, True, "shared delegated task coordination", runtime_dependencies=("redis",)),
             _definition("subagent_tasks", "flowhunt_queue", "shared", True, False, True, "FlowHunt task queue handoff", implemented=False),
             _definition("audio_artifacts", "filesystem", "node", False, True, False, "local filesystem artifacts/cache"),
-            _definition("audio_artifacts", "object_storage", "shared", True, False, True, "managed object storage", implemented=False),
+            _definition("audio_artifacts", "object_storage", "shared", True, False, True, "managed object storage", runtime_dependencies=("boto3",)),
             _definition("audio_artifacts", "s3", "shared", True, False, True, "S3-compatible object storage", runtime_dependencies=("boto3",)),
         ]
     )
@@ -413,7 +413,7 @@ def build_audio_artifact_store(settings: Settings) -> FilesystemArtifactStore | 
     )
     if driver == "filesystem":
         return attach_storage_driver(FilesystemArtifactStore(settings.tts_cache_dir), selection)
-    if driver == "s3":
+    if driver in {"s3", "object_storage"}:
         return attach_storage_driver(
             S3ArtifactStore(
                 settings.object_storage_bucket,

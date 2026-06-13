@@ -213,6 +213,11 @@ already ended.
 When multiple agent workers are running, they should claim tasks before
 processing them. Claimed tasks can be renewed or released, and answered task IDs
 are retained so the same caller turn is not handled repeatedly.
+Workers can pass `wait_seconds` to `/agent/tasks` to long-poll for new work
+instead of sleeping between empty polls. Confirmed speculative subagent work is
+attached to the final task as `confirmed_speculative_task`, allowing the worker
+to answer from an already-started result or avoid duplicate delegation while the
+task is still running.
 
 ## Docker SIP Runtime
 

@@ -438,6 +438,7 @@ def create_app(
     def prompt_context_for_pending(pending: list[VoicebotEvent]) -> dict[str, Any]:
         by_call_id = {}
         session_languages = {}
+        speculative_tasks = confirmed_speculative_tasks_for_pending(pending)
         for event in pending:
             prompt_config = prompt_config_for_call(event.call_id).as_dict()
             detected_language = detected_session_language(events.list_events(call_id=event.call_id, limit=1000))
@@ -454,6 +455,7 @@ def create_app(
         context: dict[str, Any] = {
             "prompt_configs_by_call_id": by_call_id,
             "session_languages_by_call_id": session_languages,
+            "confirmed_speculative_tasks_by_event_id": speculative_tasks,
         }
         if len(by_call_id) == 1:
             context["voicebot_prompts"] = next(iter(by_call_id.values()))
@@ -475,7 +477,50 @@ def create_app(
                 **payload.get("data", {}),
                 "session_language": session_language,
             }
+        speculative_task = (context.get("confirmed_speculative_tasks_by_event_id") or {}).get(str(event.id))
+        if isinstance(speculative_task, dict):
+            payload["data"] = {
+                **payload.get("data", {}),
+                "confirmed_speculative_task": speculative_task,
+                "confirmed_speculative_task_id": speculative_task.get("task_id"),
+                "speculative_partial_text": speculative_task.get("partial_text"),
+                "speculative_started_at": speculative_task.get("created_at"),
+                "speculative_result_ready_at": speculative_task.get("updated_at")
+                if speculative_task.get("status") == "completed"
+                else None,
+                "speculative_reused": speculative_task.get("status") == "completed",
+            }
         return payload
+
+    def confirmed_speculative_tasks_for_pending(pending: list[VoicebotEvent]) -> dict[str, Any]:
+        if subagent_coordinator is None or not pending:
+            return {}
+        pending_ids = {event.id for event in pending}
+        result: dict[str, Any] = {}
+        try:
+            tasks = subagent_coordinator.store.list()
+        except Exception:
+            return {}
+        for task in tasks:
+            metadata = task.metadata if isinstance(task.metadata, dict) else {}
+            if not metadata.get("speculative") or metadata.get("speculative_status") != "confirmed":
+                continue
+            final_event_id = _optional_int(metadata.get("final_request_event_id"))
+            if final_event_id not in pending_ids:
+                continue
+            result[str(final_event_id)] = {
+                "task_id": task.task_id,
+                "status": task.status,
+                "provider": task.provider,
+                "external_task_id": task.external_task_id,
+                "partial_event_id": metadata.get("partial_event_id"),
+                "partial_text": metadata.get("partial_text") or metadata.get("speculative_input_text"),
+                "final_input_text": metadata.get("final_input_text"),
+                "created_at": task.created_at,
+                "updated_at": task.updated_at,
+                "result": task.clean_result_context(),
+            }
+        return result
 
     def append_security_audit(
         *,

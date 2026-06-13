@@ -1691,6 +1691,9 @@ Query parameters:
 - `after`: event cursor, default `0`.
 - `call_id`: optional call filter.
 - `limit`: maximum pending tasks, default `200`.
+- `wait_seconds`: optional long-poll timeout. When no task is immediately
+  pending, the request waits up to this many seconds and returns as soon as a
+  task appears.
 
 Response:
 
@@ -1703,7 +1706,19 @@ Response:
       "type": "agent_response_requested",
       "timestamp": "2026-05-28T12:00:00.000000Z",
       "data": {
-        "text": "I need help with my order."
+        "text": "I need help with my order.",
+        "confirmed_speculative_task_id": "optional-task-id",
+        "confirmed_speculative_task": {
+          "task_id": "optional-task-id",
+          "status": "completed",
+          "provider": "flowhunt_flow",
+          "partial_text": "help with my order",
+          "result": {
+            "summary": "The delegated task result.",
+            "content": "Detailed result content."
+          }
+        },
+        "speculative_reused": true
       }
     }
   ],

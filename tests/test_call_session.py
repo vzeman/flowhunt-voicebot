@@ -302,7 +302,7 @@ class CallSessionPipelineTests(unittest.TestCase):
             session = CallSession(
                 "pending",
                 left,
-                self._speculative_settings(audiosocket_jitter_buffer_enabled=False),
+                self._speculative_settings(audiosocket_jitter_buffer_enabled=False, streaming_rag_enabled=True),
                 events,
                 MatchingSpeculativeSTT(),
                 FakeTTS(),
@@ -332,6 +332,15 @@ class CallSessionPipelineTests(unittest.TestCase):
             self.assertEqual(len(lifecycle.scheduled), 1)
             self.assertEqual(tasks[0].metadata["speculative_status"], "confirmed")
             self.assertEqual(tasks[0].metadata["final_request_event_id"], requests[-1].id)
+            metric_names = {
+                event.data["name"]
+                for event in events.list_events(call_id=call_id)
+                if event.type == "metrics"
+            }
+            self.assertIn("partial_stt_first_text_seconds", metric_names)
+            self.assertIn("partial_stt_to_speculative_start_seconds", metric_names)
+            self.assertIn("speech_start_to_speculative_start_seconds", metric_names)
+            self.assertIn("speech_finished_to_final_transcript_seconds", metric_names)
             self.assertLess(
                 self._event_index(events, "subagent_task_speculative_started"),
                 self._event_index(events, "user_speech_finished"),
@@ -388,7 +397,7 @@ class CallSessionPipelineTests(unittest.TestCase):
         session = WebRTCCallSession(
             call_id="webrtc-call-1",
             session_id="session-1",
-            settings=self._speculative_settings(webrtc_jitter_buffer_enabled=False),
+            settings=self._speculative_settings(webrtc_jitter_buffer_enabled=False, streaming_rag_enabled=True),
             event_store=events,
             stt=MatchingSpeculativeSTT(),
             tts=FakeTTS(),
@@ -411,6 +420,15 @@ class CallSessionPipelineTests(unittest.TestCase):
         self.assertEqual(len(provider.requests), 1)
         self.assertEqual(task.metadata["speculative_status"], "confirmed")
         self.assertEqual(task.metadata["final_input_text"], "please check website status")
+        metric_names = {
+            event.data["name"]
+            for event in events.list_events(call_id="webrtc-call-1")
+            if event.type == "metrics"
+        }
+        self.assertIn("partial_stt_first_text_seconds", metric_names)
+        self.assertIn("partial_stt_to_speculative_start_seconds", metric_names)
+        self.assertIn("speech_start_to_speculative_start_seconds", metric_names)
+        self.assertIn("speech_finished_to_final_transcript_seconds", metric_names)
 
     def _wait_for_event(self, events: EventStore, event_type: str, timeout: float = 2.0) -> None:
         deadline = time.monotonic() + timeout

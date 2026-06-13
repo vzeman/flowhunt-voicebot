@@ -48,8 +48,42 @@ can map them to Prometheus, Datadog, OpenTelemetry, or FlowHunt-native monitors.
 
 Realtime audio metrics include `tts_first_audio_latency_seconds`; transports or
 workers may also emit `end_of_speech_to_playback_started_seconds` for full
-caller-finished to first-bot-audio latency. These are consumed by
-`/scaling/signals`, `/observability/timeline`, and `/observability/slo`.
+caller-finished to first-bot-audio latency. Metric summaries include `min`,
+`max`, `avg`, `p50`, `p90`, and the latest sample. These are consumed by
+`/metrics`, `/scaling/signals`, `/observability/timeline`, and
+`/observability/slo`.
+
+Streaming-RAG turns add stage metrics so speculative work can be compared with
+final-transcript-only behavior:
+
+- `partial_stt_first_text_seconds`
+- `partial_stt_to_speculative_start_seconds`
+- `speech_start_to_speculative_start_seconds`
+- `speech_finished_to_final_transcript_seconds`
+- `speculative_task_completed_before_final_transcript`
+- `speculative_result_reuse_latency_seconds`
+- `agent_task_pickup_latency_seconds`
+- `agent_stream_first_text_latency_seconds`
+- `tts_stream_first_audio_latency_seconds`
+- `response_request_to_first_playback_seconds`
+
+Timeline latency summaries also report Streaming-RAG outcome counts for
+confirmed, cancelled, and superseded speculative tasks, plus the confirmation
+hit rate and reflector decision counts.
+
+## Latency Benchmark
+
+Run the deterministic local benchmark without external credentials:
+
+```bash
+python3 -m tools.latency_benchmark
+```
+
+It emits JSON for final-only, final tool-only, speculative confirmed,
+speculative cancelled, speculative superseded, and streaming agent/TTS
+scenarios. The benchmark checks that confirmed speculative work reduces final
+turn wait, speculative work starts before endpointing, unconfirmed work is not
+spoken, and superseded candidates are reported.
 
 ## Diagnostics
 

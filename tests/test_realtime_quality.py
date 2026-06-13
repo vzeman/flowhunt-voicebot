@@ -63,6 +63,8 @@ class RealtimeQualityTests(unittest.TestCase):
 
         self.assertEqual(signals["tts_first_audio_latency_seconds"]["avg"], 0.12)
         self.assertEqual(signals["tts_stream_first_audio_latency_seconds"]["avg"], 0.08)
+        self.assertEqual(signals["tts_stream_first_audio_latency_seconds"]["p50"], 0.08)
+        self.assertEqual(signals["tts_stream_first_audio_latency_seconds"]["p90"], 0.08)
         self.assertEqual(signals["end_of_speech_to_playback_started_seconds"]["avg"], 1.4)
 
     def test_realtime_audio_profile_endpoint_returns_profile_and_issues(self) -> None:

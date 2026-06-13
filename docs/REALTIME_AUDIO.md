@@ -118,6 +118,15 @@ worker, plus `response_request_to_first_playback_seconds` when the first audio
 for an agent request is queued, so STT, agent, TTS, and playback delay can be
 separated.
 
+Streaming STT and speculative work add `partial_stt_first_text_seconds`,
+`partial_stt_to_speculative_start_seconds`,
+`speech_start_to_speculative_start_seconds`,
+`speech_finished_to_final_transcript_seconds`,
+`speculative_task_completed_before_final_transcript`, and
+`speculative_result_reuse_latency_seconds`. These make it possible to compare a
+confirmed speculative turn against a final-transcript-only tool call without
+live provider credentials by running `python3 -m tools.latency_benchmark`.
+
 ## Latency Budgets
 
 Realtime budgets are explicit runtime settings. When a transport or API helper

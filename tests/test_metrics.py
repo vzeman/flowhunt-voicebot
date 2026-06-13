@@ -26,6 +26,8 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metric["min"], 0.2)
         self.assertEqual(metric["max"], 0.4)
         self.assertEqual(metric["avg"], 0.30000000000000004)
+        self.assertEqual(metric["p50"], 0.30000000000000004)
+        self.assertEqual(metric["p90"], 0.38)
         self.assertEqual(metric["latest"]["event_id"], latest.id)
         self.assertEqual(summary["providers"]["openai"]["latency_count"], 2)
 

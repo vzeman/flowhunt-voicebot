@@ -1134,10 +1134,27 @@ def latency_metric_signals(events: list[Any]) -> dict[str, Any]:
             continue
         values.setdefault(name, []).append(value)
     return {
-        name: {"count": len(items), "avg": sum(items) / len(items), "max": max(items)}
+        name: {
+            "count": len(items),
+            "avg": sum(items) / len(items),
+            "max": max(items),
+            "p50": _percentile(items, 50),
+            "p90": _percentile(items, 90),
+        }
         for name, items in sorted(values.items())
         if items
     }
+
+
+def _percentile(values: list[float], percentile_value: float) -> float:
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    rank = (len(ordered) - 1) * (percentile_value / 100.0)
+    lower = int(rank)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = rank - lower
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
 def calls_per_second(events: list[Any], *, now: datetime | None = None, window_seconds: float = 60.0) -> float:

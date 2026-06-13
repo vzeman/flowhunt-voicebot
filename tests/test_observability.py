@@ -138,6 +138,9 @@ class ObservabilityTests(unittest.TestCase):
         queued = events.append("call-1", "agent_response_queued", {"response_to_event_id": request.id})
         playback = events.append("call-1", "bot_playback_started", {})
         metric = events.append("call-1", "metrics", {"name": "tts_synthesis_latency_seconds", "value": 0.42})
+        metric_2 = events.append("call-1", "metrics", {"name": "tts_synthesis_latency_seconds", "value": 0.84})
+        events.append("call-1", "subagent_task_speculative_confirmed", {"task_id": "task-1"})
+        events.append("call-1", "metrics", {"name": "streaming_rag_reflector_decision", "decision": "reuse", "value": 1})
         fixed = [
             type(speech_finished)(speech_finished.id, speech_finished.call_id, speech_finished.type, "2026-05-28T00:00:00+00:00", speech_finished.data),
             type(transcript)(transcript.id, transcript.call_id, transcript.type, "2026-05-28T00:00:01+00:00", transcript.data),
@@ -147,6 +150,8 @@ class ObservabilityTests(unittest.TestCase):
             type(queued)(queued.id, queued.call_id, queued.type, "2026-05-28T00:00:03.600000+00:00", queued.data),
             type(playback)(playback.id, playback.call_id, playback.type, "2026-05-28T00:00:03.700000+00:00", playback.data),
             type(metric)(metric.id, metric.call_id, metric.type, "2026-05-28T00:00:03.800000+00:00", metric.data),
+            metric_2,
+            *events.list_events(call_id="call-1")[-2:],
         ]
 
         summary = latency_observability_summary(fixed)
@@ -157,7 +162,12 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(summary["turns"][0]["agent_response_to_tts_started_seconds"], 0.5)
         self.assertEqual(summary["turns"][0]["end_of_speech_to_playback_started_seconds"], 3.7)
         self.assertEqual(summary["slowest_turn"]["turn_id"], 1)
-        self.assertEqual(summary["metrics"]["tts_synthesis_latency_seconds"]["latest"]["event_id"], metric.id)
+        self.assertEqual(summary["metrics"]["tts_synthesis_latency_seconds"]["latest"]["event_id"], metric_2.id)
+        self.assertEqual(summary["metrics"]["tts_synthesis_latency_seconds"]["p50"], 0.63)
+        self.assertEqual(summary["metrics"]["tts_synthesis_latency_seconds"]["p90"], 0.798)
+        self.assertEqual(summary["streaming_rag"]["confirmed"], 1)
+        self.assertEqual(summary["streaming_rag"]["confirm_hit_rate"], 1.0)
+        self.assertEqual(summary["streaming_rag"]["reflector_decisions"], {"reuse": 1})
 
     def test_slo_evaluation_reports_breaches_and_targets(self) -> None:
         events = EventStore(max_context_events=30)

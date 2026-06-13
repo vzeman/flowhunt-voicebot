@@ -383,6 +383,29 @@ def latency_observability_summary(events: list[VoicebotEvent]) -> dict[str, Any]
         "turns": turns,
         "metrics": metric_summary,
         "slowest_turn": slowest,
+        "streaming_rag": streaming_rag_observability_summary(ordered),
+    }
+
+
+def streaming_rag_observability_summary(events: list[VoicebotEvent]) -> dict[str, Any]:
+    confirmed = _count_events(events, "subagent_task_speculative_confirmed")
+    cancelled = _count_events(events, "subagent_task_speculative_cancelled")
+    superseded = _count_events(events, "subagent_task_speculative_superseded")
+    terminal = confirmed + cancelled + superseded
+    decisions: dict[str, int] = {}
+    for event in events:
+        if event.type != "metrics" or event.data.get("name") != "streaming_rag_reflector_decision":
+            continue
+        decision = str(event.data.get("decision") or "")
+        if decision:
+            decisions[decision] = decisions.get(decision, 0) + 1
+    return {
+        "confirmed": confirmed,
+        "cancelled": cancelled,
+        "superseded": superseded,
+        "terminal": terminal,
+        "confirm_hit_rate": confirmed / terminal if terminal else None,
+        "reflector_decisions": dict(sorted(decisions.items())),
     }
 
 
@@ -535,8 +558,11 @@ def _metric_latency_summary(events: list[VoicebotEvent]) -> dict[str, Any]:
     return {
         name: {
             "count": len(values),
+            "min": min(value for _event, value in values),
             "avg": sum(value for _event, value in values) / len(values),
             "max": max(value for _event, value in values),
+            "p50": _percentile([value for _event, value in values], 50),
+            "p90": _percentile([value for _event, value in values], 90),
             "latest": {
                 "event_id": values[-1][0].id,
                 "value": values[-1][1],
@@ -555,6 +581,17 @@ def _first_event(events: list[VoicebotEvent], event_type: str, turn_id: int | No
             continue
         return event
     return None
+
+
+def _percentile(values: list[float], percentile_value: float) -> float:
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    rank = (len(ordered) - 1) * (percentile_value / 100.0)
+    lower = int(rank)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = rank - lower
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
 def _first_response_for_request(events: list[VoicebotEvent], request_event_id: int | None) -> VoicebotEvent | None:

@@ -25,6 +25,7 @@ from .runtime_storage import (
 )
 from .runtime_transports import WebRTCManagerTransport, build_runtime_transport_registry
 from .subagents import FlowHuntSubagentProvider, HttpSubagentProvider, HttpSubagentProviderManifest, SubagentCoordinator
+from .task_lifecycle import PollingPolicy, SubagentTaskLifecycleRunner
 from .transports import TransportKind, TransportRegistry, default_transport_registry
 from .workspace_model import VoicebotDefinition, VoicebotStore
 
@@ -45,6 +46,7 @@ def main() -> None:
     voicebots = build_default_voicebot_store(settings)
     audio_artifacts = build_audio_artifact_store(settings)
     subagents = build_subagent_coordinator(settings, events)
+    speculative_subagent_lifecycle = build_subagent_lifecycle(settings, subagents)
     asterisk = (
         AsteriskAMI(settings.ami_host, settings.ami_port, settings.ami_username, settings.ami_password)
         if settings.ami_password
@@ -63,6 +65,8 @@ def main() -> None:
         tts,
         voicebot_sessions,
         audio_artifacts,
+        subagents,
+        speculative_subagent_lifecycle,
     )
     started_transports = transport_registry.start_enabled()
     if "asterisk_audiosocket" in started_transports:
@@ -141,6 +145,18 @@ def build_subagent_coordinator(settings: Settings, events: EventStore) -> Subage
         provider = HttpSubagentProvider(manifest)
         coordinator.register(provider, provider.descriptor)
     return coordinator
+
+
+def build_subagent_lifecycle(settings: Settings, coordinator: SubagentCoordinator) -> SubagentTaskLifecycleRunner:
+    return SubagentTaskLifecycleRunner(
+        coordinator,
+        policy=PollingPolicy(
+            initial_interval_seconds=settings.subagent_task_initial_poll_seconds,
+            max_interval_seconds=settings.subagent_task_max_poll_seconds,
+            timeout_seconds=settings.subagent_task_timeout_seconds,
+            max_attempts=settings.subagent_task_max_attempts,
+        ),
+    )
 
 
 def build_default_voicebot_store(settings: Settings) -> VoicebotStore:

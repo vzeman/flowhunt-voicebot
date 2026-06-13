@@ -36,6 +36,7 @@ from .processor_registry import ProcessorDependencies, ProcessorRegistry, Proces
 from .realtime_audio import AudioJitterBuffer, JitterBufferConfig, TurnDetector, trim_trailing_silence, turn_detection_config_from_settings
 from .realtime_quality import metric_latency_budget_seconds
 from .spoken_text import limit_spoken_response_text, split_spoken_response_text
+from .speculative_turns import SpeculativeTurnCoordinator
 from .transcript_filter import should_drop_agent_transcript
 from .turn_coalescing import TurnCoalescer
 from .transports import ASTERISK_AUDIOSOCKET_CAPABILITIES, StaticMediaTransport
@@ -179,6 +180,8 @@ class CallSession:
         stt_pipeline_specs: tuple[ProcessorSpec, ...] = DEFAULT_STT_PIPELINE,
         tts_pipeline_specs: tuple[ProcessorSpec, ...] = DEFAULT_TTS_PIPELINE,
         audio_artifact_store=None,
+        subagent_coordinator=None,
+        subagent_lifecycle=None,
     ) -> None:
         self.call_id = call_id
         self.sock = sock
@@ -217,6 +220,13 @@ class CallSession:
             can_delay_or_merge=self._can_delay_or_merge_turns,
             window_seconds=settings.turn_coalesce_window_ms / 1000,
             max_chars=settings.turn_coalesce_max_chars,
+        )
+        self._speculative_turns = SpeculativeTurnCoordinator(
+            settings=settings,
+            events=self.events,
+            subagent_coordinator=subagent_coordinator,
+            subagent_lifecycle=subagent_lifecycle,
+            scope_resolver=self._subagent_scope_for_call,
         )
         self.stop_event = threading.Event()
         self.recording_event = threading.Event()
@@ -728,7 +738,7 @@ class CallSession:
             if self._partial_stt_last_text.get(turn_id) == text:
                 return
             self._partial_stt_last_text[turn_id] = text
-        self.events.append(
+        event = self.events.append(
             self.call_id,
             "user_transcript_partial",
             {
@@ -738,6 +748,7 @@ class CallSession:
                 "metadata": {**metadata, "source": "partial_snapshot"},
             },
         )
+        self._speculative_turns.observe_partial(event)
 
     def _speech_worker_loop(self) -> None:
         while not self.stop_event.is_set():
@@ -809,6 +820,10 @@ class CallSession:
                                 },
                             )
                             self._maybe_resume_interrupted_persistent_response(str(drop_decision.reason))
+                            self._speculative_turns.cancel_turn(
+                                _optional_int(frame.data.get("turn_id")),
+                                reason=str(drop_decision.reason),
+                            )
                             continue
                         self._turn_coalescer.handle(
                             {
@@ -850,6 +865,7 @@ class CallSession:
                         },
                     )
                     self._maybe_resume_interrupted_persistent_response("stt_no_text")
+                    self._speculative_turns.cancel_turn(frame.turn_id, reason="stt_no_text")
                 elif frame.kind == "transcription_finished":
                     self._record_metric(
                         "stt_duration_seconds",
@@ -1020,7 +1036,26 @@ class CallSession:
     def _emit_agent_request(self, data: dict) -> VoicebotEvent:
         request = self.events.append(self.call_id, "agent_response_requested", data)
         self._remember_response_generation(request.id)
+        self._speculative_turns.reconcile_final_request(
+            turn_id=_optional_int(data.get("turn_id")),
+            final_text=str(data.get("text") or ""),
+            final_request_event_id=request.id,
+        )
         return request
+
+    def _subagent_scope_for_call(self, call_id: str) -> dict[str, str] | None:
+        route = self.descriptor.route
+        workspace_id = route.workspace_id or self.settings.flowhunt_workspace_id
+        if not workspace_id:
+            return None
+        voicebot_id = route.voicebot_id or self.settings.default_voicebot_id or "default"
+        return {
+            "workspace_id": workspace_id,
+            "voicebot_id": voicebot_id,
+            "session_id": call_id,
+            "call_id": call_id,
+            "transport": self.descriptor.transport,
+        }
 
     def _can_delay_or_merge_turns(self) -> bool:
         return not self.playback.is_active()

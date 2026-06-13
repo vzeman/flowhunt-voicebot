@@ -11,6 +11,7 @@ from agent_provider_registry import AgentProviderRegistry
 from communication_agent import (
     CommunicationAgentConfig,
     DelayedProgressAcknowledgement,
+    agent_streaming_speech_mode,
     deterministic_colleague_tool_recovery,
     finalize_streamed_response,
     colleague_progress_ack_text_for_task,
@@ -36,6 +37,7 @@ from communication_agent import (
     run_provider_with_retry,
 )
 from voicebot.agent import AgentOutput
+from voicebot.providers import ProviderCapabilities, ProviderDescriptor
 
 
 class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
@@ -184,7 +186,7 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
 
         registry = AgentProviderRegistry()
         registry.register("test", provider)
-        registry.register_stream("test", stream_provider)
+        registry.register_stream("test", stream_provider, descriptor=native_streaming_descriptor())
         calls = []
 
         with unittest.mock.patch("communication_agent.http_json", side_effect=lambda method, url, payload=None: calls.append((method, url, payload)) or {"ok": True}):
@@ -215,6 +217,68 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
         self.assertTrue(calls[0][2]["partial"])
         self.assertEqual(calls[0][2]["text"], "Hello caller.")
         self.assertNotIn("finalize_only", calls[-1][2])
+
+    def test_streaming_model_turn_buffers_json_tool_call_scaffolding(self) -> None:
+        def provider(client, model, prompt, timeout, max_output_tokens, tools):
+            raise AssertionError("non-streaming provider should not be used")
+
+        def stream_provider(client, model, prompt, timeout, max_output_tokens, tools):
+            yield AgentOutput('{"tool_calls":[', is_final=False)
+            yield AgentOutput('{"name":"transfer_call","arguments":{"call_id":"call-1","target":"123"}}', is_final=False)
+            yield AgentOutput("]}", is_final=True)
+
+        registry = AgentProviderRegistry()
+        registry.register("test", provider)
+        registry.register_stream("test", stream_provider)
+        calls = []
+
+        with unittest.mock.patch("communication_agent.http_json", side_effect=lambda method, url, payload=None: calls.append((method, url, payload)) or {"ok": True}):
+            answer, tool_calls, streamed = run_model_turn_streaming(
+                object(),
+                registry,
+                CommunicationAgentConfig(
+                    base_url="http://voicebot",
+                    provider="test",
+                    model="model",
+                    interval=0.01,
+                    timeout=1.0,
+                    max_output_tokens=80,
+                    owner_prefix="test-agent",
+                    streaming_enabled=True,
+                    streaming_chunk_chars=12,
+                ),
+                "prompt",
+                [{"id": 42, "call_id": "call-1", "data": {"text": "transfer me"}}],
+                [],
+                {"id": 42, "call_id": "call-1"},
+            )
+
+        self.assertEqual(answer, "")
+        self.assertEqual(tool_calls[0]["name"], "transfer_call")
+        self.assertFalse(streamed)
+        self.assertEqual(calls, [])
+
+    def test_streaming_mode_buffers_native_provider_when_tools_are_available(self) -> None:
+        registry = AgentProviderRegistry()
+        registry.register("test", lambda client, model, prompt, timeout, max_output_tokens, tools: ("ok", []))
+        registry.register_stream("test", lambda client, model, prompt, timeout, max_output_tokens, tools: (), descriptor=native_streaming_descriptor())
+
+        mode = agent_streaming_speech_mode(
+            registry,
+            CommunicationAgentConfig(
+                base_url="http://voicebot",
+                provider="test",
+                model="model",
+                interval=0.01,
+                timeout=1.0,
+                max_output_tokens=80,
+                owner_prefix="test-agent",
+                streaming_enabled=True,
+            ),
+            native_tools=[{"type": "function", "name": "transfer_call"}],
+        )
+
+        self.assertEqual(mode, "buffer")
 
     def test_stream_chunk_and_finalize_use_response_protocol(self) -> None:
         calls = []
@@ -452,3 +516,17 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def native_streaming_descriptor() -> ProviderDescriptor:
+    return ProviderDescriptor(
+        provider="test",
+        family="agent",
+        adapter="native",
+        capabilities=ProviderCapabilities(
+            modalities=frozenset({"agent"}),
+            streaming=True,
+            native_tools=True,
+            latency_profile="interactive",
+        ),
+    )

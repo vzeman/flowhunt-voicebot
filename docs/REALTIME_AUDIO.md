@@ -99,11 +99,24 @@ not resumed.
 The OpenAI-compatible TTS adapter uses the Speech API streaming response with
 raw `pcm` output, converts the 24 kHz PCM stream into normalized call audio, and
 resamples it to the runtime call sample rate before playback.
+The ElevenLabs HTTP adapter also consumes its PCM stream endpoint incrementally
+instead of waiting for the full response body.
+
+The TTS cache preserves streaming behavior. On cache misses, a streaming inner
+provider yields audio immediately while the wrapper accumulates the complete
+audio artifact for a safe cache write after the stream finishes. On cache hits,
+cached audio is replayed in bounded chunks. `VOICEBOT_TTS_STREAM_MIN_CHUNK_SECONDS`
+and `VOICEBOT_TTS_STREAM_MAX_CHUNK_SECONDS` control coalescing and splitting.
+If an inner stream fails after partial audio, no cache artifact is written.
 
 The runtime records `tts_first_audio_latency_seconds` when the first TTS audio
-chunk is available. Autoscaling and diagnostics also recognize
+chunk is available. Streaming chunks also emit
+`tts_stream_first_audio_latency_seconds`, and the call-response finalizer emits
+`stream_chunk_count`. Autoscaling and diagnostics also recognize
 `end_of_speech_to_playback_started_seconds` when emitted by a transport or
-worker, so STT, agent, TTS, and playback delay can be separated.
+worker, plus `response_request_to_first_playback_seconds` when the first audio
+for an agent request is queued, so STT, agent, TTS, and playback delay can be
+separated.
 
 ## Latency Budgets
 

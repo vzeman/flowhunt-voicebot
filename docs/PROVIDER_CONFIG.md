@@ -77,7 +77,11 @@ voicebot override is present. Supported runtime adapters are:
 All TTS adapters are wrapped by the existing cache when
 `VOICEBOT_TTS_CACHE_ENABLED=true`, so provider/model/voice/language changes
 produce separate cache entries. `VOICEBOT_TTS_TIMEOUT_SECONDS` bounds native
-HTTP TTS calls.
+HTTP TTS calls. The cache wrapper preserves streaming for streaming-capable
+inner providers and replays cached hits in chunks. Use
+`VOICEBOT_TTS_STREAM_MIN_CHUNK_SECONDS` and
+`VOICEBOT_TTS_STREAM_MAX_CHUNK_SECONDS` to bound cached and streamed chunk
+durations.
 
 ## Runtime Plan
 

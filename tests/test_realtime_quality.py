@@ -21,6 +21,8 @@ class RealtimeQualityTests(unittest.TestCase):
         self.assertEqual(realtime_audio_profile_issues(profile), [])
         self.assertTrue(profile["cancellation"]["barge_in_interrupts_playback"])
         self.assertTrue(profile["streaming"]["tts_streaming_chunks_supported"])
+        self.assertEqual(profile["streaming"]["tts_stream_min_chunk_seconds"], 0.04)
+        self.assertEqual(profile["streaming"]["tts_stream_max_chunk_seconds"], 0.30)
         self.assertEqual(profile["latency_budgets"]["agent_seconds"], 1.2)
         self.assertTrue(profile["normalization"]["webrtc_jitter_buffer_enabled"])
         self.assertTrue(profile["cache"]["tts_cache_enabled"])
@@ -31,6 +33,8 @@ class RealtimeQualityTests(unittest.TestCase):
                 start_threshold=0.01,
                 stop_threshold=0.02,
                 tts_chunk_chars=0,
+                tts_stream_min_chunk_seconds=0.5,
+                tts_stream_max_chunk_seconds=0.1,
                 tts_cache_enabled=False,
             )
         )
@@ -39,6 +43,7 @@ class RealtimeQualityTests(unittest.TestCase):
 
         self.assertIn({"issue": "stop_threshold exceeds start_threshold"}, issues)
         self.assertIn({"issue": "tts_chunk_chars must be positive"}, issues)
+        self.assertIn({"issue": "tts_stream_max_chunk_seconds must be at least min chunk seconds"}, issues)
         self.assertIn({"issue": "tts cache is disabled"}, issues)
 
     def test_latency_budget_defaults_and_metric_mapping_are_configurable(self) -> None:
@@ -51,11 +56,13 @@ class RealtimeQualityTests(unittest.TestCase):
     def test_latency_metric_signals_include_first_audio_metrics(self) -> None:
         events = EventStore(max_context_events=20)
         events.append("call-1", "metrics", {"name": "tts_first_audio_latency_seconds", "value": 0.12})
+        events.append("call-1", "metrics", {"name": "tts_stream_first_audio_latency_seconds", "value": 0.08})
         events.append("call-1", "metrics", {"name": "end_of_speech_to_playback_started_seconds", "value": 1.4})
 
         signals = latency_metric_signals(events.list_events())
 
         self.assertEqual(signals["tts_first_audio_latency_seconds"]["avg"], 0.12)
+        self.assertEqual(signals["tts_stream_first_audio_latency_seconds"]["avg"], 0.08)
         self.assertEqual(signals["end_of_speech_to_playback_started_seconds"]["avg"], 1.4)
 
     def test_realtime_audio_profile_endpoint_returns_profile_and_issues(self) -> None:

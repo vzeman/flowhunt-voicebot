@@ -37,6 +37,7 @@ from local_command_agent import (
     speculative_progress_answer,
     suppress_duplicate_colleague_tool_calls_for_speculative,
 )
+from voicebot.providers import normalize_provider
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,7 @@ def run_communication_agent(
                 streamed_response = False
                 chat = None
                 try:
-                    if config.streaming_enabled:
+                    if agent_streaming_speech_mode(providers, config, native_tools) != "disabled":
                         answer, tool_calls, streamed_response = run_model_turn_streaming(
                             client,
                             providers,
@@ -290,10 +291,17 @@ def run_model_turn_streaming(
     native_tools: list[dict],
     latest: dict,
 ) -> tuple[str, list[dict], bool]:
+    stream_mode = agent_streaming_speech_mode(providers, config, native_tools)
+    if stream_mode == "disabled":
+        raw_answer, native_tool_calls = run_provider_with_retry(client, providers, config, prompt, native_tools)
+        answer, parsed_tool_calls = parse_agent_output(raw_answer)
+        return answer, [*native_tool_calls, *parsed_tool_calls], False
+
     raw_parts: list[str] = []
     native_tool_calls: list[dict] = []
     pending_text = ""
     streamed = False
+    direct_to_speech = stream_mode == "direct"
     try:
         chunks = providers.run_stream(
             client,
@@ -307,13 +315,14 @@ def run_model_turn_streaming(
         for chunk in chunks:
             if chunk.text:
                 raw_parts.append(chunk.text)
-                pending_text += chunk.text
-                ready, pending_text = split_stable_stream_text(pending_text, config.streaming_chunk_chars)
-                for text in ready:
-                    submit_stream_chunk(config.base_url, latest, text)
-                    streamed = True
+                if direct_to_speech:
+                    pending_text += chunk.text
+                    ready, pending_text = split_stable_stream_text(pending_text, config.streaming_chunk_chars)
+                    for text in ready:
+                        submit_stream_chunk(config.base_url, latest, text)
+                        streamed = True
             native_tool_calls.extend({"name": call.name, "arguments": call.arguments} for call in chunk.tool_calls)
-        if pending_text.strip():
+        if direct_to_speech and pending_text.strip():
             submit_stream_chunk(config.base_url, latest, pending_text.strip())
             streamed = True
     except Exception:
@@ -334,6 +343,27 @@ def run_model_turn_streaming(
         if answer and is_echo_answer(answer, pending):
             raise RuntimeError(f"{config.echo_error_label} returned echo response twice: {answer}")
     return ("" if streamed else answer), tool_calls, streamed
+
+
+def agent_streaming_speech_mode(
+    providers: AgentProviderRegistry,
+    config: CommunicationAgentConfig,
+    native_tools: list[dict] | None = None,
+) -> str:
+    if not config.streaming_enabled:
+        return "disabled"
+    descriptor = providers.describe(config.provider)
+    if descriptor is None or not descriptor.capabilities.streaming:
+        print(f"streaming disabled for {config.provider}: provider does not declare streaming", flush=True)
+        return "disabled"
+    if normalize_provider(config.provider) not in providers.stream_factories:
+        print(f"streaming disabled for {config.provider}: no streaming adapter registered", flush=True)
+        return "disabled"
+    if native_tools and descriptor.capabilities.native_tools:
+        return "buffer"
+    if not descriptor.capabilities.native_tools:
+        return "buffer"
+    return "direct"
 
 
 def split_stable_stream_text(text: str, chunk_chars: int) -> tuple[list[str], str]:

@@ -40,6 +40,8 @@ OPENAI_TTS_PCM_SAMPLE_RATE = 24_000
 
 
 class TTSProvider(ABC):
+    streaming_capable = False
+
     @abstractmethod
     def synthesize(self, text: str) -> tuple[np.ndarray, float]:
         raise NotImplementedError
@@ -55,6 +57,8 @@ class TTSCacheConfig:
     voice: str
     language: str | None
     sample_rate: int = CALL_SAMPLE_RATE
+    stream_min_chunk_seconds: float = 0.04
+    stream_max_chunk_seconds: float = 0.30
 
 
 class _ArtifactReaderWriter(Protocol):
@@ -66,6 +70,8 @@ class _ArtifactReaderWriter(Protocol):
 
 
 class CachedTTSProvider(TTSProvider):
+    streaming_capable = True
+
     def __init__(
         self,
         inner: TTSProvider,
@@ -91,6 +97,34 @@ class CachedTTSProvider(TTSProvider):
         audio, duration = self._inner.synthesize(text)
         self._write(artifact_id, audio, duration, language)
         return audio, duration
+
+    def synthesize_stream(self, text: str) -> Iterable[tuple[np.ndarray, float]]:
+        language = self._effective_language(text)
+        key = self._cache_key(text, language)
+        artifact_id = f"{key}.npz"
+        cached = self._read(artifact_id)
+        if cached is not None:
+            yield from _coalesced_audio_chunks(
+                [cached],
+                sample_rate=self._config.sample_rate,
+                min_chunk_seconds=self._config.stream_min_chunk_seconds,
+                max_chunk_seconds=self._config.stream_max_chunk_seconds,
+            )
+            return
+
+        complete_audio: list[np.ndarray] = []
+        complete_duration = 0.0
+        for audio, duration in _coalesced_audio_chunks(
+            self._inner.synthesize_stream(text),
+            sample_rate=self._config.sample_rate,
+            min_chunk_seconds=self._config.stream_min_chunk_seconds,
+            max_chunk_seconds=self._config.stream_max_chunk_seconds,
+        ):
+            complete_audio.append(audio)
+            complete_duration += float(duration)
+            yield audio, duration
+        if complete_audio:
+            self._write(artifact_id, np.concatenate(complete_audio), complete_duration, language)
 
     def _cache_key(self, text: str, language: str | None) -> str:
         payload = {
@@ -170,6 +204,8 @@ class SupertonicTTSProvider(TTSProvider):
 
 
 class OpenAITTSProvider(TTSProvider):
+    streaming_capable = True
+
     def __init__(self, settings: Settings) -> None:
         if OpenAI is None:
             raise RuntimeError("The openai package is required when using OpenAI-compatible TTS")
@@ -235,6 +271,7 @@ class OpenAITTSProvider(TTSProvider):
 class HttpTTSProvider(TTSProvider):
     def __init__(self, settings: Settings) -> None:
         self._provider = normalize_provider(settings.tts_provider)
+        self.streaming_capable = self._provider == "elevenlabs"
         if self._provider == "deepgram" and sf is None:
             raise RuntimeError("The soundfile package is required when using Deepgram TTS")
         self._api_key = provider_api_key(self._provider, settings.tts_api_key, "")
@@ -254,6 +291,13 @@ class HttpTTSProvider(TTSProvider):
             if self._provider == "deepgram":
                 return self._synthesize_deepgram(text)
             return self._synthesize_elevenlabs(text)
+
+    def synthesize_stream(self, text: str) -> Iterable[tuple[np.ndarray, float]]:
+        if self._provider != "elevenlabs":
+            yield self.synthesize(text)
+            return
+        with self._lock:
+            yield from self._synthesize_elevenlabs_stream(text)
 
     def _synthesize_deepgram(self, text: str) -> tuple[np.ndarray, float]:
         query = {
@@ -291,6 +335,34 @@ class HttpTTSProvider(TTSProvider):
         audio = pcm16le_bytes_to_float32(content)
         call_audio = resample_audio(audio, OPENAI_TTS_PCM_SAMPLE_RATE, CALL_SAMPLE_RATE)
         return call_audio, audio.size / float(OPENAI_TTS_PCM_SAMPLE_RATE)
+
+    def _synthesize_elevenlabs_stream(self, text: str) -> Iterable[tuple[np.ndarray, float]]:
+        query = urllib.parse.urlencode({"output_format": f"pcm_{OPENAI_TTS_PCM_SAMPLE_RATE}"})
+        voice_id = urllib.parse.quote(self._voice)
+        pending = b""
+        for chunk in _stream_binary_request(
+            "POST",
+            f"{self._base_url.rstrip('/')}/v1/text-to-speech/{voice_id}/stream?{query}",
+            headers={
+                "xi-api-key": self._api_key,
+                "Content-Type": "application/json",
+                "Accept": "audio/pcm",
+            },
+            body=json.dumps({"text": text, "model_id": self._model}).encode("utf-8"),
+            timeout=self._timeout,
+        ):
+            pending += chunk
+            even_length = len(pending) - (len(pending) % 2)
+            if even_length <= 0:
+                continue
+            pcm = pending[:even_length]
+            pending = pending[even_length:]
+            audio = pcm16le_bytes_to_float32(pcm)
+            if audio.size == 0:
+                continue
+            call_audio = resample_audio(audio, OPENAI_TTS_PCM_SAMPLE_RATE, CALL_SAMPLE_RATE)
+            if call_audio.size:
+                yield call_audio, audio.size / float(OPENAI_TTS_PCM_SAMPLE_RATE)
 
 
 def _default_http_tts_base_url(provider: str) -> str:
@@ -347,6 +419,33 @@ def _binary_request(
     return content
 
 
+def _stream_binary_request(
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    body: bytes | None = None,
+    timeout: float = 8.0,
+    chunk_size: int = 4096,
+) -> Iterable[bytes]:
+    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = response.status
+            if not 200 <= status < 300:
+                message = response.read().decode("utf-8", errors="replace")[:1000]
+                raise RuntimeError(f"HTTP {status} from TTS provider: {message}")
+            while True:
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+    except urllib.error.HTTPError as exc:
+        content = exc.read()
+        message = content.decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"HTTP {exc.code} from TTS provider: {message}") from exc
+
+
 def _wav_bytes_to_call_audio(content: bytes) -> tuple[np.ndarray, float]:
     wav, sample_rate = sf.read(BytesIO(content), dtype="float32")
     audio = np.asarray(wav, dtype=np.float32)
@@ -361,3 +460,64 @@ def pcm16le_bytes_to_float32(content: bytes) -> np.ndarray:
     if even_length <= 0:
         return np.zeros(0, dtype=np.float32)
     return np.frombuffer(content[:even_length], dtype="<i2").astype(np.float32) / 32768.0
+
+
+def _coalesced_audio_chunks(
+    chunks: Iterable[tuple[np.ndarray, float]],
+    *,
+    sample_rate: int,
+    min_chunk_seconds: float,
+    max_chunk_seconds: float,
+) -> Iterable[tuple[np.ndarray, float]]:
+    min_seconds, max_seconds = _normalized_stream_chunk_bounds(min_chunk_seconds, max_chunk_seconds)
+    pending: list[np.ndarray] = []
+    pending_duration = 0.0
+    for audio, duration in chunks:
+        for segment, segment_duration in _split_audio_chunk(
+            audio,
+            duration,
+            sample_rate=sample_rate,
+            max_chunk_seconds=max_seconds,
+        ):
+            pending.append(segment)
+            pending_duration += segment_duration
+            if pending_duration >= min_seconds:
+                yield _concat_audio(pending), pending_duration
+                pending = []
+                pending_duration = 0.0
+    if pending:
+        yield _concat_audio(pending), pending_duration
+
+
+def _split_audio_chunk(
+    audio: np.ndarray,
+    duration: float,
+    *,
+    sample_rate: int,
+    max_chunk_seconds: float,
+) -> Iterable[tuple[np.ndarray, float]]:
+    normalized = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if normalized.size == 0:
+        return
+    total_duration = float(duration) if duration and duration > 0 else normalized.size / float(sample_rate)
+    max_samples = max(1, int(sample_rate * max_chunk_seconds))
+    for start in range(0, normalized.size, max_samples):
+        segment = normalized[start : start + max_samples]
+        if segment.size == 0:
+            continue
+        segment_duration = total_duration * (segment.size / float(normalized.size))
+        yield segment, segment_duration
+
+
+def _concat_audio(chunks: list[np.ndarray]) -> np.ndarray:
+    if len(chunks) == 1:
+        return chunks[0]
+    return np.concatenate(chunks).astype(np.float32, copy=False)
+
+
+def _normalized_stream_chunk_bounds(min_chunk_seconds: float, max_chunk_seconds: float) -> tuple[float, float]:
+    minimum = max(0.0, float(min_chunk_seconds))
+    maximum = max(0.01, float(max_chunk_seconds))
+    if maximum < minimum:
+        maximum = minimum or 0.01
+    return minimum, maximum

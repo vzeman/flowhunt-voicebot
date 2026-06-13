@@ -20,6 +20,30 @@ class CountingTTS:
         return np.ones(80, dtype=np.float32) * self.calls, 0.01
 
 
+class StreamingTTS:
+    def __init__(self, chunks: list[np.ndarray]) -> None:
+        self.chunks = chunks
+        self.synthesize_calls = 0
+        self.stream_calls = 0
+
+    def synthesize(self, text: str):
+        self.synthesize_calls += 1
+        audio = np.concatenate(self.chunks) if self.chunks else np.zeros(0, dtype=np.float32)
+        return audio, audio.size / float(CALL_SAMPLE_RATE)
+
+    def synthesize_stream(self, text: str):
+        self.stream_calls += 1
+        for chunk in self.chunks:
+            yield chunk, chunk.size / float(CALL_SAMPLE_RATE)
+
+
+class FailingStreamingTTS(StreamingTTS):
+    def synthesize_stream(self, text: str):
+        self.stream_calls += 1
+        yield self.chunks[0], self.chunks[0].size / float(CALL_SAMPLE_RATE)
+        raise RuntimeError("stream failed")
+
+
 class _NoopLock:
     def __enter__(self):
         return self
@@ -124,6 +148,79 @@ class TTSCacheTests(unittest.TestCase):
         self.assertEqual(len(metadata_files), 1)
         self.assertIn('"kind": "tts_cache"', metadata)
 
+    def test_cached_tts_streaming_miss_yields_inner_chunks_and_writes_cache_after_completion(self) -> None:
+        chunks = [
+            np.ones(80, dtype=np.float32),
+            np.ones(80, dtype=np.float32) * 2,
+            np.ones(80, dtype=np.float32) * 3,
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            inner = StreamingTTS(chunks)
+            provider = CachedTTSProvider(
+                inner,
+                directory,
+                TTSCacheConfig(
+                    provider="openai",
+                    model="tts-model",
+                    voice="alloy",
+                    language="en",
+                    stream_min_chunk_seconds=0.0,
+                    stream_max_chunk_seconds=0.03,
+                ),
+            )
+
+            streamed = list(provider.synthesize_stream("Hello"))
+            cached = list(provider.synthesize_stream("Hello"))
+
+        self.assertEqual(inner.synthesize_calls, 0)
+        self.assertEqual(inner.stream_calls, 1)
+        self.assertEqual(len(streamed), 3)
+        self.assertGreaterEqual(len(cached), 1)
+        np.testing.assert_array_equal(np.concatenate([audio for audio, _duration in streamed]), np.concatenate(chunks))
+        np.testing.assert_array_equal(
+            np.concatenate([audio for audio, _duration in cached]),
+            np.concatenate(chunks),
+        )
+
+    def test_cached_tts_streaming_hit_replays_long_audio_in_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            inner = StreamingTTS([np.arange(1600, dtype=np.float32)])
+            provider = CachedTTSProvider(
+                inner,
+                directory,
+                TTSCacheConfig(
+                    provider="openai",
+                    model="tts-model",
+                    voice="alloy",
+                    language="en",
+                    stream_min_chunk_seconds=0.0,
+                    stream_max_chunk_seconds=0.05,
+                ),
+            )
+
+            provider.synthesize("Hello")
+            chunks = list(provider.synthesize_stream("Hello"))
+
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(duration <= 0.051 for _audio, duration in chunks))
+        np.testing.assert_array_equal(np.concatenate([audio for audio, _duration in chunks]), np.arange(1600, dtype=np.float32))
+
+    def test_cached_tts_stream_failure_does_not_write_cache_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            inner = FailingStreamingTTS([np.ones(80, dtype=np.float32)])
+            provider = CachedTTSProvider(
+                inner,
+                directory,
+                TTSCacheConfig(provider="openai", model="tts-model", voice="alloy", language="en"),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "stream failed"):
+                list(provider.synthesize_stream("Hello"))
+
+            artifacts = list(Path(directory).glob("*.npz"))
+
+        self.assertEqual(artifacts, [])
+
     def test_pcm16le_bytes_to_float32_ignores_trailing_odd_byte(self) -> None:
         audio = pcm16le_bytes_to_float32(b"\x00\x40\xff")
 
@@ -214,6 +311,41 @@ class TTSCacheTests(unittest.TestCase):
         self.assertEqual(headers["Accept"], "audio/pcm")
         self.assertIn(b"eleven_flash_v2_5", body)
         self.assertEqual(timeout, 8.0)
+
+    def test_elevenlabs_http_tts_streams_pcm_chunks(self) -> None:
+        provider = HttpTTSProvider.__new__(HttpTTSProvider)
+        provider._provider = "elevenlabs"
+        provider._api_key = "el-key"
+        provider._base_url = "https://api.elevenlabs.io"
+        provider._model = "eleven_flash_v2_5"
+        provider._voice = "voice-1"
+        provider._timeout = 5.0
+        provider._lock = _NoopLock()
+        samples = (np.ones(OPENAI_TTS_PCM_SAMPLE_RATE // 10, dtype=np.int16) * 8192).astype("<i2")
+        calls = []
+
+        def fake_stream(method, url, *, headers, body=None, timeout=0, chunk_size=0):
+            calls.append((method, url, headers, body, timeout, chunk_size))
+            yield samples.tobytes()[:101]
+            yield samples.tobytes()[101:]
+
+        with patch("voicebot.tts._stream_binary_request", side_effect=fake_stream):
+            chunks = list(provider.synthesize_stream("Hello"))
+
+        audio = np.concatenate([chunk for chunk, _duration in chunks])
+        duration = sum(duration for _chunk, duration in chunks)
+        self.assertGreaterEqual(len(chunks), 1)
+        self.assertAlmostEqual(duration, 0.1, places=2)
+        self.assertAlmostEqual(len(audio), CALL_SAMPLE_RATE // 10, delta=2)
+        method, url, headers, body, timeout, _chunk_size = calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(
+            url,
+            "https://api.elevenlabs.io/v1/text-to-speech/voice-1/stream?output_format=pcm_24000",
+        )
+        self.assertEqual(headers["Accept"], "audio/pcm")
+        self.assertIn(b"eleven_flash_v2_5", body)
+        self.assertEqual(timeout, 5.0)
 
 
 if __name__ == "__main__":

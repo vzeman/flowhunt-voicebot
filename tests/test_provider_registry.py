@@ -54,6 +54,8 @@ class ProviderRegistryTests(unittest.TestCase):
 
         stt = registry.describe_stt("openai")
         tts = registry.describe_tts("supertonic")
+        openai_tts = registry.describe_tts("openai")
+        elevenlabs_tts = registry.describe_tts("elevenlabs")
 
         self.assertIsNotNone(stt)
         self.assertEqual(stt.provider, "openai")
@@ -61,6 +63,11 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertEqual(stt.capabilities.latency_profile, "interactive")
         self.assertIsNotNone(tts)
         self.assertEqual(tts.capabilities.output_audio_format, "pcm_f32_8000")
+        self.assertFalse(tts.capabilities.streaming)
+        self.assertIsNotNone(openai_tts)
+        self.assertTrue(openai_tts.capabilities.streaming)
+        self.assertIsNotNone(elevenlabs_tts)
+        self.assertTrue(elevenlabs_tts.capabilities.streaming)
 
     def test_registry_rejects_invalid_provider_descriptor(self) -> None:
         registry = ProviderRegistry()

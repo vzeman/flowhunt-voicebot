@@ -188,6 +188,8 @@ def _build_supertonic_tts(settings: Settings):
             model="supertonic-3",
             voice=settings.tts_voice,
             language=settings.language,
+            stream_min_chunk_seconds=settings.tts_stream_min_chunk_seconds,
+            stream_max_chunk_seconds=settings.tts_stream_max_chunk_seconds,
         ),
     )
 
@@ -207,6 +209,8 @@ def _build_openai_tts(settings: Settings):
             model=settings.tts_model or settings.openai_tts_model,
             voice=settings.openai_tts_voice,
             language=settings.language,
+            stream_min_chunk_seconds=settings.tts_stream_min_chunk_seconds,
+            stream_max_chunk_seconds=settings.tts_stream_max_chunk_seconds,
         ),
     )
 
@@ -226,6 +230,8 @@ def _build_http_tts(settings: Settings):
             model=settings.tts_model or _default_http_tts_model(normalized_provider),
             voice=_default_http_tts_voice(normalized_provider, settings.tts_voice),
             language=settings.language,
+            stream_min_chunk_seconds=settings.tts_stream_min_chunk_seconds,
+            stream_max_chunk_seconds=settings.tts_stream_max_chunk_seconds,
         ),
     )
 
@@ -325,6 +331,7 @@ def _default_tts_descriptor(provider: str) -> ProviderDescriptor:
         adapter="openai_compatible",
         capabilities=ProviderCapabilities(
             modalities=frozenset({"tts"}),
+            streaming=True,
             required_credentials=("api_key",),
             latency_profile="interactive",
             interruption_support=True,
@@ -351,6 +358,7 @@ def _native_http_tts_descriptor(provider: str) -> ProviderDescriptor:
         capabilities=ProviderCapabilities(
             modalities=frozenset({"tts"}),
             required_credentials=("api_key",),
+            streaming=provider == "elevenlabs",
             latency_profile="interactive",
             interruption_support=True,
             output_audio_format="pcm_f32_8000",

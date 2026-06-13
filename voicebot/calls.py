@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import queue
 import socket
 import threading
@@ -76,6 +77,18 @@ def _optional_int(value: object) -> int | None:
         return int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+
+
+def _seconds_since_timestamp(timestamp: str) -> float | None:
+    if not timestamp:
+        return None
+    try:
+        started = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    return max(0.0, (datetime.now(UTC) - started.astimezone(UTC)).total_seconds())
 
 
 class PlaybackBuffer:
@@ -237,6 +250,7 @@ class CallSession:
         self._response_generation_lock = threading.Lock()
         self._response_generations: dict[int, int] = {}
         self._response_request_times: dict[int, float] = {}
+        self._first_playback_metric_event_ids: set[int] = set()
         self._startup_response_event_ids: set[int] = set()
         self._startup_playback_guard = False
         self._last_persistent_response: dict[str, object] | None = None
@@ -289,7 +303,8 @@ class CallSession:
 
     def submit_agent_response(self, response: AgentResponse) -> VoicebotEvent:
         text = limit_spoken_response_text(response.text, self.settings.max_reply_chars)
-        self._record_agent_latency(response.response_to_event_id)
+        is_stream_chunk = response.partial and response.response_kind == "stream_chunk"
+        self._record_agent_latency(response.response_to_event_id, stream_chunk=is_stream_chunk)
         event_type = "agent_response_partial" if response.partial else "agent_response_received"
         event = self.events.append(
             self.call_id,
@@ -381,11 +396,19 @@ class CallSession:
             for chunk, chunk_duration in self._tts_audio_chunks(text):
                 if not first_audio_recorded:
                     first_audio_recorded = True
+                    first_audio_latency = time.monotonic() - tts_synthesis_started
                     self._record_metric(
                         "tts_first_audio_latency_seconds",
-                        time.monotonic() - tts_synthesis_started,
+                        first_audio_latency,
                         {"response_to_event_id": response.response_to_event_id},
                     )
+                    if is_stream_chunk:
+                        self._record_metric(
+                            "tts_stream_first_audio_latency_seconds",
+                            first_audio_latency,
+                            {"response_to_event_id": response.response_to_event_id},
+                        )
+                    self._record_response_request_to_first_playback(response.response_to_event_id)
                 duration += float(chunk_duration)
                 if self._has_newer_user_activity(response.response_to_event_id) and not startup_response and not persistent_response:
                     self.events.append(
@@ -511,8 +534,9 @@ class CallSession:
 
     def _tts_audio_chunks(self, text: str):
         synthesize_stream = getattr(self.tts, "synthesize_stream", None)
+        streaming_capable = bool(getattr(self.tts, "streaming_capable", synthesize_stream is not None))
         for chunk_text in split_spoken_response_text(text, self.settings.tts_chunk_chars):
-            if synthesize_stream is None:
+            if synthesize_stream is None or not streaming_capable:
                 yield self.tts.synthesize(chunk_text)
             else:
                 yield from synthesize_stream(chunk_text)
@@ -1006,13 +1030,28 @@ class CallSession:
         with self._response_generation_lock:
             return self._response_generations.get(event_id, self._current_interrupt_generation())
 
-    def _record_agent_latency(self, event_id: int | None) -> None:
+    def _record_agent_latency(self, event_id: int | None, *, stream_chunk: bool = False) -> None:
         if event_id is None:
             return
         with self._response_generation_lock:
             started = self._response_request_times.pop(event_id, None)
         if started is not None:
-            self._record_metric("agent_response_latency_seconds", time.monotonic() - started, {"event_id": event_id})
+            elapsed = time.monotonic() - started
+            self._record_metric("agent_response_latency_seconds", elapsed, {"event_id": event_id})
+            if stream_chunk:
+                self._record_metric("agent_stream_first_text_latency_seconds", elapsed, {"event_id": event_id})
+
+    def _record_response_request_to_first_playback(self, event_id: int | None) -> None:
+        if event_id is None:
+            return
+        with self._response_generation_lock:
+            if event_id in self._first_playback_metric_event_ids:
+                return
+            self._first_playback_metric_event_ids.add(event_id)
+        source = self.events.get_event(event_id)
+        elapsed = _seconds_since_timestamp(source.timestamp if source else "")
+        if elapsed is not None:
+            self._record_metric("response_request_to_first_playback_seconds", elapsed, {"event_id": event_id})
 
     def _record_metric(self, name: str, value: float, data: dict | None = None) -> None:
         payload = {"name": name, "value": value, **(data or {})}

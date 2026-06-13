@@ -31,9 +31,24 @@ def summarize_metrics(events: list[VoicebotEvent]) -> dict[str, Any]:
                 "min": min(values),
                 "max": max(values),
                 "avg": sum(values) / len(values),
+                "p50": percentile(values, 50),
+                "p90": percentile(values, 90),
                 "latest": latest[name],
             }
             for name, values in sorted(grouped.items())
         },
         "providers": provider_observability_summary(events)["providers"],
     }
+
+
+def percentile(values: list[float], percentile_value: float) -> float:
+    if not values:
+        raise ValueError("values must not be empty")
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    rank = (len(ordered) - 1) * (percentile_value / 100.0)
+    lower = int(rank)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = rank - lower
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction

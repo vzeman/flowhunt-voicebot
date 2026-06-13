@@ -131,6 +131,14 @@ class SpeculativeTurnCoordinatorTests(unittest.TestCase):
             if event.type == "metrics" and event.data.get("name") == "streaming_rag_reflector_decision"
         ]
         self.assertEqual(metrics[-1]["decision"], "reuse")
+        metric_names = {
+            event.data["name"]
+            for event in events.list_events(call_id="call-1")
+            if event.type == "metrics"
+        }
+        self.assertIn("partial_stt_to_speculative_start_seconds", metric_names)
+        self.assertIn("speculative_task_completed_before_final_transcript", metric_names)
+        self.assertIn("speculative_result_reuse_latency_seconds", metric_names)
 
     def test_changed_external_final_supersedes_non_cancellable_candidate(self) -> None:
         events, coordinator, provider = self._coordinator(provider_supports_cancel=False)

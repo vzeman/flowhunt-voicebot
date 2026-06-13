@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 import hashlib
 import re
 import threading
@@ -167,6 +168,7 @@ class SpeculativeTurnCoordinator:
             self._by_turn.setdefault(turn_id, []).append(candidate)
         if streaming_enabled:
             self._record_candidate_metric(candidate, "started")
+            self._record_speculative_start_metrics(candidate, event)
         return task
 
     def reconcile_final_request(self, *, turn_id: int | None, final_text: str, final_request_event_id: int) -> SubagentTask | None:
@@ -210,6 +212,7 @@ class SpeculativeTurnCoordinator:
                     streaming_rag_final_request_event_id=final_request_event_id,
                     streaming_rag_final_normalized_query=_normalize(final_text),
                 )
+                self._record_speculative_reuse_metrics(selected, task, final_request_event_id, decision)
             with self._lock:
                 self._replace_candidate_locked(
                     replace(
@@ -384,6 +387,77 @@ class SpeculativeTurnCoordinator:
             },
         )
 
+    def _record_speculative_start_metrics(self, candidate: StreamingRagCandidate, partial_event: VoicebotEvent) -> None:
+        partial_to_start = _seconds_between_timestamps(partial_event.timestamp, candidate.submitted_at)
+        if partial_to_start is not None:
+            self._append_metric(
+                candidate.call_id,
+                "partial_stt_to_speculative_start_seconds",
+                partial_to_start,
+                {
+                    "turn_id": candidate.turn_id,
+                    "partial_event_id": partial_event.id,
+                    "task_id": candidate.task_id,
+                },
+            )
+        speech_start = _first_event_for_turn(
+            self.events.list_events(call_id=candidate.call_id, limit=1000),
+            "user_speech_started",
+            candidate.turn_id,
+        )
+        speech_to_start = _seconds_between_timestamps(speech_start.timestamp if speech_start else "", candidate.submitted_at)
+        if speech_to_start is not None:
+            self._append_metric(
+                candidate.call_id,
+                "speech_start_to_speculative_start_seconds",
+                speech_to_start,
+                {
+                    "turn_id": candidate.turn_id,
+                    "speech_started_event_id": speech_start.id if speech_start else None,
+                    "partial_event_id": partial_event.id,
+                    "task_id": candidate.task_id,
+                },
+            )
+
+    def _record_speculative_reuse_metrics(
+        self,
+        candidate: StreamingRagCandidate,
+        task: SubagentTask,
+        final_request_event_id: int,
+        decision: ReflectorDecision,
+    ) -> None:
+        final_event = self.events.get_event(final_request_event_id)
+        if final_event is None:
+            return
+        completed_before_final = task.status == "completed" and _timestamp_lte(task.updated_at, final_event.timestamp)
+        self._append_metric(
+            candidate.call_id,
+            "speculative_task_completed_before_final_transcript",
+            1.0 if completed_before_final else 0.0,
+            {
+                "turn_id": candidate.turn_id,
+                "task_id": candidate.task_id,
+                "final_request_event_id": final_request_event_id,
+                "decision": decision,
+            },
+        )
+        if decision == "reuse" and task.status == "completed":
+            reuse_latency = _non_negative_seconds_between(final_event.timestamp, task.updated_at)
+            if reuse_latency is not None:
+                self._append_metric(
+                    candidate.call_id,
+                    "speculative_result_reuse_latency_seconds",
+                    reuse_latency,
+                    {
+                        "turn_id": candidate.turn_id,
+                        "task_id": candidate.task_id,
+                        "final_request_event_id": final_request_event_id,
+                    },
+                )
+
+    def _append_metric(self, call_id: str, name: str, value: float, data: dict[str, Any]) -> None:
+        self.events.append(call_id, "metrics", {"name": name, "value": value, **data})
+
     def _call_id_for_turn(self, turn_id: int) -> str:
         with self._lock:
             candidates = self._by_turn.get(turn_id) or []
@@ -544,6 +618,46 @@ def _task_result_fingerprints(task: SubagentTask) -> tuple[str, ...]:
             elif isinstance(value, (list, tuple)):
                 values.extend(str(item) for item in value if item not in (None, ""))
     return tuple(sorted(set(values)))
+
+
+def _first_event_for_turn(events: list[VoicebotEvent], event_type: str, turn_id: int) -> VoicebotEvent | None:
+    for event in events:
+        if event.type == event_type and _optional_int(event.data.get("turn_id")) == turn_id:
+            return event
+    return None
+
+
+def _seconds_between_timestamps(start_timestamp: str, end_timestamp: str) -> float | None:
+    delta = _timestamp_delta_seconds(start_timestamp, end_timestamp)
+    return None if delta is None else max(0.0, delta)
+
+
+def _non_negative_seconds_between(start_timestamp: str, end_timestamp: str) -> float | None:
+    delta = _timestamp_delta_seconds(start_timestamp, end_timestamp)
+    return None if delta is None else max(0.0, delta)
+
+
+def _timestamp_lte(left: str, right: str) -> bool:
+    try:
+        return _parse_timestamp(left) <= _parse_timestamp(right)
+    except ValueError:
+        return False
+
+
+def _timestamp_delta_seconds(start_timestamp: str, end_timestamp: str) -> float | None:
+    if not start_timestamp or not end_timestamp:
+        return None
+    try:
+        return (_parse_timestamp(end_timestamp) - _parse_timestamp(start_timestamp)).total_seconds()
+    except ValueError:
+        return None
+
+
+def _parse_timestamp(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _optional_int(value: object) -> int | None:

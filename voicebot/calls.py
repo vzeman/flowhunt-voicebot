@@ -91,6 +91,28 @@ def _seconds_since_timestamp(timestamp: str) -> float | None:
     return max(0.0, (datetime.now(UTC) - started.astimezone(UTC)).total_seconds())
 
 
+def _seconds_between_timestamps(start_timestamp: str, end_timestamp: str) -> float | None:
+    if not start_timestamp or not end_timestamp:
+        return None
+    try:
+        started = datetime.fromisoformat(start_timestamp.replace("Z", "+00:00"))
+        ended = datetime.fromisoformat(end_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    if ended.tzinfo is None:
+        ended = ended.replace(tzinfo=UTC)
+    return max(0.0, (ended.astimezone(UTC) - started.astimezone(UTC)).total_seconds())
+
+
+def _first_event_for_turn(events: list[VoicebotEvent], event_type: str, turn_id: int) -> VoicebotEvent | None:
+    for event in events:
+        if event.type == event_type and _optional_int(event.data.get("turn_id")) == turn_id:
+            return event
+    return None
+
+
 class PlaybackBuffer:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -772,6 +794,13 @@ class CallSession:
                 "metadata": {**metadata, "source": "partial_snapshot"},
             },
         )
+        self._record_turn_event_latency(
+            "partial_stt_first_text_seconds",
+            start_event_type="user_speech_started",
+            end_event=event,
+            data={"turn_id": turn_id, "partial_event_id": event.id},
+            first_only=True,
+        )
         self._speculative_turns.observe_partial(event)
 
     def _speech_worker_loop(self) -> None:
@@ -862,7 +891,7 @@ class CallSession:
                 if frame.kind == "transcription_started" and not stt_started_recorded:
                     self.events.append(self.call_id, "stt_started", {"turn_id": frame.turn_id})
                 elif frame.kind == "transcription_partial":
-                    self.events.append(
+                    event = self.events.append(
                         self.call_id,
                         "user_transcript_partial",
                         {
@@ -871,6 +900,13 @@ class CallSession:
                             "elapsed": frame.data.get("elapsed"),
                             "metadata": frame.metadata,
                         },
+                    )
+                    self._record_turn_event_latency(
+                        "partial_stt_first_text_seconds",
+                        start_event_type="user_speech_started",
+                        end_event=event,
+                        data={"turn_id": frame.turn_id, "partial_event_id": event.id},
+                        first_only=True,
                     )
                 elif frame.kind == "transcription_empty":
                     self._record_metric(
@@ -917,6 +953,12 @@ class CallSession:
                         },
                     )
                     transcript_event_ids[frame.frame_id] = transcript.id
+                    self._record_turn_event_latency(
+                        "speech_finished_to_final_transcript_seconds",
+                        start_event_type="user_speech_finished",
+                        end_event=transcript,
+                        data={"turn_id": frame.turn_id, "transcript_event_id": transcript.id},
+                    )
             if not transcription_frame_seen and not error_frame_seen:
                 self.events.append(
                     self.call_id,
@@ -1052,6 +1094,30 @@ class CallSession:
         elapsed = _seconds_since_timestamp(source.timestamp if source else "")
         if elapsed is not None:
             self._record_metric("response_request_to_first_playback_seconds", elapsed, {"event_id": event_id})
+
+    def _record_turn_event_latency(
+        self,
+        name: str,
+        *,
+        start_event_type: str,
+        end_event: VoicebotEvent,
+        data: dict,
+        first_only: bool = False,
+    ) -> None:
+        turn_id = _optional_int(end_event.data.get("turn_id"))
+        if turn_id is None:
+            return
+        if first_only and any(
+            event.type == "metrics"
+            and event.data.get("name") == name
+            and _optional_int(event.data.get("turn_id")) == turn_id
+            for event in self.events.list_events(call_id=self.call_id, limit=1000)
+        ):
+            return
+        start = _first_event_for_turn(self.events.list_events(call_id=self.call_id, limit=1000), start_event_type, turn_id)
+        elapsed = _seconds_between_timestamps(start.timestamp if start else "", end_event.timestamp)
+        if elapsed is not None:
+            self._record_metric(name, elapsed, data)
 
     def _record_metric(self, name: str, value: float, data: dict | None = None) -> None:
         payload = {"name": name, "value": value, **(data or {})}

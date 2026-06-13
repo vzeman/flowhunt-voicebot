@@ -71,7 +71,9 @@ work itself.
 include active sessions, per-workspace/voicebot session counts, queue pending
 and claimed depth by worker role, dead-lettered queue items, provider failures,
 latency metrics, calls per second, worker capacity, and warm-capacity deficits.
-Operational SLOs and support diagnostics are exposed through
+Latency metric signals include count, average, max, P50, and P90 so autoscaling
+can react to tail latency rather than only mean latency. Operational SLOs and
+support diagnostics are exposed through
 `/observability/slo` and `/observability/diagnostics`.
 
 `POST /scaling/admission` evaluates whether a new session can be accepted before

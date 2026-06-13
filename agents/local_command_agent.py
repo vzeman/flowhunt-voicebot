@@ -29,6 +29,7 @@ import textwrap
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -160,6 +161,11 @@ wrong. Use normal language understanding, in the caller's language, to decide
 whether it is a still-actionable command or request. If it is just an obsolete
 fragment already superseded by a newer pending message, merge it into context
 or ignore it silently.
+Some pending messages may include confirmed_speculative_task. That means
+external work was already started from a stable partial transcript and the final
+caller transcript confirmed it. Use completed speculative results directly. If
+the speculative task is still running, do not call a colleague tool again for
+the same request; give a short progress answer instead.
 Only call hangup_call when the caller explicitly asks you to disconnect,
 terminate, stop, or hang up the call. If a short transcript only says "bye" or
 "goodbye", speak a brief farewell instead of using a tool.
@@ -671,6 +677,31 @@ def remove_colleague_reentrant_tool_calls(tasks: list[dict], tool_calls: list[di
     return [call for call in tool_calls if call.get("name") not in COLLEAGUE_TOOL_NAMES]
 
 
+def suppress_duplicate_colleague_tool_calls_for_speculative(task: dict, tool_calls: list[dict]) -> tuple[list[dict], bool]:
+    speculative = confirmed_speculative_task(task)
+    if speculative is None:
+        return tool_calls, False
+    filtered = [call for call in tool_calls if call.get("name") not in COLLEAGUE_TOOL_NAMES]
+    return filtered, len(filtered) != len(tool_calls)
+
+
+def confirmed_speculative_task(task: dict) -> dict | None:
+    data = task.get("data") if isinstance(task.get("data"), dict) else {}
+    speculative = data.get("confirmed_speculative_task")
+    return speculative if isinstance(speculative, dict) else None
+
+
+def speculative_progress_answer(task: dict) -> str:
+    speculative = confirmed_speculative_task(task) or {}
+    status = str(speculative.get("status") or "").strip()
+    if status == "completed":
+        result = speculative.get("result") if isinstance(speculative.get("result"), dict) else {}
+        summary = str(result.get("summary") or result.get("content") or "").strip()
+        if summary:
+            return summary
+    return "I am already checking that and will tell you as soon as it is ready."
+
+
 def call_control_validation_prompt(task: dict, tool_call: dict) -> str:
     data = task.get("data", {})
     return f"""Decide whether a phone call-control tool is explicitly requested by the caller's current message.
@@ -741,6 +772,13 @@ def claim_tasks(base_url: str, tasks: list[dict], owner: str, ttl_seconds: float
     )
     claimed_ids = set(response.get("claimed_event_ids", []))
     return [task for task in tasks if task["id"] in claimed_ids]
+
+
+def agent_tasks_url(base_url: str, wait_seconds: float = 0.0) -> str:
+    if wait_seconds <= 0:
+        return f"{base_url}/agent/tasks"
+    query = urllib.parse.urlencode({"wait_seconds": round(wait_seconds, 3)})
+    return f"{base_url}/agent/tasks?{query}"
 
 
 def release_tasks(base_url: str, tasks: list[dict], owner: str | None = None) -> dict:
@@ -1201,7 +1239,7 @@ def main() -> None:
         try:
             claimed_pending = []
             active_call_ids = set(http_json("GET", f"{args.base_url}/health").get("active_calls", []))
-            response = http_json("GET", f"{args.base_url}/agent/tasks")
+            response = http_json("GET", agent_tasks_url(args.base_url, max(args.interval, 5.0)))
             pending = [
                 task
                 for task in response.get("pending", [])
@@ -1249,6 +1287,12 @@ def main() -> None:
                     ),
                 )
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
+                tool_calls, suppressed_speculative_duplicate = suppress_duplicate_colleague_tool_calls_for_speculative(
+                    latest,
+                    tool_calls,
+                )
+                if suppressed_speculative_duplicate and not answer.strip():
+                    answer = speculative_progress_answer(latest)
                 calls_to_execute = []
                 say_call = answer_as_say_call(answer, latest, chat=chat)
                 if say_call:

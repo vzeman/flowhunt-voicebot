@@ -17,6 +17,7 @@ from communication_agent import (
     colleague_progress_ack_tool_call,
     fallback_answer_for_dropped_tools,
     has_colleague_tool_call,
+    speculative_progress_answer,
     parse_colleague_tool_recovery,
     preferred_colleague_tool_name,
     progress_ack_text_for_task,
@@ -29,6 +30,7 @@ from communication_agent import (
     split_stable_stream_text,
     submit_stream_chunk,
     suppress_colleague_tool_progress,
+    suppress_duplicate_colleague_tool_calls_for_speculative,
     has_http_failed_say,
     provider_failure_answer,
     run_provider_with_retry,
@@ -350,6 +352,29 @@ class CommunicationAgentProviderRecoveryTests(unittest.TestCase):
     def test_colleague_tool_call_is_detected(self) -> None:
         self.assertTrue(has_colleague_tool_call([{"name": "delegate_to_subagent", "arguments": {}}]))
         self.assertFalse(has_colleague_tool_call([{"name": "say", "arguments": {}}]))
+
+    def test_confirmed_speculative_task_suppresses_duplicate_colleague_tool_call(self) -> None:
+        task = {
+            "id": 10,
+            "call_id": "call-1",
+            "data": {
+                "confirmed_speculative_task": {
+                    "task_id": "task-1",
+                    "status": "running",
+                    "result": {"summary": "Already checking."},
+                }
+            },
+        }
+        tool_calls = [
+            {"name": "delegate_to_subagent", "arguments": {"call_id": "call-1", "message": "Check it"}},
+            {"name": "say", "arguments": {"call_id": "call-1", "text": "Working."}},
+        ]
+
+        filtered, suppressed = suppress_duplicate_colleague_tool_calls_for_speculative(task, tool_calls)
+
+        self.assertTrue(suppressed)
+        self.assertEqual([call["name"] for call in filtered], ["say"])
+        self.assertIn("already checking", speculative_progress_answer(task).lower())
 
     def test_preferred_colleague_recovery_tool_uses_generic_delegate(self) -> None:
         self.assertEqual(

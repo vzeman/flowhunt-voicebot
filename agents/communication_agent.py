@@ -12,6 +12,7 @@ from typing import Any
 from agent_provider_registry import AgentProviderRegistry, default_agent_provider_registry
 from local_command_agent import (
     attach_task_context,
+    agent_tasks_url,
     build_prompt,
     build_retry_prompt,
     build_tool_result_prompt,
@@ -33,6 +34,8 @@ from local_command_agent import (
     ensure_expanded_chat_for_say_calls,
     remove_colleague_reentrant_tool_calls,
     release_tasks,
+    speculative_progress_answer,
+    suppress_duplicate_colleague_tool_calls_for_speculative,
 )
 
 
@@ -65,7 +68,7 @@ def run_communication_agent(
         try:
             claimed_pending = []
             active_call_ids = set(http_json("GET", f"{config.base_url}/health").get("active_calls", []))
-            response = http_json("GET", f"{config.base_url}/agent/tasks")
+            response = http_json("GET", agent_tasks_url(config.base_url, max(config.interval, 5.0)))
             pending = [
                 task
                 for task in response.get("pending", [])
@@ -143,6 +146,12 @@ def run_communication_agent(
                     if tool_calls:
                         print(f"recovered missing colleague tool call for event {latest['id']}", flush=True)
                 tool_calls = remove_colleague_reentrant_tool_calls(pending, tool_calls)
+                tool_calls, suppressed_speculative_duplicate = suppress_duplicate_colleague_tool_calls_for_speculative(
+                    latest,
+                    tool_calls,
+                )
+                if suppressed_speculative_duplicate and not answer.strip():
+                    answer = speculative_progress_answer(latest)
                 tool_calls = ensure_action_acknowledgements(tool_calls)
                 initial_say = None if streamed_response else answer_as_say_call(answer, latest, chat=chat)
                 if should_prepend_colleague_progress_ack(

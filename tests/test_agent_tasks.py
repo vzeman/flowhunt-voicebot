@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 import unittest
 
@@ -11,6 +12,7 @@ from voicebot.calls import CallRegistry
 from voicebot.events import EventStore
 from voicebot.runtime_config import VoicebotPromptConfig, VoicebotPromptConfigStore
 from voicebot.storage.redis_agent_tasks import RedisAgentTaskTracker
+from voicebot.subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, SubagentTaskResult, SubagentTaskStore
 from voicebot.transcripts import TranscriptStore
 
 
@@ -33,6 +35,26 @@ class FakeCallRegistry(CallRegistry):
         return self._snapshots.get(call_id)
 
 
+class CompletedSubagentProvider:
+    kind = "flowhunt_flow"
+
+    def submit(self, request: SubagentTaskRequest) -> SubagentTask:
+        task, _created = SubagentTaskStore().get_or_create_requested(request)
+        return task.with_status(
+            "completed",
+            result=SubagentTaskResult(
+                summary="The speculative result is ready.",
+                content="The website status is operational.",
+            ),
+        )
+
+    def poll(self, task: SubagentTask) -> SubagentTask:
+        return task
+
+    def cancel(self, task: SubagentTask) -> SubagentTask:
+        return task.with_status("cancelled")
+
+
 class AgentTasksTests(unittest.TestCase):
     def build_client(self) -> tuple[TestClient, EventStore, AgentTaskTracker]:
         events = EventStore(max_context_events=20)
@@ -44,6 +66,20 @@ class AgentTasksTests(unittest.TestCase):
             WebSocketHub(),
             TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
             None,
+        )
+        return TestClient(app), events, tracker
+
+    def build_client_with_subagents(self, coordinator: SubagentCoordinator) -> tuple[TestClient, EventStore, AgentTaskTracker]:
+        events = EventStore(max_context_events=50)
+        tracker = AgentTaskTracker()
+        app = create_app(
+            events,
+            FakeCallRegistry(["call-1", "call-2"]),
+            tracker,
+            WebSocketHub(),
+            TranscriptStore("/tmp/flowhunt-voicebot-test-transcripts"),
+            None,
+            subagent_coordinator=coordinator,
         )
         return TestClient(app), events, tracker
 
@@ -60,6 +96,24 @@ class AgentTasksTests(unittest.TestCase):
         self.assertEqual([event["id"] for event in payload["pending"]], [first.id])
         self.assertEqual([event["call_id"] for event in payload["context"]["events"]], ["call-1"])
         self.assertEqual(tracker.responded_event_ids, set())
+
+    def test_agent_tasks_long_poll_waits_until_task_arrives(self) -> None:
+        client, events, _tracker = self.build_client()
+        payload: dict = {}
+
+        def poll() -> None:
+            payload.update(client.get("/agent/tasks?call_id=call-1&wait_seconds=1").json())
+
+        thread = threading.Thread(target=poll)
+        started = time.monotonic()
+        thread.start()
+        time.sleep(0.1)
+        task = events.append("call-1", "agent_response_requested", {"text": "hello"})
+        thread.join(timeout=2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertLess(time.monotonic() - started, 0.8)
+        self.assertEqual([event["id"] for event in payload["pending"]], [task.id])
 
     def test_agent_tasks_include_cached_prompt_config_for_call_route(self) -> None:
         events = EventStore(max_context_events=20)
@@ -188,6 +242,45 @@ class AgentTasksTests(unittest.TestCase):
         ]
         self.assertEqual([event.data["task_event_id"] for event in claim_events], [first.id, second.id])
         self.assertEqual([event.data["owner"] for event in claim_events], ["worker-1", "worker-1"])
+        metric_events = [
+            event
+            for event in events.list_events(call_id="call-1")
+            if event.type == "metrics" and event.data.get("name") == "agent_task_pickup_latency_seconds"
+        ]
+        self.assertEqual([event.data["task_event_id"] for event in metric_events], [first.id, second.id])
+
+    def test_agent_tasks_include_confirmed_speculative_task_context(self) -> None:
+        coordinator = SubagentCoordinator()
+        coordinator.register(CompletedSubagentProvider())
+        client, events, _tracker = self.build_client_with_subagents(coordinator)
+        partial = events.append("call-1", "user_transcript_partial", {"turn_id": 1, "text": "please check website status"})
+        final = events.append("call-1", "agent_response_requested", {"turn_id": 1, "text": "please check website status"})
+        task = coordinator.request_speculative(
+            SubagentTaskRequest(
+                workspace_id="workspace-1",
+                voicebot_id="voicebot-1",
+                session_id="call-1",
+                request_event_id=partial.id,
+                provider="flowhunt_flow",
+                input_text="please check website status",
+                metadata={"partial_event_id": partial.id, "partial_text": "please check website status"},
+            ),
+            speculative_key="call-1:turn:1",
+        )
+        coordinator.confirm_speculative(
+            task.task_id,
+            "workspace-1",
+            final_request_event_id=final.id,
+            final_input_text="please check website status",
+        )
+
+        response = client.get("/agent/tasks?call_id=call-1")
+
+        self.assertEqual(response.status_code, 200)
+        task_data = response.json()["pending"][0]["data"]
+        self.assertEqual(task_data["confirmed_speculative_task_id"], task.task_id)
+        self.assertTrue(task_data["speculative_reused"])
+        self.assertEqual(task_data["confirmed_speculative_task"]["result"]["summary"], "The speculative result is ready.")
 
     def test_redis_agent_task_claim_is_shared_across_worker_clients(self) -> None:
         events = EventStore(max_context_events=50)

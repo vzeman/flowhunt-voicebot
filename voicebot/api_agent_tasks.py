@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+import time
 from typing import Any, Callable
 
 from fastapi import APIRouter
@@ -23,8 +25,13 @@ def create_agent_tasks_router(context: AgentTasksApiContext) -> APIRouter:
     router = APIRouter()
 
     @router.get("/agent/tasks")
-    def agent_tasks(after: int = 0, call_id: str | None = None, limit: int = 200) -> dict[str, Any]:
-        return agent_tasks_payload(context, after=after, call_id=call_id, limit=limit)
+    def agent_tasks(
+        after: int = 0,
+        call_id: str | None = None,
+        limit: int = 200,
+        wait_seconds: float = 0.0,
+    ) -> dict[str, Any]:
+        return agent_tasks_payload(context, after=after, call_id=call_id, limit=limit, wait_seconds=wait_seconds)
 
     @router.post("/agent/tasks/claim")
     def claim_agent_tasks(request: AgentTaskClaimRequest) -> dict[str, Any]:
@@ -55,6 +62,22 @@ def create_agent_tasks_router(context: AgentTasksApiContext) -> APIRouter:
 
 
 def agent_tasks_payload(
+    context: AgentTasksApiContext,
+    *,
+    after: int = 0,
+    call_id: str | None = None,
+    limit: int = 200,
+    wait_seconds: float = 0.0,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + min(max(float(wait_seconds), 0.0), 30.0)
+    while True:
+        payload = _agent_tasks_payload_now(context, after=after, call_id=call_id, limit=limit)
+        if payload["pending"] or wait_seconds <= 0 or time.monotonic() >= deadline:
+            return payload
+        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+
+
+def _agent_tasks_payload_now(
     context: AgentTasksApiContext,
     *,
     after: int = 0,
@@ -111,10 +134,31 @@ def claim_agent_tasks_payload(context: AgentTasksApiContext, request: AgentTaskC
                 "ttl_seconds": request.ttl_seconds,
             },
         )
+        latency = _seconds_since_event(source_event)
+        if latency is not None:
+            context.events.append(
+                source_event.call_id,
+                "metrics",
+                {
+                    "name": "agent_task_pickup_latency_seconds",
+                    "value": latency,
+                    "task_event_id": event_id,
+                    "owner": request.owner,
+                },
+            )
     return {
         "claimed_event_ids": claimed_event_ids,
         "owner": request.owner,
     }
+
+
+def _seconds_since_event(event: Any) -> float | None:
+    try:
+        timestamp = datetime.fromisoformat(str(event.timestamp).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    now = datetime.now(timestamp.tzinfo)
+    return max(0.0, (now - timestamp).total_seconds())
 
 
 def release_agent_tasks_payload(context: AgentTasksApiContext, request: AgentTaskReleaseRequest) -> dict[str, Any]:

@@ -283,6 +283,8 @@ class ApiCallControlTests(unittest.TestCase):
         self.assertTrue(session.responses[0].partial)
         persisted = events.list_events(call_id="call-1")
         self.assertEqual(persisted[-1].data["stream_finalized"], True)
+        stream_metrics = [event.data for event in persisted if event.type == "metrics" and event.data.get("name") == "stream_chunk_count"]
+        self.assertEqual(stream_metrics[0]["value"], 1)
 
     def test_call_message_submits_text_turn_and_agent_request(self) -> None:
         registry = CallRegistry()

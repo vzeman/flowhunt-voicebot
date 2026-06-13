@@ -675,6 +675,37 @@ class CallSessionPipelineTests(unittest.TestCase):
             left.close()
             right.close()
 
+    def test_stream_chunk_response_emits_first_text_and_first_audio_metrics(self) -> None:
+        left, right = socket.socketpair()
+        events = EventStore(max_context_events=50)
+        try:
+            session = CallSession("call-1", left, Settings(greet_on_connect=False), events, FakeSTT(), FakeTTS())
+            request = events.append("call-1", "agent_response_requested", {"text": "question"})
+            with session._response_generation_lock:
+                session._response_request_times[request.id] = time.monotonic() - 0.01
+
+            session.submit_agent_response(
+                AgentResponse(
+                    "call-1",
+                    "Stream chunk.",
+                    response_to_event_id=request.id,
+                    response_kind="stream_chunk",
+                    partial=True,
+                )
+            )
+
+            metrics = {
+                event.data["name"]
+                for event in events.list_events(call_id="call-1")
+                if event.type == "metrics"
+            }
+            self.assertIn("agent_stream_first_text_latency_seconds", metrics)
+            self.assertIn("tts_stream_first_audio_latency_seconds", metrics)
+            self.assertIn("response_request_to_first_playback_seconds", metrics)
+        finally:
+            left.close()
+            right.close()
+
 
 if __name__ == "__main__":
     unittest.main()

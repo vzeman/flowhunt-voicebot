@@ -229,9 +229,23 @@ responses:
   session's normal stale-generation and barge-in checks drop remaining chunks.
 
 This keeps the final task lifecycle explicit while letting simple spoken
-answers reach first audio before the full model response is available. OpenAI
-Responses and OpenAI-compatible chat adapters expose streaming deltas. Providers
-without streaming support fall back to one final response.
+answers reach first audio before the full model response is available. Direct
+speech streaming is only enabled when the provider descriptor declares validated
+streaming and the adapter can emit native natural-language deltas without
+fallback JSON/tool-call scaffolding. Chat-compatible or otherwise unsafe streams
+are buffered until the final output is parsed as plain text versus tool calls.
+If native tools are available for the turn, the communication agent buffers the
+stream so the caller does not hear text that a tool result could invalidate.
+Providers without validated streaming support fall back to one final response.
+
+Streaming metrics:
+
+- `agent_stream_first_text_latency_seconds`: request-to-first streamed text.
+- `tts_stream_first_audio_latency_seconds`: TTS start-to-first audio for a
+  streamed chunk.
+- `response_request_to_first_playback_seconds`: agent request-to-first queued
+  playback.
+- `stream_chunk_count`: number of streamed chunks before finalization.
 
 ## Ordering Rules
 

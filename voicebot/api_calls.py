@@ -187,6 +187,18 @@ async def submit_response_payload(
         raise HTTPException(status_code=404, detail=f"Active call not found: {call_id}")
     if request.finalize_only:
         context.tracker.mark_responded(request.response_to_event_id)
+        chunk_count = _stream_chunk_count(context.events, call_id, request.response_to_event_id)
+        if chunk_count:
+            metric = context.events.append(
+                call_id,
+                "metrics",
+                {
+                    "name": "stream_chunk_count",
+                    "value": chunk_count,
+                    "response_to_event_id": request.response_to_event_id,
+                },
+            )
+            await context.broadcast(metric)
         event = context.events.append(
             call_id,
             "agent_response_received",
@@ -229,6 +241,18 @@ async def submit_response_payload(
         context.tracker.mark_responded(request.response_to_event_id)
     await context.broadcast(event)
     return {"event": event_to_dict(event), "ok": True}
+
+
+def _stream_chunk_count(events: Any, call_id: str, response_to_event_id: int | None) -> int:
+    if response_to_event_id is None:
+        return 0
+    return sum(
+        1
+        for event in events.list_events(call_id=call_id, limit=1000)
+        if event.type == "agent_response_partial"
+        and event.data.get("response_to_event_id") == response_to_event_id
+        and event.data.get("response_kind") == "stream_chunk"
+    )
 
 
 async def call_control_payload(

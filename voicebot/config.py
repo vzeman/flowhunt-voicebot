@@ -111,6 +111,8 @@ class Settings:
     openai_tts_voice: str = os.getenv("VOICEBOT_OPENAI_TTS_VOICE", "alloy")
     tts_cache_enabled: bool = env_bool("VOICEBOT_TTS_CACHE_ENABLED", True)
     tts_cache_dir: str = os.getenv("VOICEBOT_TTS_CACHE_DIR", "/data/tts-cache")
+    tts_stream_min_chunk_seconds: float = env_float("VOICEBOT_TTS_STREAM_MIN_CHUNK_SECONDS", 0.04)
+    tts_stream_max_chunk_seconds: float = env_float("VOICEBOT_TTS_STREAM_MAX_CHUNK_SECONDS", 0.30)
 
     start_threshold: float = env_float("VOICEBOT_START_THRESHOLD", 0.020)
     stop_threshold: float = env_float("VOICEBOT_STOP_THRESHOLD", 0.010)

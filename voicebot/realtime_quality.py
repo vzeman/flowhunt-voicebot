@@ -24,6 +24,8 @@ def metric_latency_budget_seconds(settings: Settings, metric_name: str) -> float
         "speech_to_transcript_seconds": settings.latency_budget_stt_seconds,
         "agent_response_latency_seconds": settings.latency_budget_agent_seconds,
         "tts_first_audio_latency_seconds": settings.latency_budget_tts_first_audio_seconds,
+        "tts_stream_first_audio_latency_seconds": settings.latency_budget_tts_first_audio_seconds,
+        "response_request_to_first_playback_seconds": settings.latency_budget_first_audio_seconds,
         "colleague_result_to_agent_request_seconds": settings.latency_budget_delegated_progress_seconds,
     }
     return budgets.get(metric_name)
@@ -52,8 +54,12 @@ def realtime_audio_profile(settings: Settings) -> dict[str, Any]:
             "stt_partial_transcripts_supported_by_contract": True,
             "tts_streaming_chunks_supported": True,
             "tts_chunk_chars": settings.tts_chunk_chars,
+            "tts_stream_min_chunk_seconds": settings.tts_stream_min_chunk_seconds,
+            "tts_stream_max_chunk_seconds": settings.tts_stream_max_chunk_seconds,
             "first_audio_metric": "tts_first_audio_latency_seconds",
+            "stream_first_audio_metric": "tts_stream_first_audio_latency_seconds",
             "end_to_end_first_audio_metric": "end_of_speech_to_playback_started_seconds",
+            "response_request_to_first_playback_metric": "response_request_to_first_playback_seconds",
         },
         "latency_budgets": latency_budget_defaults(settings),
         "normalization": {
@@ -97,6 +103,15 @@ def realtime_audio_profile_issues(profile: dict[str, Any]) -> list[dict[str, Any
     streaming = profile.get("streaming") or {}
     if streaming.get("tts_chunk_chars", 0) <= 0:
         issues.append({"issue": "tts_chunk_chars must be positive"})
+    if streaming.get("tts_stream_min_chunk_seconds", 0) < 0:
+        issues.append({"issue": "tts_stream_min_chunk_seconds must be non-negative"})
+    if streaming.get("tts_stream_max_chunk_seconds", 0) <= 0:
+        issues.append({"issue": "tts_stream_max_chunk_seconds must be positive"})
+    if (
+        streaming.get("tts_stream_min_chunk_seconds", 0) > 0
+        and streaming.get("tts_stream_max_chunk_seconds", 0) < streaming.get("tts_stream_min_chunk_seconds", 0)
+    ):
+        issues.append({"issue": "tts_stream_max_chunk_seconds must be at least min chunk seconds"})
     normalization = profile.get("normalization") or {}
     for prefix in ("webrtc", "audiosocket"):
         target = normalization.get(f"{prefix}_jitter_target_delay_ms", 0)

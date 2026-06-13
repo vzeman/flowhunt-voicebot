@@ -156,6 +156,29 @@ Partial STT settings:
 - `VOICEBOT_STT_PARTIAL_MIN_CHARS`: minimum recognized text length before a
   partial event is persisted. Default `4`.
 
+Speculative subagent preparation can be enabled on top of partial STT with
+`VOICEBOT_SPECULATIVE_WORK_ENABLED=true`. When enabled, stable partial
+transcripts that look like external-work intent can start one speculative
+subagent task before endpointing. The final transcript still controls what is
+spoken: matching final requests confirm the speculative task, changed final
+requests cancel it, and unconfirmed speculative results remain suppressed.
+
+Speculative settings:
+
+- `VOICEBOT_SPECULATIVE_WORK_ENABLED`: enable partial-STT speculative subagent
+  work. Default `false`.
+- `VOICEBOT_SPECULATIVE_MIN_CHARS`: minimum partial transcript length. Default
+  `20`.
+- `VOICEBOT_SPECULATIVE_MIN_TOKENS`: minimum partial transcript token count.
+  Default `3`.
+- `VOICEBOT_SPECULATIVE_MAX_PER_TURN`: maximum speculative tasks per turn.
+  Default `1`.
+- `VOICEBOT_SPECULATIVE_SUBAGENT_PROVIDER`: optional provider override. When
+  empty, the runtime prefers `flowhunt_project`, then `flowhunt_flow`, then the
+  first registered provider.
+- `VOICEBOT_SPECULATIVE_EXTERNAL_INTENT_REQUIRED`: require heuristic
+  external-work intent before starting speculation. Default `true`.
+
 Final STT results are persisted even when they are stale, so operators can audit
 what the recognizer returned. Stale final transcripts and very short low-signal
 fragments are not converted into communication-agent requests; the runtime emits

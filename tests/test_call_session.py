@@ -15,6 +15,8 @@ from voicebot.config import Settings
 from voicebot.events import EventStore
 from voicebot.pipeline_contract import PIPELINE_CONTRACT_VERSION
 from voicebot.processor_registry import ProcessorSpec
+from voicebot.subagents import SubagentCoordinator, SubagentTask, SubagentTaskRequest, SubagentTaskStore
+from voicebot.webrtc import WebRTCCallSession
 
 
 class FakeSTT:
@@ -45,6 +47,65 @@ class SnapshotPartialSTT:
     def transcribe_stream(self, call_audio, sample_rate=8000):
         self.final_calls += 1
         yield SimpleNamespace(text="final hello", metadata={"sample_rate": sample_rate}, is_final=True)
+
+
+class MatchingSpeculativeSTT:
+    def transcribe(self, call_audio, sample_rate=8000):
+        return SimpleNamespace(
+            text="please check website status",
+            metadata={"sample_rate": sample_rate},
+            is_final=True,
+        )
+
+    def transcribe_stream(self, call_audio, sample_rate=8000):
+        yield SimpleNamespace(
+            text="please check website status",
+            metadata={"sample_rate": sample_rate},
+            is_final=True,
+        )
+
+
+class ChangedSpeculativeSTT:
+    def transcribe(self, call_audio, sample_rate=8000):
+        return SimpleNamespace(
+            text="please check website status",
+            metadata={"sample_rate": sample_rate},
+            is_final=True,
+        )
+
+    def transcribe_stream(self, call_audio, sample_rate=8000):
+        yield SimpleNamespace(
+            text="thanks goodbye",
+            metadata={"sample_rate": sample_rate},
+            is_final=True,
+        )
+
+
+class FakeSubagentProvider:
+    kind = "flowhunt_flow"
+
+    def __init__(self) -> None:
+        self.requests: list[SubagentTaskRequest] = []
+
+    def submit(self, request: SubagentTaskRequest) -> SubagentTask:
+        self.requests.append(request)
+        task, _created = SubagentTaskStore().get_or_create_requested(request)
+        return task.with_status("running", external_task_id="external-1")
+
+    def poll(self, task: SubagentTask) -> SubagentTask:
+        return task
+
+    def cancel(self, task: SubagentTask) -> SubagentTask:
+        return task.with_status("cancelled")
+
+
+class RecordingLifecycle:
+    def __init__(self) -> None:
+        self.scheduled: list[str] = []
+
+    def schedule(self, task: SubagentTask) -> SubagentTask:
+        self.scheduled.append(task.task_id)
+        return task
 
 
 class GatedStreamingTTS:
@@ -207,7 +268,7 @@ class CallSessionPipelineTests(unittest.TestCase):
 
             speech = np.ones(160, dtype=np.float32) * 0.2
             silence = np.zeros(160, dtype=np.float32)
-            for _ in range(5):
+            for _ in range(20):
                 write_audiosocket_message(right, MSG_SLIN8, float32_to_pcm16_bytes(speech))
             self._wait_for_event(events, "user_transcript_partial")
             for _ in range(3):
@@ -230,6 +291,127 @@ class CallSessionPipelineTests(unittest.TestCase):
             left.close()
             right.close()
 
+    def test_partial_stt_starts_and_confirms_speculative_subagent_task_for_sip(self) -> None:
+        left, right = socket.socketpair()
+        events = EventStore(max_context_events=100)
+        provider = FakeSubagentProvider()
+        coordinator = SubagentCoordinator(events=events)
+        coordinator.register(provider)
+        lifecycle = RecordingLifecycle()
+        try:
+            session = CallSession(
+                "pending",
+                left,
+                self._speculative_settings(audiosocket_jitter_buffer_enabled=False),
+                events,
+                MatchingSpeculativeSTT(),
+                FakeTTS(),
+                subagent_coordinator=coordinator,
+                subagent_lifecycle=lifecycle,
+            )
+            thread = threading.Thread(target=session.run)
+            thread.start()
+            call_id = str(uuid.uuid4())
+            write_audiosocket_message(right, MSG_UUID, uuid.UUID(call_id).bytes)
+
+            speech = np.ones(160, dtype=np.float32) * 0.2
+            silence = np.zeros(160, dtype=np.float32)
+            for _ in range(20):
+                write_audiosocket_message(right, MSG_SLIN8, float32_to_pcm16_bytes(speech))
+            self._wait_for_event(events, "subagent_task_speculative_started")
+            for _ in range(3):
+                write_audiosocket_message(right, MSG_SLIN8, float32_to_pcm16_bytes(silence))
+            self._wait_for_event(events, "subagent_task_speculative_confirmed")
+
+            write_audiosocket_message(right, MSG_TERMINATE)
+            thread.join(timeout=2)
+
+            tasks = coordinator.store.list(workspace_id="workspace-1")
+            requests = [event for event in events.list_events(call_id=call_id) if event.type == "agent_response_requested"]
+            self.assertEqual(len(provider.requests), 1)
+            self.assertEqual(len(lifecycle.scheduled), 1)
+            self.assertEqual(tasks[0].metadata["speculative_status"], "confirmed")
+            self.assertEqual(tasks[0].metadata["final_request_event_id"], requests[-1].id)
+            self.assertLess(
+                self._event_index(events, "subagent_task_speculative_started"),
+                self._event_index(events, "user_speech_finished"),
+            )
+        finally:
+            left.close()
+            right.close()
+
+    def test_changed_final_transcript_cancels_speculative_subagent_task(self) -> None:
+        left, right = socket.socketpair()
+        events = EventStore(max_context_events=100)
+        provider = FakeSubagentProvider()
+        coordinator = SubagentCoordinator(events=events)
+        coordinator.register(provider)
+        try:
+            session = CallSession(
+                "pending",
+                left,
+                self._speculative_settings(audiosocket_jitter_buffer_enabled=False),
+                events,
+                ChangedSpeculativeSTT(),
+                FakeTTS(),
+                subagent_coordinator=coordinator,
+                subagent_lifecycle=RecordingLifecycle(),
+            )
+            thread = threading.Thread(target=session.run)
+            thread.start()
+            write_audiosocket_message(right, MSG_UUID, uuid.uuid4().bytes)
+
+            speech = np.ones(160, dtype=np.float32) * 0.2
+            silence = np.zeros(160, dtype=np.float32)
+            for _ in range(5):
+                write_audiosocket_message(right, MSG_SLIN8, float32_to_pcm16_bytes(speech))
+            self._wait_for_event(events, "subagent_task_speculative_started")
+            for _ in range(3):
+                write_audiosocket_message(right, MSG_SLIN8, float32_to_pcm16_bytes(silence))
+            self._wait_for_event(events, "subagent_task_speculative_cancelled")
+
+            write_audiosocket_message(right, MSG_TERMINATE)
+            thread.join(timeout=2)
+
+            task = coordinator.store.list(workspace_id="workspace-1")[0]
+            self.assertEqual(task.metadata["speculative_status"], "cancelled")
+            self.assertEqual(task.metadata["speculative_cancel_reason"], "final_transcript_changed")
+        finally:
+            left.close()
+            right.close()
+
+    def test_partial_stt_starts_and_confirms_speculative_subagent_task_for_webrtc(self) -> None:
+        events = EventStore(max_context_events=100)
+        provider = FakeSubagentProvider()
+        coordinator = SubagentCoordinator(events=events)
+        coordinator.register(provider)
+        session = WebRTCCallSession(
+            call_id="webrtc-call-1",
+            session_id="session-1",
+            settings=self._speculative_settings(webrtc_jitter_buffer_enabled=False),
+            event_store=events,
+            stt=MatchingSpeculativeSTT(),
+            tts=FakeTTS(),
+            metadata={"workspace_id": "workspace-1", "voicebot_id": "voicebot-1"},
+            subagent_coordinator=coordinator,
+            subagent_lifecycle=RecordingLifecycle(),
+        )
+        self.addCleanup(session.stop)
+
+        speech = np.ones(320, dtype=np.float32) * 0.2
+        silence = np.zeros(320, dtype=np.float32)
+        for _ in range(20):
+            session.process_remote_audio_block(speech)
+        self._wait_for_event(events, "subagent_task_speculative_started")
+        for _ in range(3):
+            session.process_remote_audio_block(silence)
+        self._wait_for_event(events, "subagent_task_speculative_confirmed")
+
+        task = coordinator.store.list(workspace_id="workspace-1")[0]
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(task.metadata["speculative_status"], "confirmed")
+        self.assertEqual(task.metadata["final_input_text"], "please check website status")
+
     def _wait_for_event(self, events: EventStore, event_type: str, timeout: float = 2.0) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -237,6 +419,30 @@ class CallSessionPipelineTests(unittest.TestCase):
                 return
             time.sleep(0.02)
         self.fail(f"timed out waiting for {event_type}")
+
+    def _event_index(self, events: EventStore, event_type: str) -> int:
+        for index, event in enumerate(events.list_events()):
+            if event.type == event_type:
+                return index
+        self.fail(f"missing event {event_type}")
+
+    def _speculative_settings(self, **overrides) -> Settings:
+        return Settings(
+            greet_on_connect=False,
+            stt_partial_enabled=True,
+            stt_partial_interval_seconds=0.0,
+            stt_partial_min_seconds=0.04,
+            stt_partial_min_chars=4,
+            vad_start_ms=20,
+            silence_ms=40,
+            min_seconds=0.04,
+            turn_coalesce_window_ms=0,
+            flowhunt_workspace_id="workspace-1",
+            speculative_work_enabled=True,
+            speculative_min_chars=8,
+            speculative_min_tokens=2,
+            **overrides,
+        )
 
     def test_audiosocket_vad_decisions_emit_runtime_metrics(self) -> None:
         left, right = socket.socketpair()

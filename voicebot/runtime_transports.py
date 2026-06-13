@@ -41,6 +41,8 @@ class AudioSocketServerTransport:
         stt: STTProvider,
         tts: TTSProvider,
         audio_artifact_store: Any = None,
+        subagent_coordinator: Any = None,
+        subagent_lifecycle: Any = None,
     ) -> None:
         self.settings = settings
         self.events = events
@@ -48,6 +50,8 @@ class AudioSocketServerTransport:
         self.stt = stt
         self.tts = tts
         self.audio_artifact_store = audio_artifact_store
+        self.subagent_coordinator = subagent_coordinator
+        self.subagent_lifecycle = subagent_lifecycle
         self.server: ThreadingAudioSocketServer | None = None
         self.thread: threading.Thread | None = None
         self._stt_pipeline_specs = tuple(processor_specs_from_config(settings.stt_pipeline))
@@ -71,6 +75,8 @@ class AudioSocketServerTransport:
                 self.stt,
                 self.tts,
                 self.audio_artifact_store,
+                self.subagent_coordinator,
+                self.subagent_lifecycle,
             )
             self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
             self.thread.start()
@@ -169,10 +175,21 @@ def build_runtime_transport_registry(
     tts: TTSProvider,
     voicebot_sessions: VoicebotSessionStore,
     audio_artifacts: Any = None,
+    subagent_coordinator: Any = None,
+    subagent_lifecycle: Any = None,
 ) -> TransportRegistry:
     enabled = set(settings.enabled_transports)
     registry = TransportRegistry()
-    audiosocket = AudioSocketServerTransport(settings, events, call_registry, stt, tts, audio_artifacts)
+    audiosocket = AudioSocketServerTransport(
+        settings,
+        events,
+        call_registry,
+        stt,
+        tts,
+        audio_artifacts,
+        subagent_coordinator,
+        subagent_lifecycle,
+    )
     webrtc = WebRTCManagerTransport(
         WebRTCSessionManager(
             settings,
@@ -184,6 +201,8 @@ def build_runtime_transport_registry(
             audiosocket.tts_pipeline_specs,
             voicebot_sessions,
             audio_artifacts,
+            subagent_coordinator,
+            subagent_lifecycle,
         )
     )
     registry.register(audiosocket, enabled="asterisk_audiosocket" in enabled)

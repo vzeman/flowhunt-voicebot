@@ -110,6 +110,16 @@ speculative results are held in task state and are not sent to the
 communication agent until the task is confirmed, so speculative work can reduce
 latency without speaking unconfirmed results to the caller.
 
+SIP AudioSocket and WebRTC sessions can now start that speculative path
+directly from `user_transcript_partial` events when both partial STT and
+`VOICEBOT_SPECULATIVE_WORK_ENABLED=true` are enabled. Runtime speculation is
+conservative: it requires enough partial text, external-work intent, a
+workspace scope or `VOICEBOT_FLOWHUNT_WORKSPACE_ID`, and a registered subagent
+provider. The final `agent_response_requested` event confirms the task when the
+final transcript matches the partial text; otherwise the runtime cancels the
+speculative task with a reason such as `final_transcript_changed` or
+`stt_no_text`.
+
 The `delegate_to_subagent` tool derives workspace/session scope from the active
 call route when available and falls back to local FlowHunt workspace settings
 for Docker testing. It submits through `SubagentCoordinator`, so every provider

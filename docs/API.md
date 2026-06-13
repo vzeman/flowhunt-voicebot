@@ -771,6 +771,12 @@ until confirmed.
 }
 ```
 
+Runtime Streaming-RAG candidates use the same endpoint/model. When
+`VOICEBOT_STREAMING_RAG_ENABLED=true`, candidate metadata includes
+`normalized_query`, `query_hash`, `streaming_rag_trigger_mode`,
+`streaming_rag_reflector_mode`, `streaming_rag_triggered_at`, and
+`streaming_rag_submitted_at`.
+
 ### POST `/subagent/tasks/{task_id}/confirm-speculative`
 
 Confirms speculative work after final STT matches the intent.
@@ -1713,6 +1719,10 @@ Response:
           "status": "completed",
           "provider": "flowhunt_flow",
           "partial_text": "help with my order",
+          "normalized_query": "help with my order",
+          "query_hash": "query-hash",
+          "streaming_rag_trigger_mode": "model_triggered",
+          "streaming_rag_reflector_decision": "reuse",
           "result": {
             "summary": "The delegated task result.",
             "content": "Detailed result content."

@@ -548,6 +548,18 @@ class SubagentCoordinator:
         self._emit_task_event("subagent_task_speculative_cancelled", cancelled)
         return cancelled
 
+    def mark_speculative_superseded(
+        self,
+        task_id: str,
+        workspace_id: str,
+        *,
+        reason: str = "final_transcript_changed",
+    ) -> SubagentTask:
+        cancelled = self.cancel_speculative(task_id, workspace_id, reason=reason)
+        superseded = self.store.update(cancelled.with_metadata(speculative_status="superseded", speculative_cancel_reason=reason))
+        self._emit_task_event("subagent_task_speculative_superseded", superseded)
+        return superseded
+
     def supersede_speculative(
         self,
         task_id: str,
@@ -556,9 +568,7 @@ class SubagentCoordinator:
         *,
         reason: str = "final_transcript_changed",
     ) -> tuple[SubagentTask, SubagentTask]:
-        cancelled = self.cancel_speculative(task_id, workspace_id, reason=reason)
-        superseded = self.store.update(cancelled.with_metadata(speculative_status="superseded", speculative_cancel_reason=reason))
-        self._emit_task_event("subagent_task_speculative_superseded", superseded)
+        superseded = self.mark_speculative_superseded(task_id, workspace_id, reason=reason)
         return superseded, self.request(replacement)
 
     def poll(self, task_id: str, workspace_id: str) -> SubagentTask:

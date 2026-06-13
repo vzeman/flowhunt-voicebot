@@ -120,6 +120,25 @@ final transcript matches the partial text; otherwise the runtime cancels the
 speculative task with a reason such as `final_transcript_changed` or
 `stt_no_text`.
 
+`VOICEBOT_STREAMING_RAG_ENABLED=true` upgrades runtime speculation into a
+per-turn Streaming-RAG cache. In `model_triggered` mode, a newer partial that
+adds meaningful intent supersedes any older running candidate for the same turn,
+using provider cancellation when available and otherwise marking the task
+`metadata.speculative_status=superseded`. In `fixed_interval` mode, each
+distinct normalized partial query can create a candidate until
+`VOICEBOT_STREAMING_RAG_MAX_PARALLEL_PER_TURN` is reached. Every candidate keeps
+its query hash, normalized query, trigger mode, and trigger/submission
+timestamps in task metadata for audit.
+
+Final STT reconciliation runs a reflector before the communication agent sees
+the pending task. A matching completed candidate is attached to `/agent/tasks`
+with `confirmed_speculative_task` and
+`streaming_rag_reflector_decision=reuse`; a matching running candidate is
+confirmed with `wait`; changed external-work requests supersede earlier
+candidates; final text that no longer needs external work cancels them. Late
+superseded results remain in subagent task storage and are not attached to
+caller-facing agent tasks.
+
 The `delegate_to_subagent` tool derives workspace/session scope from the active
 call route when available and falls back to local FlowHunt workspace settings
 for Docker testing. It submits through `SubagentCoordinator`, so every provider

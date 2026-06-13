@@ -163,6 +163,15 @@ subagent task before endpointing. The final transcript still controls what is
 spoken: matching final requests confirm the speculative task, changed final
 requests cancel it, and unconfirmed speculative results remain suppressed.
 
+Streaming-RAG mode is the same provider-neutral speculative path with an
+explicit per-turn query cache and reflector. Enable it with
+`VOICEBOT_STREAMING_RAG_ENABLED=true`. Each candidate wraps a normal
+`SubagentTask` and records the call/session/workspace scope, partial event ID,
+normalized query, query hash, trigger mode, trigger/submission timestamps, and
+final reflector decision in task metadata. Completed speculative results are
+attached to `/agent/tasks` only after the final transcript confirms the
+candidate.
+
 Speculative settings:
 
 - `VOICEBOT_SPECULATIVE_WORK_ENABLED`: enable partial-STT speculative subagent
@@ -178,6 +187,25 @@ Speculative settings:
   first registered provider.
 - `VOICEBOT_SPECULATIVE_EXTERNAL_INTENT_REQUIRED`: require heuristic
   external-work intent before starting speculation. Default `true`.
+- `VOICEBOT_STREAMING_RAG_ENABLED`: enable the Streaming-RAG candidate cache
+  and reflector path. Default `false`.
+- `VOICEBOT_STREAMING_RAG_TRIGGER_MODE`: `model_triggered` keeps at most one
+  active candidate per turn and supersedes older running work when a later
+  partial adds meaningful new intent; `fixed_interval` allows multiple
+  partial-triggered candidates up to the configured cap. Default
+  `model_triggered`.
+- `VOICEBOT_STREAMING_RAG_MAX_PARALLEL_PER_TURN`: candidate cap for
+  `fixed_interval` mode. Default `1`.
+- `VOICEBOT_STREAMING_RAG_REFLECTOR_MODE`: `heuristic` and `provider` currently
+  use deterministic normalized-query/token-overlap checks; `disabled` cancels
+  candidates instead of reusing them. Default `heuristic`.
+
+The reflector returns `reuse` when a matching candidate is already completed,
+`wait` when the matching candidate is still in flight, `supersede` when the
+final transcript is a different external-work request, or `cancel` when the
+final transcript no longer needs external work. Reflector decisions and
+candidate lifecycle actions are emitted as `metrics` events named
+`streaming_rag_reflector_decision` and `streaming_rag_candidate`.
 
 Final STT results are persisted even when they are stale, so operators can audit
 what the recognizer returned. Stale final transcripts and very short low-signal
